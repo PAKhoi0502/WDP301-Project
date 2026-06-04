@@ -11,6 +11,9 @@ const ServicePackage = require('../service-packages/servicePackage.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const bookingRewardService = require('./bookingReward.service');
 const promotionService = require('../promotions/promotion.service');
+const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
+const TierRule = require('../loyalty/tierRule.model');
+const { LOYALTY_TIERS } = require('../../shared/constants/loyalty.constant');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const { WASH_BAY_STATUS } = require('../../shared/constants/washBay.constant');
@@ -103,8 +106,53 @@ const createDateFromLocalTime = (dateString, timeString) => {
     return new Date(`${dateString}T${timeString}:00${DEFAULT_TIMEZONE_OFFSET}`);
 };
 
-const getBookingRuleForCustomer = async () => {
+const toBookingRuleFromTierRule = (tierRule) => {
+    if (!tierRule) {
+        return { ...DEFAULT_BOOKING_RULE };
+    }
+
+    return {
+        current_tier: tierRule.tier_name,
+        booking_window_days: tierRule.booking_window_days,
+        max_upcoming_bookings: tierRule.max_upcoming_bookings,
+        priority_level: tierRule.priority_level,
+    };
+};
+
+const getActiveBookingRuleByTier = async (tierName) => {
+    const selectedTierName = tierName || LOYALTY_TIERS.BRONZE;
+
+    const selectedTierRule = await TierRule.findOne({
+        tier_name: selectedTierName,
+        is_active: true,
+    }).lean();
+
+    if (selectedTierRule) {
+        return toBookingRuleFromTierRule(selectedTierRule);
+    }
+
+    if (selectedTierName !== LOYALTY_TIERS.BRONZE) {
+        const bronzeTierRule = await TierRule.findOne({
+            tier_name: LOYALTY_TIERS.BRONZE,
+            is_active: true,
+        }).lean();
+
+        if (bronzeTierRule) {
+            return toBookingRuleFromTierRule(bronzeTierRule);
+        }
+    }
+
     return { ...DEFAULT_BOOKING_RULE };
+};
+
+const getBookingRuleForCustomer = async (customerId) => {
+    const loyalty = await CustomerLoyalty.findOne({
+        customer_id: customerId,
+    })
+        .select('current_tier')
+        .lean();
+
+    return getActiveBookingRuleByTier(loyalty?.current_tier || LOYALTY_TIERS.BRONZE);
 };
 
 const populateBookingQuery = (query) => {
