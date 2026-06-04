@@ -1,0 +1,206 @@
+const toId = (value) => {
+    if (!value) {
+        return null;
+    }
+
+    if (value._id) {
+        return value._id.toString();
+    }
+
+    if (value.toString) {
+        return value.toString();
+    }
+
+    return value;
+};
+
+const toUserSummaryDto = (user) => {
+    if (!user || !user._id) {
+        return null;
+    }
+
+    return {
+        id: user._id.toString(),
+        full_name: user.full_name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        is_active: user.is_active,
+    };
+};
+
+const toVehicleSummaryDto = (vehicle) => {
+    if (!vehicle || !vehicle._id) {
+        return null;
+    }
+
+    return {
+        id: vehicle._id.toString(),
+        raw_license_plate: vehicle.raw_license_plate,
+        normalized_license_plate: vehicle.normalized_license_plate,
+        vehicle_type: vehicle.vehicle_type,
+        engine_type: vehicle.engine_type,
+        brand: vehicle.brand,
+        model: vehicle.model,
+        color: vehicle.color,
+        is_active: vehicle.is_active,
+    };
+};
+
+const toGarageSummaryDto = (garage) => {
+    if (!garage || !garage._id) {
+        return null;
+    }
+
+    return {
+        id: garage._id.toString(),
+        name: garage.name,
+        garage_code: garage.garage_code,
+        address: garage.address,
+        city: garage.city,
+        opening_time: garage.opening_time,
+        closing_time: garage.closing_time,
+        slot_interval_minutes: garage.slot_interval_minutes,
+        is_active: garage.is_active,
+    };
+};
+
+const toServicePackageSummaryDto = (servicePackage) => {
+    if (!servicePackage || !servicePackage._id) {
+        return null;
+    }
+
+    return {
+        id: servicePackage._id.toString(),
+        name: servicePackage.name,
+        vehicle_type: servicePackage.vehicle_type,
+        service_type: servicePackage.service_type,
+        base_price: servicePackage.base_price,
+        duration_minutes: servicePackage.duration_minutes,
+        wash_bay_duration_minutes: servicePackage.wash_bay_duration_minutes,
+        points_earned: servicePackage.points_earned,
+        requires_wash_bay: servicePackage.requires_wash_bay,
+        is_active: servicePackage.is_active,
+    };
+};
+
+const toWashBaySummaryDto = (washBay) => {
+    if (!washBay || !washBay._id) {
+        return null;
+    }
+
+    return {
+        id: washBay._id.toString(),
+        name: washBay.name,
+        bay_code: washBay.bay_code,
+        vehicle_type: washBay.vehicle_type,
+        status: washBay.status,
+        is_active: washBay.is_active,
+    };
+};
+
+const toBookingDto = (booking) => {
+    if (!booking) {
+        return null;
+    }
+
+    const plainBooking = booking.toObject ? booking.toObject() : booking;
+
+    return {
+        id: plainBooking._id?.toString() || plainBooking.id || null,
+        customer_id: toId(plainBooking.customer_id),
+        customer: toUserSummaryDto(plainBooking.customer_id),
+        vehicle_id: toId(plainBooking.vehicle_id),
+        vehicle: toVehicleSummaryDto(plainBooking.vehicle_id),
+        is_walk_in: plainBooking.is_walk_in,
+        guest_name: plainBooking.guest_name,
+        guest_phone: plainBooking.guest_phone,
+        guest_email: plainBooking.guest_email,
+        license_plate: plainBooking.license_plate,
+        normalized_license_plate: plainBooking.normalized_license_plate,
+        vehicle_type: plainBooking.vehicle_type,
+        created_by_staff_id: toId(plainBooking.created_by_staff_id),
+        created_by_staff: toUserSummaryDto(plainBooking.created_by_staff_id),
+        garage_id: toId(plainBooking.garage_id),
+        garage: toGarageSummaryDto(plainBooking.garage_id),
+        wash_bay_id: toId(plainBooking.wash_bay_id),
+        wash_bay: toWashBaySummaryDto(plainBooking.wash_bay_id),
+        service_package_id: toId(plainBooking.service_package_id),
+        service_package: toServicePackageSummaryDto(plainBooking.service_package_id),
+        booking_date: plainBooking.booking_date,
+        start_time: plainBooking.start_time,
+        end_time: plainBooking.end_time,
+        wash_bay_start_time: plainBooking.wash_bay_start_time,
+        wash_bay_end_time: plainBooking.wash_bay_end_time,
+        original_price: plainBooking.original_price,
+        promotion_discount_amount: plainBooking.promotion_discount_amount,
+        points_discount_amount: plainBooking.points_discount_amount,
+        discount_amount: plainBooking.discount_amount,
+        final_price: plainBooking.final_price,
+        payment_method: plainBooking.payment_method,
+        payment_status: plainBooking.payment_status,
+        used_points: plainBooking.used_points,
+        earned_points: plainBooking.earned_points,
+        promotion_id: toId(plainBooking.promotion_id),
+        requires_wash_bay: plainBooking.requires_wash_bay,
+        status: plainBooking.status,
+        checked_in_at: plainBooking.checked_in_at,
+        started_at: plainBooking.started_at,
+        completed_at: plainBooking.completed_at,
+        paid_at: plainBooking.paid_at,
+        canceled_at: plainBooking.canceled_at,
+        canceled_by_id: toId(plainBooking.canceled_by_id),
+        cancel_reason: plainBooking.cancel_reason,
+        reward_processed: plainBooking.reward_processed,
+        reward_processed_at: plainBooking.reward_processed_at,
+        note: plainBooking.note,
+        created_at: plainBooking.created_at,
+        updated_at: plainBooking.updated_at,
+    };
+};
+
+const toBookingDtoList = (bookings = []) => {
+    return bookings.map((booking) => toBookingDto(booking));
+};
+
+const copyDefinedFields = (data = {}, fields = []) => {
+    const payload = {};
+
+    fields.forEach((field) => {
+        if (data[field] !== undefined) {
+            payload[field] = data[field];
+        }
+    });
+
+    return payload;
+};
+
+const customerCreateFields = [
+    'garage_id',
+    'vehicle_id',
+    'service_package_id',
+    'start_time',
+    'note',
+];
+
+const walkInCreateFields = [
+    'garage_id',
+    'service_package_id',
+    'start_time',
+    'guest_name',
+    'guest_phone',
+    'guest_email',
+    'license_plate',
+    'vehicle_type',
+    'note',
+];
+
+const toCustomerCreatePayload = (data = {}) => copyDefinedFields(data, customerCreateFields);
+const toWalkInCreatePayload = (data = {}) => copyDefinedFields(data, walkInCreateFields);
+
+module.exports = {
+    toBookingDto,
+    toBookingDtoList,
+    toCustomerCreatePayload,
+    toWalkInCreatePayload,
+};
