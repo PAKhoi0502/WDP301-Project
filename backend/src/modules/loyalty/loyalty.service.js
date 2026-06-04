@@ -315,6 +315,69 @@ const getTierRules = async ({ active_only = true } = {}) => {
     return LoyaltyMapper.toTierRuleDtoList(tierRules);
 };
 
+
+const getTierRuleById = async (tierRuleId) => {
+    const tierRule = await TierRule.findById(tierRuleId);
+
+    if (!tierRule) {
+        throw new AppError('Tier rule not found', 404, 'TIER_RULE_NOT_FOUND');
+    }
+
+    return LoyaltyMapper.toTierRuleDto(tierRule);
+};
+
+const createTierRule = async (payload) => {
+    const existingTierRule = await TierRule.findOne({
+        tier_name: payload.tier_name,
+    });
+
+    if (existingTierRule) {
+        throw new AppError('Tier rule already exists', 409, 'TIER_RULE_ALREADY_EXISTS');
+    }
+
+    const tierRule = await TierRule.create(payload);
+
+    return LoyaltyMapper.toTierRuleDto(tierRule);
+};
+
+const updateTierRule = async (tierRuleId, payload) => {
+    const tierRule = await TierRule.findById(tierRuleId);
+
+    if (!tierRule) {
+        throw new AppError('Tier rule not found', 404, 'TIER_RULE_NOT_FOUND');
+    }
+
+    Object.assign(tierRule, payload);
+
+    await tierRule.save();
+
+    return LoyaltyMapper.toTierRuleDto(tierRule);
+};
+
+const setTierRuleActiveStatus = async (tierRuleId, isActive) => {
+    const tierRule = await TierRule.findByIdAndUpdate(
+        tierRuleId,
+        { is_active: isActive },
+        { new: true, runValidators: true }
+    );
+
+    if (!tierRule) {
+        throw new AppError('Tier rule not found', 404, 'TIER_RULE_NOT_FOUND');
+    }
+
+    return LoyaltyMapper.toTierRuleDto(tierRule);
+};
+
+const deleteTierRule = async (tierRuleId) => {
+    const tierRule = await TierRule.findByIdAndDelete(tierRuleId);
+
+    if (!tierRule) {
+        throw new AppError('Tier rule not found', 404, 'TIER_RULE_NOT_FOUND');
+    }
+
+    return LoyaltyMapper.toTierRuleDto(tierRule);
+};
+
 const getAllCustomerLoyalties = async ({ page = 1, limit = 20, search, tier } = {}) => {
     const filter = {};
 
@@ -392,6 +455,11 @@ module.exports = {
     getCustomerLoyaltyOverview,
     getCustomerPointTransactions,
     getTierRules,
+    getTierRuleById,
+    createTierRule,
+    updateTierRule,
+    setTierRuleActiveStatus,
+    deleteTierRule,
     getAllCustomerLoyalties,
     getCustomerLoyaltyForAdmin,
     getAllPointTransactions,

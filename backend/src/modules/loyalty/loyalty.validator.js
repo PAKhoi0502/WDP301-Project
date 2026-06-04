@@ -32,6 +32,57 @@ const optionalObjectIdField = z.preprocess(emptyToUndefined, objectIdField.optio
 const loyaltyTierField = z.enum(LOYALTY_TIER_VALUES);
 const pointTransactionTypeField = z.enum(POINT_TRANSACTION_TYPE_VALUES);
 
+const tierRuleFields = {
+    tier_name: loyaltyTierField,
+    booking_window_days: z.coerce.number().int().min(1).max(60),
+    max_upcoming_bookings: z.coerce.number().int().min(1).max(20),
+    point_multiplier: z.coerce.number().min(0).max(10),
+    priority_level: z.coerce.number().int().min(1).max(100),
+    min_total_spent: z.coerce.number().min(0).default(0),
+    min_total_visits: z.coerce.number().int().min(0).default(0),
+    min_total_points: z.coerce.number().int().min(0).default(0),
+    is_active: z.boolean().optional(),
+};
+
+const updatableTierRuleFields = {
+    booking_window_days: tierRuleFields.booking_window_days.optional(),
+    max_upcoming_bookings: tierRuleFields.max_upcoming_bookings.optional(),
+    point_multiplier: tierRuleFields.point_multiplier.optional(),
+    priority_level: tierRuleFields.priority_level.optional(),
+    min_total_spent: z.coerce.number().min(0).optional(),
+    min_total_visits: z.coerce.number().int().min(0).optional(),
+    min_total_points: z.coerce.number().int().min(0).optional(),
+    is_active: z.boolean().optional(),
+};
+
+const tierRuleIdParamSchema = z.object({
+    params: z
+        .object({
+            tierRuleId: objectIdField,
+        })
+        .strict(),
+});
+
+const createTierRuleSchema = z.object({
+    body: z
+        .object(tierRuleFields)
+        .strict(),
+});
+
+const updateTierRuleSchema = z.object({
+    params: z
+        .object({
+            tierRuleId: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object(updatableTierRuleFields)
+        .strict()
+        .refine((body) => Object.keys(body).length > 0, {
+            message: 'At least one field is required',
+        }),
+});
+
 const customerIdParamSchema = z.object({
     params: z
         .object({
@@ -92,4 +143,7 @@ module.exports = {
     adminLoyaltyListSchema,
     adminTransactionsSchema,
     adminCustomerTransactionsSchema,
+    tierRuleIdParamSchema,
+    createTierRuleSchema,
+    updateTierRuleSchema,
 };

@@ -1,6 +1,6 @@
 const loyaltyService = require('./loyalty.service');
 const { asyncHandler } = require('../../shared/utils/asyncHandler');
-const { sendSuccess } = require('../../shared/utils/apiResponse');
+const { sendSuccess, sendCreated } = require('../../shared/utils/apiResponse');
 
 const getMyLoyalty = asyncHandler(async (req, res) => {
     const result = await loyaltyService.getCustomerLoyaltyOverview(req.user._id);
@@ -89,6 +89,73 @@ const getAdminTierRules = asyncHandler(async (req, res) => {
     });
 });
 
+const getAdminTierRuleById = asyncHandler(async (req, res) => {
+    const { tierRuleId } = req.validated.params;
+
+    const result = await loyaltyService.getTierRuleById(tierRuleId);
+
+    return sendSuccess(res, {
+        message: 'Get tier rule successfully',
+        data: result,
+    });
+});
+
+const createTierRule = asyncHandler(async (req, res) => {
+    const { body } = req.validated;
+
+    const result = await loyaltyService.createTierRule(body);
+
+    return sendCreated(res, {
+        message: 'Create tier rule successfully',
+        data: result,
+    });
+});
+
+const updateTierRule = asyncHandler(async (req, res) => {
+    const { tierRuleId } = req.validated.params;
+    const { body } = req.validated;
+
+    const result = await loyaltyService.updateTierRule(tierRuleId, body);
+
+    return sendSuccess(res, {
+        message: 'Update tier rule successfully',
+        data: result,
+    });
+});
+
+const activateTierRule = asyncHandler(async (req, res) => {
+    const { tierRuleId } = req.validated.params;
+
+    const result = await loyaltyService.setTierRuleActiveStatus(tierRuleId, true);
+
+    return sendSuccess(res, {
+        message: 'Activate tier rule successfully',
+        data: result,
+    });
+});
+
+const deactivateTierRule = asyncHandler(async (req, res) => {
+    const { tierRuleId } = req.validated.params;
+
+    const result = await loyaltyService.setTierRuleActiveStatus(tierRuleId, false);
+
+    return sendSuccess(res, {
+        message: 'Deactivate tier rule successfully',
+        data: result,
+    });
+});
+
+const deleteTierRule = asyncHandler(async (req, res) => {
+    const { tierRuleId } = req.validated.params;
+
+    const result = await loyaltyService.deleteTierRule(tierRuleId);
+
+    return sendSuccess(res, {
+        message: 'Delete tier rule successfully',
+        data: result,
+    });
+});
+
 module.exports = {
     getMyLoyalty,
     getMyPointTransactions,
@@ -98,4 +165,10 @@ module.exports = {
     getAllPointTransactions,
     getCustomerPointTransactionsByCustomerId,
     getAdminTierRules,
+    getAdminTierRuleById,
+    createTierRule,
+    updateTierRule,
+    activateTierRule,
+    deactivateTierRule,
+    deleteTierRule,
 };

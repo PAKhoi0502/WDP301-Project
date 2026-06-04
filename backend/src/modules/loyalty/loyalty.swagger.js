@@ -62,6 +62,51 @@ const tierRuleSchema = {
     },
 };
 
+const createTierRuleRequestSchema = {
+    type: 'object',
+    required: [
+        'tier_name',
+        'booking_window_days',
+        'max_upcoming_bookings',
+        'point_multiplier',
+        'priority_level',
+    ],
+    properties: {
+        tier_name: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
+        booking_window_days: { type: 'number', example: 7 },
+        max_upcoming_bookings: { type: 'number', example: 1 },
+        point_multiplier: { type: 'number', example: 1 },
+        priority_level: { type: 'number', example: 1 },
+        min_total_spent: { type: 'number', example: 0 },
+        min_total_visits: { type: 'number', example: 0 },
+        min_total_points: { type: 'number', example: 0 },
+        is_active: { type: 'boolean', example: true },
+    },
+};
+
+const updateTierRuleRequestSchema = {
+    type: 'object',
+    properties: {
+        booking_window_days: { type: 'number', example: 12 },
+        max_upcoming_bookings: { type: 'number', example: 2 },
+        point_multiplier: { type: 'number', example: 1.35 },
+        priority_level: { type: 'number', example: 3 },
+        min_total_spent: { type: 'number', example: 2000000 },
+        min_total_visits: { type: 'number', example: 10 },
+        min_total_points: { type: 'number', example: 500 },
+        is_active: { type: 'boolean', example: true },
+    },
+};
+
+const tierRuleResponse = {
+    type: 'object',
+    properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        data: tierRuleSchema,
+    },
+};
+
 const pointTransactionSchema = {
     type: 'object',
     properties: {
@@ -339,6 +384,139 @@ const paths = {
                 ...commonErrorResponses,
             },
         },
+        post: {
+            tags: ['Admin Loyalty'],
+            summary: 'Create loyalty tier rule',
+            security: [{ bearerAuth: [] }],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: createTierRuleRequestSchema,
+                    },
+                },
+            },
+            responses: {
+                201: {
+                    description: 'Created',
+                    content: {
+                        'application/json': {
+                            schema: tierRuleResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/loyalty/tier-rules/{tierRuleId}': {
+        get: {
+            tags: ['Admin Loyalty'],
+            summary: 'Get loyalty tier rule detail',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'tierRuleId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: tierRuleResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+        patch: {
+            tags: ['Admin Loyalty'],
+            summary: 'Update loyalty tier rule',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'tierRuleId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: updateTierRuleRequestSchema,
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: tierRuleResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+        delete: {
+            tags: ['Admin Loyalty'],
+            summary: 'Delete loyalty tier rule',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'tierRuleId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: tierRuleResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/loyalty/tier-rules/{tierRuleId}/activate': {
+        patch: {
+            tags: ['Admin Loyalty'],
+            summary: 'Activate loyalty tier rule',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'tierRuleId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: tierRuleResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/loyalty/tier-rules/{tierRuleId}/deactivate': {
+        patch: {
+            tags: ['Admin Loyalty'],
+            summary: 'Deactivate loyalty tier rule',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'tierRuleId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: tierRuleResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
     },
 };
 
@@ -348,6 +526,8 @@ module.exports = {
         CustomerLoyalty: customerLoyaltySchema,
         PointTransaction: pointTransactionSchema,
         TierRule: tierRuleSchema,
+        CreateTierRuleRequest: createTierRuleRequestSchema,
+        UpdateTierRuleRequest: updateTierRuleRequestSchema,
         LoyaltyOverview: loyaltyOverviewSchema,
     },
     paths,
