@@ -10,6 +10,7 @@ const servicePackageSwagger = require('../../modules/service-packages/servicePac
 const bookingSwagger = require('../../modules/bookings/booking.swagger');
 const bookingServiceStepSwagger = require('../../modules/booking-service-steps/bookingServiceStep.swagger');
 const vehicleInspectionSwagger = require('../../modules/vehicle-inspections/vehicleInspection.swagger');
+const promotionSwagger = require('../../modules/promotions/promotion.swagger');
 
 const openApiSpec = {
     openapi: '3.0.0',
@@ -35,6 +36,7 @@ const openApiSpec = {
         ...bookingSwagger.tags,
         ...bookingServiceStepSwagger.tags,
         ...vehicleInspectionSwagger.tags,
+        ...promotionSwagger.tags,
     ],
     paths,
     components: {
@@ -51,6 +53,7 @@ const openApiSpec = {
             ...bookingSwagger.schemas,
             ...bookingServiceStepSwagger.schemas,
             ...vehicleInspectionSwagger.schemas,
+            ...promotionSwagger.schemas,
         },
     },
 };

@@ -8,6 +8,7 @@ const servicePackageSwagger = require('../../modules/service-packages/servicePac
 const bookingSwagger = require('../../modules/bookings/booking.swagger');
 const bookingServiceStepSwagger = require('../../modules/booking-service-steps/bookingServiceStep.swagger');
 const vehicleInspectionSwagger = require('../../modules/vehicle-inspections/vehicleInspection.swagger');
+const promotionSwagger = require('../../modules/promotions/promotion.swagger');
 
 const paths = {
     ...authSwagger.paths,
@@ -20,6 +21,7 @@ const paths = {
     ...bookingSwagger.paths,
     ...bookingServiceStepSwagger.paths,
     ...vehicleInspectionSwagger.paths,
+    ...promotionSwagger.paths,
 };
 
 module.exports = paths;

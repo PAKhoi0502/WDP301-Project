@@ -41,6 +41,7 @@ const bookingSchema = {
         used_points: { type: 'number' },
         earned_points: { type: 'number' },
         promotion_id: { type: 'string', nullable: true },
+        promotion: { $ref: '#/components/schemas/Promotion', nullable: true },
         requires_wash_bay: { type: 'boolean' },
         status: {
             type: 'string',
@@ -81,6 +82,7 @@ const createCustomerBookingRequest = {
         vehicle_id: { type: 'string', example: '665f0d3d8b4f5d0012a00002' },
         service_package_id: { type: 'string', example: '665f0d3d8b4f5d0012a00003' },
         start_time: { type: 'string', format: 'date-time', example: '2026-06-10T09:00:00+07:00' },
+        promotion_code: { type: 'string', example: 'WELCOME10' },
         note: { type: 'string', example: 'Please prepare before arrival' },
     },
 };
@@ -97,6 +99,7 @@ const createWalkInBookingRequest = {
         guest_email: { type: 'string', example: 'guest@example.com' },
         license_plate: { type: 'string', example: '59A-123.45' },
         vehicle_type: { type: 'string', enum: ['MOTORBIKE', 'CAR'], example: 'CAR' },
+        promotion_code: { type: 'string', example: 'WELCOME10' },
         note: { type: 'string', example: 'Walk-in customer' },
     },
 };

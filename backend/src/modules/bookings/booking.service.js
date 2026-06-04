@@ -10,6 +10,7 @@ const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const bookingRewardService = require('./bookingReward.service');
+const promotionService = require('../promotions/promotion.service');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const { WASH_BAY_STATUS } = require('../../shared/constants/washBay.constant');
@@ -113,6 +114,7 @@ const populateBookingQuery = (query) => {
         .populate('garage_id', 'name garage_code address city opening_time closing_time slot_interval_minutes is_active')
         .populate('wash_bay_id', 'name bay_code vehicle_type status is_active')
         .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active')
+        .populate('promotion_id', 'code name discount_type discount_value max_discount_amount min_order_amount start_at end_at is_active')
         .populate('created_by_staff_id', 'full_name email phone role is_active')
         .populate('canceled_by_id', 'full_name email phone role is_active');
 };
@@ -254,10 +256,10 @@ const calculateBookingTimes = (startTime, servicePackage) => {
     };
 };
 
-const buildBookingBasePayload = ({ garage, servicePackage, startTime, vehicleType, note }) => {
+const buildBookingBasePayload = ({ garage, servicePackage, startTime, vehicleType, note, promotionResult = null }) => {
     const bookingTimes = calculateBookingTimes(startTime, servicePackage);
     const originalPrice = servicePackage.base_price;
-    const promotionDiscountAmount = 0;
+    const promotionDiscountAmount = promotionResult?.discount_amount || 0;
     const pointsDiscountAmount = 0;
     const discountAmount = promotionDiscountAmount + pointsDiscountAmount;
     const finalPrice = Math.max(originalPrice - discountAmount, 0);
@@ -280,7 +282,7 @@ const buildBookingBasePayload = ({ garage, servicePackage, startTime, vehicleTyp
         payment_status: BOOKING_PAYMENT_STATUS.UNPAID,
         used_points: 0,
         earned_points: 0,
-        promotion_id: null,
+        promotion_id: promotionResult?.promotion?._id || null,
         requires_wash_bay: servicePackage.requires_wash_bay,
         status: BOOKING_STATUS.CONFIRMED,
         reward_processed: false,
@@ -742,12 +744,21 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         getBookingRuleForCustomer(customerId),
     ]);
     const startTime = parseDateTime(createPayload.start_time, 'start_time');
+    const promotionResult = await promotionService.validatePromotionForBooking({
+        promotion_code: createPayload.promotion_code,
+        customer_id: customerId,
+        servicePackage,
+        vehicleType: vehicle.vehicle_type,
+        orderAmount: servicePackage.base_price,
+        bookingStartTime: startTime,
+    });
     const basePayload = buildBookingBasePayload({
         garage,
         servicePackage,
         startTime,
         vehicleType: vehicle.vehicle_type,
         note: createPayload.note,
+        promotionResult,
     });
 
     assertServicePackageMatchesVehicleType(servicePackage, vehicle.vehicle_type);
@@ -794,12 +805,21 @@ const createWalkInBooking = async (user, payload = {}) => {
     ]);
     const startTime = parseDateTime(createPayload.start_time, 'start_time');
     const normalizedLicensePlate = normalizeLicensePlate(createPayload.license_plate);
+    const promotionResult = await promotionService.validatePromotionForBooking({
+        promotion_code: createPayload.promotion_code,
+        customer_id: null,
+        servicePackage,
+        vehicleType: createPayload.vehicle_type,
+        orderAmount: servicePackage.base_price,
+        bookingStartTime: startTime,
+    });
     const basePayload = buildBookingBasePayload({
         garage,
         servicePackage,
         startTime,
         vehicleType: createPayload.vehicle_type,
         note: createPayload.note,
+        promotionResult,
     });
 
     await assertStaffCanAccessGarage(user, garage._id);

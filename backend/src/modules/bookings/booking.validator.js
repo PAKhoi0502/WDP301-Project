@@ -58,6 +58,18 @@ const optionalTextField = (max = 100) => z.preprocess(
     z.string().trim().max(max).optional()
 );
 
+const optionalPromotionCodeField = z.preprocess(
+    emptyToUndefined,
+    z
+        .string()
+        .trim()
+        .min(2)
+        .max(40)
+        .regex(/^[A-Za-z0-9_]+$/, 'Promotion code is invalid')
+        .transform((value) => value.toUpperCase())
+        .optional()
+);
+
 const idParamSchema = z.object({
     params: z
         .object({
@@ -115,6 +127,7 @@ const createCustomerBookingSchema = z.object({
             vehicle_id: objectIdField,
             service_package_id: objectIdField,
             start_time: isoDateTimeField,
+            promotion_code: optionalPromotionCodeField,
             note: optionalTextField(1000),
         })
         .strict(),
@@ -134,6 +147,7 @@ const createWalkInBookingSchema = z.object({
             ),
             license_plate: z.string().trim().min(3).max(30),
             vehicle_type: z.enum(VEHICLE_TYPE_VALUES),
+            promotion_code: optionalPromotionCodeField,
             note: optionalTextField(1000),
         })
         .strict(),

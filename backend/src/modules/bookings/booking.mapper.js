@@ -84,6 +84,25 @@ const toServicePackageSummaryDto = (servicePackage) => {
     };
 };
 
+const toPromotionSummaryDto = (promotion) => {
+    if (!promotion || !promotion._id) {
+        return null;
+    }
+
+    return {
+        id: promotion._id.toString(),
+        code: promotion.code,
+        name: promotion.name,
+        discount_type: promotion.discount_type,
+        discount_value: promotion.discount_value,
+        max_discount_amount: promotion.max_discount_amount,
+        min_order_amount: promotion.min_order_amount,
+        start_at: promotion.start_at,
+        end_at: promotion.end_at,
+        is_active: promotion.is_active,
+    };
+};
+
 const toWashBaySummaryDto = (washBay) => {
     if (!washBay || !washBay._id) {
         return null;
@@ -142,6 +161,7 @@ const toBookingDto = (booking) => {
         used_points: plainBooking.used_points,
         earned_points: plainBooking.earned_points,
         promotion_id: toId(plainBooking.promotion_id),
+        promotion: toPromotionSummaryDto(plainBooking.promotion_id),
         requires_wash_bay: plainBooking.requires_wash_bay,
         status: plainBooking.status,
         checked_in_at: plainBooking.checked_in_at,
@@ -180,6 +200,7 @@ const customerCreateFields = [
     'vehicle_id',
     'service_package_id',
     'start_time',
+    'promotion_code',
     'note',
 ];
 
@@ -192,6 +213,7 @@ const walkInCreateFields = [
     'guest_email',
     'license_plate',
     'vehicle_type',
+    'promotion_code',
     'note',
 ];
 

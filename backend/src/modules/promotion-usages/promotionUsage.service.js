@@ -1,4 +1,5 @@
 const PromotionUsage = require('./promotionUsage.model');
+const Promotion = require('../promotions/promotion.model');
 const PromotionUsageMapper = require('./promotionUsage.mapper');
 
 const createPromotionUsageFromBooking = async ({ booking, actorId, session = null }) => {
@@ -31,6 +32,18 @@ const createPromotionUsageFromBooking = async ({ booking, actorId, session = nul
         ],
         session ? { session } : undefined
     );
+
+    const updateQuery = Promotion.findByIdAndUpdate(
+        booking.promotion_id,
+        { $inc: { used_count: 1 } },
+        { new: true }
+    );
+
+    if (session) {
+        updateQuery.session(session);
+    }
+
+    await updateQuery;
 
     return PromotionUsageMapper.toPromotionUsageDto(documents[0]);
 };
