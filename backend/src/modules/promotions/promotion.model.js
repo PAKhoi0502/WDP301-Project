@@ -17,7 +17,6 @@ const promotionSchema = new mongoose.Schema(
             minlength: [2, 'Promotion code must be at least 2 characters'],
             maxlength: [40, 'Promotion code must not exceed 40 characters'],
             match: [/^[A-Z0-9_]+$/, 'Promotion code is invalid'],
-            unique: true,
         },
 
         name: {
