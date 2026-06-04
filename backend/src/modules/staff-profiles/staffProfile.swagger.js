@@ -1,0 +1,529 @@
+const tags = [
+    {
+        name: 'Staff Profiles',
+        description: 'Staff profile management APIs',
+    },
+];
+
+const staffTypeValues = [
+    'CUSTOMER_SERVICE_STAFF',
+    'VEHICLE_INSPECTION_STAFF',
+    'WASH_OPERATOR',
+    'VEHICLE_CARE_STAFF',
+];
+
+const schemas = {
+    StaffProfileCreateRequest: {
+        type: 'object',
+        required: ['user_id', 'staff_code', 'staff_type'],
+        properties: {
+            user_id: {
+                type: 'string',
+                example: '665f1b7b2a5f9d0012a12345',
+            },
+            staff_code: {
+                type: 'string',
+                example: 'STF001',
+            },
+            staff_type: {
+                type: 'string',
+                enum: staffTypeValues,
+                example: 'CUSTOMER_SERVICE_STAFF',
+            },
+            garage_id: {
+                type: 'string',
+                nullable: true,
+                example: '665f1b7b2a5f9d0012a54321',
+            },
+            is_active: {
+                type: 'boolean',
+                example: true,
+            },
+        },
+    },
+    StaffProfileUpdateRequest: {
+        type: 'object',
+        properties: {
+            staff_code: {
+                type: 'string',
+                example: 'STF001',
+            },
+            staff_type: {
+                type: 'string',
+                enum: staffTypeValues,
+                example: 'WASH_OPERATOR',
+            },
+            garage_id: {
+                type: 'string',
+                nullable: true,
+                example: '665f1b7b2a5f9d0012a54321',
+            },
+            is_active: {
+                type: 'boolean',
+                example: true,
+            },
+        },
+    },
+    StaffProfileStatusUpdateRequest: {
+        type: 'object',
+        required: ['is_active'],
+        properties: {
+            is_active: {
+                type: 'boolean',
+                example: false,
+            },
+        },
+    },
+    StaffProfilePublic: {
+        type: 'object',
+        properties: {
+            id: {
+                type: 'string',
+                example: '665f1b7b2a5f9d0012a11111',
+            },
+            user_id: {
+                type: 'string',
+                example: '665f1b7b2a5f9d0012a12345',
+            },
+            user: {
+                nullable: true,
+                allOf: [
+                    {
+                        $ref: '#/components/schemas/UserPublic',
+                    },
+                ],
+            },
+            staff_code: {
+                type: 'string',
+                example: 'STF001',
+            },
+            staff_type: {
+                type: 'string',
+                enum: staffTypeValues,
+                example: 'CUSTOMER_SERVICE_STAFF',
+            },
+            garage_id: {
+                type: 'string',
+                nullable: true,
+                example: '665f1b7b2a5f9d0012a54321',
+            },
+            is_active: {
+                type: 'boolean',
+                example: true,
+            },
+            created_at: {
+                type: 'string',
+                format: 'date-time',
+                example: '2026-06-03T00:00:00.000Z',
+            },
+            updated_at: {
+                type: 'string',
+                format: 'date-time',
+                example: '2026-06-03T00:00:00.000Z',
+            },
+        },
+    },
+    StaffProfileResponse: {
+        type: 'object',
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Get staff profile successfully',
+            },
+            data: {
+                $ref: '#/components/schemas/StaffProfilePublic',
+            },
+        },
+    },
+    StaffProfileListResponse: {
+        type: 'object',
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Get staff profiles successfully',
+            },
+            data: {
+                type: 'array',
+                items: {
+                    $ref: '#/components/schemas/StaffProfilePublic',
+                },
+            },
+            meta: {
+                type: 'object',
+                properties: {
+                    page: {
+                        type: 'integer',
+                        example: 1,
+                    },
+                    limit: {
+                        type: 'integer',
+                        example: 20,
+                    },
+                    total: {
+                        type: 'integer',
+                        example: 100,
+                    },
+                    total_pages: {
+                        type: 'integer',
+                        example: 5,
+                    },
+                },
+            },
+        },
+    },
+};
+
+const unauthorizedResponse = {
+    description: 'Unauthorized',
+    content: {
+        'application/json': {
+            schema: {
+                $ref: '#/components/schemas/ErrorResponse',
+            },
+        },
+    },
+};
+
+const forbiddenResponse = {
+    description: 'Forbidden',
+    content: {
+        'application/json': {
+            schema: {
+                $ref: '#/components/schemas/ErrorResponse',
+            },
+        },
+    },
+};
+
+const validationErrorResponse = {
+    description: 'Validation failed',
+    content: {
+        'application/json': {
+            schema: {
+                $ref: '#/components/schemas/ErrorResponse',
+            },
+        },
+    },
+};
+
+const notFoundResponse = {
+    description: 'Staff profile not found',
+    content: {
+        'application/json': {
+            schema: {
+                $ref: '#/components/schemas/ErrorResponse',
+            },
+        },
+    },
+};
+
+const conflictResponse = {
+    description: 'Staff profile user or staff code already exists',
+    content: {
+        'application/json': {
+            schema: {
+                $ref: '#/components/schemas/ErrorResponse',
+            },
+        },
+    },
+};
+
+const staffProfileIdParameter = {
+    in: 'path',
+    name: 'id',
+    required: true,
+    schema: {
+        type: 'string',
+    },
+    example: '665f1b7b2a5f9d0012a11111',
+};
+
+const paths = {
+    '/staff-profiles/me': {
+        get: {
+            tags: ['Staff Profiles'],
+            summary: 'Get current staff profile',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            responses: {
+                200: {
+                    description: 'Get my staff profile successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffProfileResponse',
+                            },
+                        },
+                    },
+                },
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: notFoundResponse,
+            },
+        },
+    },
+    '/staff-profiles': {
+        get: {
+            tags: ['Staff Profiles'],
+            summary: 'Get staff profiles',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            parameters: [
+                {
+                    in: 'query',
+                    name: 'page',
+                    schema: {
+                        type: 'integer',
+                        minimum: 1,
+                        default: 1,
+                    },
+                },
+                {
+                    in: 'query',
+                    name: 'limit',
+                    schema: {
+                        type: 'integer',
+                        minimum: 1,
+                        maximum: 100,
+                        default: 20,
+                    },
+                },
+                {
+                    in: 'query',
+                    name: 'search',
+                    schema: {
+                        type: 'string',
+                    },
+                },
+                {
+                    in: 'query',
+                    name: 'staff_type',
+                    schema: {
+                        type: 'string',
+                        enum: staffTypeValues,
+                    },
+                },
+                {
+                    in: 'query',
+                    name: 'garage_id',
+                    schema: {
+                        type: 'string',
+                    },
+                },
+                {
+                    in: 'query',
+                    name: 'user_id',
+                    schema: {
+                        type: 'string',
+                    },
+                },
+                {
+                    in: 'query',
+                    name: 'is_active',
+                    schema: {
+                        type: 'boolean',
+                    },
+                },
+            ],
+            responses: {
+                200: {
+                    description: 'Get staff profiles successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffProfileListResponse',
+                            },
+                        },
+                    },
+                },
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+            },
+        },
+        post: {
+            tags: ['Staff Profiles'],
+            summary: 'Create staff profile',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            $ref: '#/components/schemas/StaffProfileCreateRequest',
+                        },
+                    },
+                },
+            },
+            responses: {
+                201: {
+                    description: 'Create staff profile successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffProfileResponse',
+                            },
+                        },
+                    },
+                },
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                409: conflictResponse,
+            },
+        },
+    },
+    '/staff-profiles/{id}': {
+        get: {
+            tags: ['Staff Profiles'],
+            summary: 'Get staff profile by id',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            parameters: [staffProfileIdParameter],
+            responses: {
+                200: {
+                    description: 'Get staff profile successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffProfileResponse',
+                            },
+                        },
+                    },
+                },
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: notFoundResponse,
+            },
+        },
+        patch: {
+            tags: ['Staff Profiles'],
+            summary: 'Update staff profile',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            parameters: [staffProfileIdParameter],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            $ref: '#/components/schemas/StaffProfileUpdateRequest',
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'Update staff profile successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffProfileResponse',
+                            },
+                        },
+                    },
+                },
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: notFoundResponse,
+                409: conflictResponse,
+            },
+        },
+        delete: {
+            tags: ['Staff Profiles'],
+            summary: 'Deactivate staff profile',
+            description: 'This endpoint does not hard delete the staff profile. It sets is_active to false.',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            parameters: [staffProfileIdParameter],
+            responses: {
+                200: {
+                    description: 'Deactivate staff profile successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffProfileResponse',
+                            },
+                        },
+                    },
+                },
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: notFoundResponse,
+            },
+        },
+    },
+    '/staff-profiles/{id}/status': {
+        patch: {
+            tags: ['Staff Profiles'],
+            summary: 'Update staff profile active status',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            parameters: [staffProfileIdParameter],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            $ref: '#/components/schemas/StaffProfileStatusUpdateRequest',
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'Update staff profile status successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffProfileResponse',
+                            },
+                        },
+                    },
+                },
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: notFoundResponse,
+            },
+        },
+    },
+};
+
+module.exports = {
+    tags,
+    schemas,
+    paths,
+};
