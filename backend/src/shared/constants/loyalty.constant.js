@@ -1,0 +1,28 @@
+const LOYALTY_TIERS = Object.freeze({
+    BRONZE: 'BRONZE',
+    SILVER: 'SILVER',
+    GOLD: 'GOLD',
+    PLATINUM: 'PLATINUM',
+});
+
+const LOYALTY_TIER_VALUES = Object.freeze(Object.values(LOYALTY_TIERS));
+
+const POINT_TRANSACTION_TYPES = Object.freeze({
+    EARN: 'EARN',
+    REDEEM: 'REDEEM',
+    REFUND: 'REFUND',
+    EXPIRE: 'EXPIRE',
+    ADJUST: 'ADJUST',
+});
+
+const POINT_TRANSACTION_TYPE_VALUES = Object.freeze(Object.values(POINT_TRANSACTION_TYPES));
+
+const POINT_EXPIRY_MONTHS = 12;
+
+module.exports = {
+    LOYALTY_TIERS,
+    LOYALTY_TIER_VALUES,
+    POINT_TRANSACTION_TYPES,
+    POINT_TRANSACTION_TYPE_VALUES,
+    POINT_EXPIRY_MONTHS,
+};
