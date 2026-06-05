@@ -10,6 +10,7 @@ const servicePackageRoutes = require('../modules/service-packages/servicePackage
 const bookingRoutes = require('../modules/bookings/booking.routes');
 const promotionRoutes = require('../modules/promotions/promotion.routes');
 const loyaltyRoutes = require('../modules/loyalty/loyalty.routes');
+const notificationRoutes = require('../modules/notifications/notification.routes');
 
 const router = express.Router();
 
@@ -30,6 +31,7 @@ router.use('/bookings', bookingRoutes.customerRouter);
 router.use('/promotions', promotionRoutes.publicRouter);
 router.use('/promotions', promotionRoutes.customerRouter);
 router.use('/loyalty', loyaltyRoutes.customerRouter);
+router.use('/notifications', notificationRoutes);
 router.use('/admin/vehicles', vehicleRoutes.adminRouter);
 router.use('/admin/service-packages', servicePackageRoutes.adminRouter);
 router.use('/admin/bookings', bookingRoutes.adminRouter);
