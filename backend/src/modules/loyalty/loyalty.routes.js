@@ -2,15 +2,17 @@ const express = require('express');
 
 const loyaltyController = require('./loyalty.controller');
 const {
-    redeemPreviewSchema,
     customerIdParamSchema,
     customerTransactionsSchema,
+    redeemPreviewSchema,
     adminLoyaltyListSchema,
     adminTransactionsSchema,
     adminCustomerTransactionsSchema,
     tierRuleIdParamSchema,
     createTierRuleSchema,
     updateTierRuleSchema,
+    expiringPointsSchema,
+    expirePointsSchema,
 } = require('./loyalty.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
 const { authenticate, authorize } = require('../../shared/middlewares/auth.middleware');
@@ -33,12 +35,25 @@ customerRouter.get(
 customerRouter.post(
     '/redeem-preview',
     validate(redeemPreviewSchema),
-    loyaltyController.getRedeemPreview
+    loyaltyController.redeemPreview
 );
 
 customerRouter.get('/tier-rules', loyaltyController.getCustomerTierRules);
 
 adminRouter.use(authenticate, authorize(USER_ROLES.ADMIN));
+
+
+adminRouter.get(
+    '/expiring-points',
+    validate(expiringPointsSchema),
+    loyaltyController.getExpiringPoints
+);
+
+adminRouter.post(
+    '/expire-points',
+    validate(expirePointsSchema),
+    loyaltyController.expirePoints
+);
 
 adminRouter.get(
     '/customers',

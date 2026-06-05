@@ -24,10 +24,10 @@ const getMyPointTransactions = asyncHandler(async (req, res) => {
 });
 
 
-const getRedeemPreview = asyncHandler(async (req, res) => {
+const redeemPreview = asyncHandler(async (req, res) => {
     const { body } = req.validated;
 
-    const result = await loyaltyService.getRedeemPreview(req.user._id, body);
+    const result = await loyaltyService.calculateRedeemPreview(req.user._id, body);
 
     return sendSuccess(res, {
         message: 'Get redeem preview successfully',
@@ -89,6 +89,33 @@ const getCustomerPointTransactionsByCustomerId = asyncHandler(async (req, res) =
         message: 'Get customer point transactions successfully',
         data: result.data,
         meta: result.meta,
+    });
+});
+
+
+const getExpiringPoints = asyncHandler(async (req, res) => {
+    const { query } = req.validated;
+
+    const result = await loyaltyService.getExpiringPointTransactions(query);
+
+    return sendSuccess(res, {
+        message: 'Get expiring points successfully',
+        data: result.data,
+        meta: result.meta,
+    });
+});
+
+const expirePoints = asyncHandler(async (req, res) => {
+    const { body } = req.validated;
+
+    const result = await loyaltyService.expireDuePoints({
+        ...body,
+        actorId: req.user._id,
+    });
+
+    return sendSuccess(res, {
+        message: 'Expire points successfully',
+        data: result,
     });
 });
 
@@ -171,12 +198,14 @@ const deleteTierRule = asyncHandler(async (req, res) => {
 module.exports = {
     getMyLoyalty,
     getMyPointTransactions,
-    getRedeemPreview,
+    redeemPreview,
     getCustomerTierRules,
     getAllCustomerLoyalties,
     getCustomerLoyaltyByCustomerId,
     getAllPointTransactions,
     getCustomerPointTransactionsByCustomerId,
+    getExpiringPoints,
+    expirePoints,
     getAdminTierRules,
     getAdminTierRuleById,
     createTierRule,

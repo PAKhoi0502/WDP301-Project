@@ -62,50 +62,6 @@ const tierRuleSchema = {
     },
 };
 
-
-const loyaltyRedeemRuleSchema = {
-    type: 'object',
-    nullable: true,
-    properties: {
-        id: { type: 'string' },
-        point_value_amount: { type: 'number' },
-        min_redeem_points: { type: 'number' },
-        redeem_step: { type: 'number' },
-        max_redeem_percent: { type: 'number' },
-        is_active: { type: 'boolean' },
-        created_at: { type: 'string', format: 'date-time' },
-        updated_at: { type: 'string', format: 'date-time' },
-    },
-};
-
-const redeemPreviewSchema = {
-    type: 'object',
-    properties: {
-        service_package_id: { type: 'string' },
-        promotion_id: { type: 'string', nullable: true },
-        promotion_code: { type: 'string', nullable: true },
-        original_price: { type: 'number' },
-        promotion_discount_amount: { type: 'number' },
-        price_after_promotion: { type: 'number' },
-        available_points: { type: 'number' },
-        used_points: { type: 'number' },
-        point_value_amount: { type: 'number' },
-        points_discount_amount: { type: 'number' },
-        discount_amount: { type: 'number' },
-        final_price: { type: 'number' },
-        redeem_rule: loyaltyRedeemRuleSchema,
-    },
-};
-
-const redeemPreviewResponse = {
-    type: 'object',
-    properties: {
-        success: { type: 'boolean', example: true },
-        message: { type: 'string' },
-        data: redeemPreviewSchema,
-    },
-};
-
 const createTierRuleRequestSchema = {
     type: 'object',
     required: [
@@ -186,6 +142,61 @@ const loyaltyOverviewSchema = {
     },
 };
 
+
+const loyaltyRedeemRuleSchema = {
+    type: 'object',
+    nullable: true,
+    properties: {
+        id: { type: 'string' },
+        point_value_amount: { type: 'number', example: 1000 },
+        min_redeem_points: { type: 'number', example: 10 },
+        redeem_step: { type: 'number', example: 10 },
+        max_redeem_percent: { type: 'number', example: 100 },
+        is_active: { type: 'boolean' },
+        created_at: { type: 'string', format: 'date-time' },
+        updated_at: { type: 'string', format: 'date-time' },
+    },
+};
+
+const redeemPreviewRequestSchema = {
+    type: 'object',
+    required: ['service_package_id', 'used_points'],
+    properties: {
+        service_package_id: { type: 'string', example: '64f000000000000000000001' },
+        promotion_id: { type: 'string', nullable: true, example: '64f000000000000000000002' },
+        promotion_code: { type: 'string', nullable: true, example: 'WELCOME10' },
+        used_points: { type: 'number', example: 50 },
+    },
+};
+
+const redeemPreviewSchema = {
+    type: 'object',
+    properties: {
+        service_package_id: { type: 'string' },
+        promotion_id: { type: 'string', nullable: true },
+        promotion_code: { type: 'string', nullable: true },
+        original_price: { type: 'number', example: 150000 },
+        promotion_discount_amount: { type: 'number', example: 20000 },
+        price_after_promotion: { type: 'number', example: 130000 },
+        available_points: { type: 'number', example: 350 },
+        used_points: { type: 'number', example: 50 },
+        point_value_amount: { type: 'number', example: 1000 },
+        points_discount_amount: { type: 'number', example: 50000 },
+        discount_amount: { type: 'number', example: 70000 },
+        final_price: { type: 'number', example: 80000 },
+        redeem_rule: loyaltyRedeemRuleSchema,
+    },
+};
+
+const redeemPreviewResponse = {
+    type: 'object',
+    properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        data: redeemPreviewSchema,
+    },
+};
+
 const loyaltyOverviewResponse = {
     type: 'object',
     properties: {
@@ -234,6 +245,30 @@ const pointTransactionListResponse = {
                 total_pages: { type: 'number' },
             },
         },
+    },
+};
+
+
+const expirePointsResultSchema = {
+    type: 'object',
+    properties: {
+        expired_points: { type: 'number' },
+        customers_processed: { type: 'number' },
+        source_transactions_processed: { type: 'number' },
+        checked_at: { type: 'string', format: 'date-time' },
+        expire_transactions: {
+            type: 'array',
+            items: pointTransactionSchema,
+        },
+    },
+};
+
+const expirePointsResponse = {
+    type: 'object',
+    properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        data: expirePointsResultSchema,
     },
 };
 
@@ -301,26 +336,17 @@ const paths = {
             },
         },
     },
-
     '/loyalty/redeem-preview': {
         post: {
             tags: ['Loyalty'],
-            summary: 'Preview redeem points discount',
+            summary: 'Preview loyalty point redeem discount',
+            description: 'Calculate point discount and final price only. This API does not deduct points or create a REDEEM transaction.',
             security: [{ bearerAuth: [] }],
             requestBody: {
                 required: true,
                 content: {
                     'application/json': {
-                        schema: {
-                            type: 'object',
-                            required: ['service_package_id', 'used_points'],
-                            properties: {
-                                service_package_id: { type: 'string' },
-                                promotion_id: { type: 'string' },
-                                promotion_code: { type: 'string', example: 'WELCOME10' },
-                                used_points: { type: 'number', example: 50 },
-                            },
-                        },
+                        schema: redeemPreviewRequestSchema,
                     },
                 },
             },
@@ -348,6 +374,63 @@ const paths = {
                     content: {
                         'application/json': {
                             schema: tierRuleListResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+
+    '/admin/loyalty/expiring-points': {
+        get: {
+            tags: ['Admin Loyalty'],
+            summary: 'Get point transactions that are expired or expiring soon',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
+                { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
+                { name: 'customer_id', in: 'query', schema: { type: 'string' } },
+                { name: 'days', in: 'query', schema: { type: 'integer', default: 30, minimum: 0, maximum: 365 } },
+            ],
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: pointTransactionListResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/loyalty/expire-points': {
+        post: {
+            tags: ['Admin Loyalty'],
+            summary: 'Expire due loyalty points',
+            description: 'Expire only point transactions whose expires_at is less than or equal to current time.',
+            security: [{ bearerAuth: [] }],
+            requestBody: {
+                required: false,
+                content: {
+                    'application/json': {
+                        schema: {
+                            type: 'object',
+                            properties: {
+                                customer_id: { type: 'string', nullable: true },
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: expirePointsResponse,
                         },
                     },
                 },
@@ -606,11 +689,13 @@ module.exports = {
         CustomerLoyalty: customerLoyaltySchema,
         PointTransaction: pointTransactionSchema,
         TierRule: tierRuleSchema,
-        LoyaltyRedeemRule: loyaltyRedeemRuleSchema,
-        RedeemPreview: redeemPreviewSchema,
         CreateTierRuleRequest: createTierRuleRequestSchema,
         UpdateTierRuleRequest: updateTierRuleRequestSchema,
         LoyaltyOverview: loyaltyOverviewSchema,
+        LoyaltyRedeemRule: loyaltyRedeemRuleSchema,
+        RedeemPreviewRequest: redeemPreviewRequestSchema,
+        RedeemPreview: redeemPreviewSchema,
+        ExpirePointsResult: expirePointsResultSchema,
     },
     paths,
 };

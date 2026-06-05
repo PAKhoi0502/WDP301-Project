@@ -31,9 +31,7 @@ const optionalTextField = (max = 100) => z.preprocess(
 const optionalObjectIdField = z.preprocess(emptyToUndefined, objectIdField.optional());
 const loyaltyTierField = z.enum(LOYALTY_TIER_VALUES);
 const pointTransactionTypeField = z.enum(POINT_TRANSACTION_TYPE_VALUES);
-
-
-const optionalPromotionCodeField = z.preprocess(
+const promotionCodeField = z.preprocess(
     emptyToUndefined,
     z
         .string()
@@ -44,24 +42,6 @@ const optionalPromotionCodeField = z.preprocess(
         .transform((value) => value.toUpperCase())
         .optional()
 );
-
-const redeemPreviewSchema = z.object({
-    body: z
-        .object({
-            service_package_id: objectIdField,
-            promotion_id: optionalObjectIdField,
-            promotion_code: optionalPromotionCodeField,
-            used_points: z.coerce.number().int().min(0),
-        })
-        .strict()
-        .refine(
-            (value) => !(value.promotion_id && value.promotion_code),
-            {
-                message: 'Use either promotion_id or promotion_code',
-                path: ['promotion_code'],
-            }
-        ),
-});
 
 const tierRuleFields = {
     tier_name: loyaltyTierField,
@@ -122,6 +102,18 @@ const customerIdParamSchema = z.object({
         .strict(),
 });
 
+
+const redeemPreviewSchema = z.object({
+    body: z
+        .object({
+            service_package_id: objectIdField,
+            promotion_id: optionalObjectIdField,
+            promotion_code: promotionCodeField,
+            used_points: z.coerce.number().int().min(0),
+        })
+        .strict(),
+});
+
 const customerTransactionsSchema = z.object({
     query: z
         .object({
@@ -153,6 +145,26 @@ const adminTransactionsSchema = z.object({
         .strict(),
 });
 
+
+const expiringPointsSchema = z.object({
+    query: z
+        .object({
+            ...paginationQueryFields,
+            customer_id: optionalObjectIdField,
+            days: z.coerce.number().int().min(0).max(365).default(30),
+        })
+        .strict(),
+});
+
+const expirePointsSchema = z.object({
+    body: z
+        .object({
+            customer_id: optionalObjectIdField,
+        })
+        .strict()
+        .default({}),
+});
+
 const adminCustomerTransactionsSchema = z.object({
     params: z
         .object({
@@ -169,13 +181,15 @@ const adminCustomerTransactionsSchema = z.object({
 });
 
 module.exports = {
-    redeemPreviewSchema,
     customerIdParamSchema,
     customerTransactionsSchema,
+    redeemPreviewSchema,
     adminLoyaltyListSchema,
     adminTransactionsSchema,
     adminCustomerTransactionsSchema,
     tierRuleIdParamSchema,
     createTierRuleSchema,
     updateTierRuleSchema,
+    expiringPointsSchema,
+    expirePointsSchema,
 };
