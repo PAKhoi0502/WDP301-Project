@@ -2,6 +2,7 @@ const express = require('express');
 
 const loyaltyController = require('./loyalty.controller');
 const {
+    redeemPreviewSchema,
     customerIdParamSchema,
     customerTransactionsSchema,
     adminLoyaltyListSchema,
@@ -26,6 +27,13 @@ customerRouter.get(
     '/me/transactions',
     validate(customerTransactionsSchema),
     loyaltyController.getMyPointTransactions
+);
+
+
+customerRouter.post(
+    '/redeem-preview',
+    validate(redeemPreviewSchema),
+    loyaltyController.getRedeemPreview
 );
 
 customerRouter.get('/tier-rules', loyaltyController.getCustomerTierRules);

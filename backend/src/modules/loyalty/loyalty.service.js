@@ -2,6 +2,10 @@ const User = require('../users/user.model');
 const CustomerLoyalty = require('./customerLoyalty.model');
 const PointTransaction = require('./pointTransaction.model');
 const TierRule = require('./tierRule.model');
+const LoyaltyRedeemRule = require('./loyaltyRedeemRule.model');
+const ServicePackage = require('../service-packages/servicePackage.model');
+const Promotion = require('../promotions/promotion.model');
+const PromotionUsage = require('../promotion-usages/promotionUsage.model');
 const LoyaltyMapper = require('./loyalty.mapper');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
@@ -10,6 +14,7 @@ const {
     POINT_TRANSACTION_TYPES,
     POINT_EXPIRY_MONTHS,
 } = require('../../shared/constants/loyalty.constant');
+const { PROMOTION_DISCOUNT_TYPES } = require('../../shared/constants/promotion.constant');
 
 const addMonths = (date, months) => {
     const result = new Date(date);
@@ -447,6 +452,216 @@ const getAllPointTransactions = async ({ page = 1, limit = 20, customer_id, book
     };
 };
 
+
+const getActiveRedeemRule = async () => {
+    const redeemRule = await LoyaltyRedeemRule.findOne({ is_active: true }).sort({ created_at: -1 });
+
+    if (!redeemRule) {
+        throw new AppError('Active loyalty redeem rule is not configured', 500, 'LOYALTY_REDEEM_RULE_NOT_CONFIGURED');
+    }
+
+    return redeemRule;
+};
+
+const getActiveServicePackageForRedeem = async (servicePackageId) => {
+    const servicePackage = await ServicePackage.findById(servicePackageId);
+
+    if (!servicePackage) {
+        throw new AppError('Service package not found', 404, 'SERVICE_PACKAGE_NOT_FOUND');
+    }
+
+    if (!servicePackage.is_active) {
+        throw new AppError('Service package is inactive', 400, 'SERVICE_PACKAGE_INACTIVE');
+    }
+
+    return servicePackage;
+};
+
+const normalizePromotionCode = (value) => {
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    return value.trim().toUpperCase();
+};
+
+const getPromotionForRedeemPreview = async ({ promotion_id, promotion_code } = {}) => {
+    if (!promotion_id && !promotion_code) {
+        return null;
+    }
+
+    const filter = promotion_id
+        ? { _id: promotion_id }
+        : { code: normalizePromotionCode(promotion_code) };
+
+    const promotion = await Promotion.findOne(filter);
+
+    if (!promotion) {
+        throw new AppError('Promotion not found', 404, 'PROMOTION_NOT_FOUND');
+    }
+
+    return promotion;
+};
+
+const calculatePromotionDiscountAmount = (promotion, orderAmount) => {
+    if (!promotion) {
+        return 0;
+    }
+
+    let discountAmount = 0;
+
+    if (promotion.discount_type === PROMOTION_DISCOUNT_TYPES.PERCENTAGE) {
+        discountAmount = Math.floor((orderAmount * promotion.discount_value) / 100);
+
+        if (promotion.max_discount_amount !== null && promotion.max_discount_amount !== undefined) {
+            discountAmount = Math.min(discountAmount, promotion.max_discount_amount);
+        }
+    }
+
+    if (promotion.discount_type === PROMOTION_DISCOUNT_TYPES.FIXED_AMOUNT) {
+        discountAmount = promotion.discount_value;
+    }
+
+    return Math.min(Math.max(discountAmount, 0), orderAmount);
+};
+
+const assertPromotionCanBeUsedForRedeemPreview = async ({ promotion, customerId, loyalty, servicePackage, orderAmount }) => {
+    if (!promotion) {
+        return;
+    }
+
+    const now = new Date();
+
+    if (!promotion.is_active) {
+        throw new AppError('Promotion is inactive', 400, 'PROMOTION_INACTIVE');
+    }
+
+    if (now < promotion.start_at || now > promotion.end_at) {
+        throw new AppError('Promotion is not valid at this time', 400, 'PROMOTION_NOT_IN_VALID_PERIOD');
+    }
+
+    if (orderAmount < promotion.min_order_amount) {
+        throw new AppError('Order amount does not meet promotion minimum amount', 400, 'PROMOTION_MIN_ORDER_NOT_MET');
+    }
+
+    if (promotion.applicable_tiers?.length && !promotion.applicable_tiers.includes(loyalty.current_tier)) {
+        throw new AppError('Promotion is not available for customer tier', 400, 'PROMOTION_TIER_NOT_ELIGIBLE');
+    }
+
+    if (promotion.applicable_vehicle_types?.length && !promotion.applicable_vehicle_types.includes(servicePackage.vehicle_type)) {
+        throw new AppError('Promotion is not available for this vehicle type', 400, 'PROMOTION_VEHICLE_TYPE_NOT_ELIGIBLE');
+    }
+
+    if (promotion.applicable_service_package_ids?.length) {
+        const servicePackageId = servicePackage._id.toString();
+        const isApplicableService = promotion.applicable_service_package_ids.some((item) => item.toString() === servicePackageId);
+
+        if (!isApplicableService) {
+            throw new AppError('Promotion is not available for this service package', 400, 'PROMOTION_SERVICE_PACKAGE_NOT_ELIGIBLE');
+        }
+    }
+
+    if (promotion.usage_limit) {
+        const totalUsageCount = await PromotionUsage.countDocuments({ promotion_id: promotion._id });
+        const effectiveUsageCount = Math.max(totalUsageCount, promotion.used_count || 0);
+
+        if (effectiveUsageCount >= promotion.usage_limit) {
+            throw new AppError('Promotion usage limit has been reached', 409, 'PROMOTION_USAGE_LIMIT_REACHED');
+        }
+    }
+
+    if (promotion.per_customer_limit) {
+        const customerUsageCount = await PromotionUsage.countDocuments({
+            promotion_id: promotion._id,
+            customer_id: customerId,
+        });
+
+        if (customerUsageCount >= promotion.per_customer_limit) {
+            throw new AppError('Customer promotion usage limit has been reached', 409, 'PROMOTION_CUSTOMER_USAGE_LIMIT_REACHED');
+        }
+    }
+};
+
+const assertRedeemPointsValid = ({ usedPoints, loyalty, redeemRule, priceAfterPromotion }) => {
+    if (usedPoints === 0) {
+        return;
+    }
+
+    if (usedPoints > loyalty.available_points) {
+        throw new AppError('Used points exceed available points', 400, 'LOYALTY_POINTS_NOT_ENOUGH');
+    }
+
+    if (usedPoints < redeemRule.min_redeem_points) {
+        throw new AppError('Used points do not meet minimum redeem points', 400, 'LOYALTY_REDEEM_MIN_POINTS_NOT_MET');
+    }
+
+    if (usedPoints % redeemRule.redeem_step !== 0) {
+        throw new AppError('Used points must follow redeem step', 400, 'LOYALTY_REDEEM_STEP_INVALID');
+    }
+
+    const maxDiscountByPercent = Math.floor((priceAfterPromotion * redeemRule.max_redeem_percent) / 100);
+    const maxAllowedDiscount = Math.min(priceAfterPromotion, maxDiscountByPercent);
+    const requestedDiscount = usedPoints * redeemRule.point_value_amount;
+
+    if (requestedDiscount > maxAllowedDiscount) {
+        throw new AppError('Point discount exceeds allowed redeem amount', 400, 'LOYALTY_REDEEM_AMOUNT_EXCEEDED');
+    }
+};
+
+const getRedeemPreview = async (customerId, payload = {}) => {
+    await assertCustomerExists(customerId);
+
+    const [servicePackage, loyalty, redeemRule] = await Promise.all([
+        getActiveServicePackageForRedeem(payload.service_package_id),
+        getOrCreateCustomerLoyalty(customerId),
+        getActiveRedeemRule(),
+    ]);
+    const promotion = await getPromotionForRedeemPreview({
+        promotion_id: payload.promotion_id,
+        promotion_code: payload.promotion_code,
+    });
+
+    await assertPromotionCanBeUsedForRedeemPreview({
+        promotion,
+        customerId,
+        loyalty,
+        servicePackage,
+        orderAmount: servicePackage.base_price,
+    });
+
+    const originalPrice = servicePackage.base_price;
+    const promotionDiscountAmount = calculatePromotionDiscountAmount(promotion, originalPrice);
+    const priceAfterPromotion = Math.max(originalPrice - promotionDiscountAmount, 0);
+    const usedPoints = payload.used_points || 0;
+
+    assertRedeemPointsValid({
+        usedPoints,
+        loyalty,
+        redeemRule,
+        priceAfterPromotion,
+    });
+
+    const pointsDiscountAmount = Math.min(usedPoints * redeemRule.point_value_amount, priceAfterPromotion);
+    const discountAmount = promotionDiscountAmount + pointsDiscountAmount;
+    const finalPrice = Math.max(originalPrice - discountAmount, 0);
+
+    return LoyaltyMapper.toRedeemPreviewDto({
+        service_package_id: servicePackage._id,
+        promotion_id: promotion?._id || null,
+        promotion_code: promotion?.code || null,
+        original_price: originalPrice,
+        promotion_discount_amount: promotionDiscountAmount,
+        price_after_promotion: priceAfterPromotion,
+        available_points: loyalty.available_points,
+        used_points: usedPoints,
+        point_value_amount: redeemRule.point_value_amount,
+        points_discount_amount: pointsDiscountAmount,
+        discount_amount: discountAmount,
+        final_price: finalPrice,
+        redeem_rule: redeemRule,
+    });
+};
+
 module.exports = {
     getOrCreateCustomerLoyalty,
     calculateEarnedPoints,
@@ -463,4 +678,5 @@ module.exports = {
     getAllCustomerLoyalties,
     getCustomerLoyaltyForAdmin,
     getAllPointTransactions,
+    getRedeemPreview,
 };

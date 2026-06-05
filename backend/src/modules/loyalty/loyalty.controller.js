@@ -23,6 +23,18 @@ const getMyPointTransactions = asyncHandler(async (req, res) => {
     });
 });
 
+
+const getRedeemPreview = asyncHandler(async (req, res) => {
+    const { body } = req.validated;
+
+    const result = await loyaltyService.getRedeemPreview(req.user._id, body);
+
+    return sendSuccess(res, {
+        message: 'Get redeem preview successfully',
+        data: result,
+    });
+});
+
 const getCustomerTierRules = asyncHandler(async (req, res) => {
     const result = await loyaltyService.getTierRules({ active_only: true });
 
@@ -159,6 +171,7 @@ const deleteTierRule = asyncHandler(async (req, res) => {
 module.exports = {
     getMyLoyalty,
     getMyPointTransactions,
+    getRedeemPreview,
     getCustomerTierRules,
     getAllCustomerLoyalties,
     getCustomerLoyaltyByCustomerId,

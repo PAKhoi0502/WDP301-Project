@@ -32,6 +32,37 @@ const optionalObjectIdField = z.preprocess(emptyToUndefined, objectIdField.optio
 const loyaltyTierField = z.enum(LOYALTY_TIER_VALUES);
 const pointTransactionTypeField = z.enum(POINT_TRANSACTION_TYPE_VALUES);
 
+
+const optionalPromotionCodeField = z.preprocess(
+    emptyToUndefined,
+    z
+        .string()
+        .trim()
+        .min(2)
+        .max(40)
+        .regex(/^[A-Za-z0-9_]+$/, 'Promotion code is invalid')
+        .transform((value) => value.toUpperCase())
+        .optional()
+);
+
+const redeemPreviewSchema = z.object({
+    body: z
+        .object({
+            service_package_id: objectIdField,
+            promotion_id: optionalObjectIdField,
+            promotion_code: optionalPromotionCodeField,
+            used_points: z.coerce.number().int().min(0),
+        })
+        .strict()
+        .refine(
+            (value) => !(value.promotion_id && value.promotion_code),
+            {
+                message: 'Use either promotion_id or promotion_code',
+                path: ['promotion_code'],
+            }
+        ),
+});
+
 const tierRuleFields = {
     tier_name: loyaltyTierField,
     booking_window_days: z.coerce.number().int().min(1).max(60),
@@ -138,6 +169,7 @@ const adminCustomerTransactionsSchema = z.object({
 });
 
 module.exports = {
+    redeemPreviewSchema,
     customerIdParamSchema,
     customerTransactionsSchema,
     adminLoyaltyListSchema,

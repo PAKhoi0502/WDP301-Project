@@ -62,6 +62,50 @@ const tierRuleSchema = {
     },
 };
 
+
+const loyaltyRedeemRuleSchema = {
+    type: 'object',
+    nullable: true,
+    properties: {
+        id: { type: 'string' },
+        point_value_amount: { type: 'number' },
+        min_redeem_points: { type: 'number' },
+        redeem_step: { type: 'number' },
+        max_redeem_percent: { type: 'number' },
+        is_active: { type: 'boolean' },
+        created_at: { type: 'string', format: 'date-time' },
+        updated_at: { type: 'string', format: 'date-time' },
+    },
+};
+
+const redeemPreviewSchema = {
+    type: 'object',
+    properties: {
+        service_package_id: { type: 'string' },
+        promotion_id: { type: 'string', nullable: true },
+        promotion_code: { type: 'string', nullable: true },
+        original_price: { type: 'number' },
+        promotion_discount_amount: { type: 'number' },
+        price_after_promotion: { type: 'number' },
+        available_points: { type: 'number' },
+        used_points: { type: 'number' },
+        point_value_amount: { type: 'number' },
+        points_discount_amount: { type: 'number' },
+        discount_amount: { type: 'number' },
+        final_price: { type: 'number' },
+        redeem_rule: loyaltyRedeemRuleSchema,
+    },
+};
+
+const redeemPreviewResponse = {
+    type: 'object',
+    properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        data: redeemPreviewSchema,
+    },
+};
+
 const createTierRuleRequestSchema = {
     type: 'object',
     required: [
@@ -250,6 +294,42 @@ const paths = {
                     content: {
                         'application/json': {
                             schema: pointTransactionListResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+
+    '/loyalty/redeem-preview': {
+        post: {
+            tags: ['Loyalty'],
+            summary: 'Preview redeem points discount',
+            security: [{ bearerAuth: [] }],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            type: 'object',
+                            required: ['service_package_id', 'used_points'],
+                            properties: {
+                                service_package_id: { type: 'string' },
+                                promotion_id: { type: 'string' },
+                                promotion_code: { type: 'string', example: 'WELCOME10' },
+                                used_points: { type: 'number', example: 50 },
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: redeemPreviewResponse,
                         },
                     },
                 },
@@ -526,6 +606,8 @@ module.exports = {
         CustomerLoyalty: customerLoyaltySchema,
         PointTransaction: pointTransactionSchema,
         TierRule: tierRuleSchema,
+        LoyaltyRedeemRule: loyaltyRedeemRuleSchema,
+        RedeemPreview: redeemPreviewSchema,
         CreateTierRuleRequest: createTierRuleRequestSchema,
         UpdateTierRuleRequest: updateTierRuleRequestSchema,
         LoyaltyOverview: loyaltyOverviewSchema,

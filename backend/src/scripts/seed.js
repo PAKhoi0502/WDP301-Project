@@ -8,6 +8,7 @@ const seedWashBay = require('./seedWashBay');
 const seedVehicle = require('./seedVehicle');
 const seedServicePackage = require('./seedServicePackage');
 const seedTierRule = require('./seedTierRule');
+const seedLoyaltyRedeemRule = require('./seedLoyaltyRedeemRule');
 
 const run = async () => {
     try {
@@ -20,6 +21,7 @@ const run = async () => {
         await seedVehicle();
         await seedServicePackage();
         await seedTierRule();
+        await seedLoyaltyRedeemRule();
 
         console.log('All seed completed');
         process.exit(0);

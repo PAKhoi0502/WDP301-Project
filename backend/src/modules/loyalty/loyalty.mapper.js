@@ -122,6 +122,48 @@ const toTierRuleDtoList = (tierRules = []) => {
     return tierRules.map((tierRule) => toTierRuleDto(tierRule));
 };
 
+
+const toLoyaltyRedeemRuleDto = (redeemRule) => {
+    if (!redeemRule) {
+        return null;
+    }
+
+    const plainRedeemRule = redeemRule.toObject ? redeemRule.toObject() : redeemRule;
+
+    return {
+        id: plainRedeemRule._id?.toString() || plainRedeemRule.id || null,
+        point_value_amount: plainRedeemRule.point_value_amount,
+        min_redeem_points: plainRedeemRule.min_redeem_points,
+        redeem_step: plainRedeemRule.redeem_step,
+        max_redeem_percent: plainRedeemRule.max_redeem_percent,
+        is_active: plainRedeemRule.is_active,
+        created_at: plainRedeemRule.created_at,
+        updated_at: plainRedeemRule.updated_at,
+    };
+};
+
+const toRedeemPreviewDto = (preview) => {
+    if (!preview) {
+        return null;
+    }
+
+    return {
+        service_package_id: toId(preview.service_package_id),
+        promotion_id: toId(preview.promotion_id),
+        promotion_code: preview.promotion_code || null,
+        original_price: preview.original_price,
+        promotion_discount_amount: preview.promotion_discount_amount,
+        price_after_promotion: preview.price_after_promotion,
+        available_points: preview.available_points,
+        used_points: preview.used_points,
+        point_value_amount: preview.point_value_amount,
+        points_discount_amount: preview.points_discount_amount,
+        discount_amount: preview.discount_amount,
+        final_price: preview.final_price,
+        redeem_rule: toLoyaltyRedeemRuleDto(preview.redeem_rule),
+    };
+};
+
 const toLoyaltyOverviewDto = ({ loyalty, currentTierRule, nextTierRule }) => {
     return {
         loyalty: toCustomerLoyaltyDto(loyalty),
@@ -137,5 +179,7 @@ module.exports = {
     toPointTransactionDtoList,
     toTierRuleDto,
     toTierRuleDtoList,
+    toLoyaltyRedeemRuleDto,
+    toRedeemPreviewDto,
     toLoyaltyOverviewDto,
 };
