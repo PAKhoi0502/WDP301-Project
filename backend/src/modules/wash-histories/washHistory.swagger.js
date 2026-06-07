@@ -114,7 +114,7 @@ const washHistorySchema = {
         discount_amount: { type: 'number' },
         points_earned: { type: 'number' },
         points_used: { type: 'number' },
-        payment_method: { type: 'string', enum: ['CASH'] },
+        payment_method: { type: 'string', enum: ['CASH', 'PAYOS'] },
         paid_at: { type: 'string', format: 'date-time' },
         service_started_at: { type: 'string', format: 'date-time', nullable: true },
         service_completed_at: { type: 'string', format: 'date-time' },
