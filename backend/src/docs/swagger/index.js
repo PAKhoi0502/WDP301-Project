@@ -13,6 +13,8 @@ const vehicleInspectionSwagger = require('../../modules/vehicle-inspections/vehi
 const promotionSwagger = require('../../modules/promotions/promotion.swagger');
 const loyaltySwagger = require('../../modules/loyalty/loyalty.swagger');
 const notificationSwagger = require('../../modules/notifications/notification.swagger');
+const washHistorySwagger = require('../../modules/wash-histories/washHistory.swagger');
+const paymentSwagger = require('../../modules/payments/payment.swagger');
 
 const openApiSpec = {
     openapi: '3.0.0',
@@ -41,6 +43,8 @@ const openApiSpec = {
         ...promotionSwagger.tags,
         ...loyaltySwagger.tags,
         ...notificationSwagger.tags,
+        ...washHistorySwagger.tags,
+        ...paymentSwagger.tags,
     ],
     paths,
     components: {
@@ -60,6 +64,8 @@ const openApiSpec = {
             ...promotionSwagger.schemas,
             ...loyaltySwagger.schemas,
             ...notificationSwagger.schemas,
+            ...washHistorySwagger.schemas,
+            ...paymentSwagger.schemas,
         },
     },
 };

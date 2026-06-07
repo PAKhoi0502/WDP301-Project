@@ -11,6 +11,8 @@ const vehicleInspectionSwagger = require('../../modules/vehicle-inspections/vehi
 const promotionSwagger = require('../../modules/promotions/promotion.swagger');
 const loyaltySwagger = require('../../modules/loyalty/loyalty.swagger');
 const notificationSwagger = require('../../modules/notifications/notification.swagger');
+const washHistorySwagger = require('../../modules/wash-histories/washHistory.swagger');
+const paymentSwagger = require('../../modules/payments/payment.swagger');
 
 const paths = {
     ...authSwagger.paths,
@@ -26,6 +28,8 @@ const paths = {
     ...promotionSwagger.paths,
     ...loyaltySwagger.paths,
     ...notificationSwagger.paths,
+    ...washHistorySwagger.paths,
+    ...paymentSwagger.paths,
 };
 
 module.exports = paths;
