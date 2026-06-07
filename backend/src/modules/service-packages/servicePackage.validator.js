@@ -133,6 +133,7 @@ const getServicePackagesSchema = z.object({
                 emptyToUndefined,
                 z.string().trim().max(100).optional()
             ),
+            garage_id: z.preprocess(emptyToUndefined, objectIdField.optional()),
             vehicle_type: vehicleTypeField.optional(),
             service_type: serviceTypeField.optional(),
             requires_wash_bay: stringBooleanField.optional(),

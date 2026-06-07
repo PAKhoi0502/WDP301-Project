@@ -176,6 +176,35 @@ const getGarageDocument = async (garageId) => {
     return garage;
 };
 
+const getSupportedVehicleTypesByGarage = async (garageId) => {
+    await getGarageDocument(garageId);
+
+    return WashBay.distinct('vehicle_type', {
+        garage_id: garageId,
+        is_active: true,
+        status: {
+            $nin: [
+                WASH_BAY_STATUS.INACTIVE,
+                WASH_BAY_STATUS.MAINTENANCE,
+            ],
+        },
+    });
+};
+
+const assertGarageSupportsVehicleType = async (garageId, vehicleType) => {
+    const supportedVehicleTypes = await getSupportedVehicleTypesByGarage(garageId);
+
+    if (!supportedVehicleTypes.includes(vehicleType)) {
+        throw new AppError(
+            'Garage does not support this vehicle type',
+            400,
+            'GARAGE_VEHICLE_TYPE_NOT_SUPPORTED'
+        );
+    }
+
+    return supportedVehicleTypes;
+};
+
 const getWashBayDocumentById = async (washBayId) => {
     const washBay = await WashBay.findById(washBayId).populate(
         'garage_id',
@@ -425,6 +454,8 @@ const deactivateWashBay = async (washBayId) => {
 };
 
 module.exports = {
+    getSupportedVehicleTypesByGarage,
+    assertGarageSupportsVehicleType,
     getAllWashBays,
     getWashBaysByGarage,
     getAvailableWashBaysByGarage,

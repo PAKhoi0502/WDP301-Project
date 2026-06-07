@@ -6,6 +6,7 @@ const User = require('../users/user.model');
 const Vehicle = require('../vehicles/vehicle.model');
 const Garage = require('../garages/garage.model');
 const WashBay = require('../wash-bays/washBay.model');
+const washBayService = require('../wash-bays/washBay.service');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
@@ -661,6 +662,10 @@ const releaseWashBayForBooking = async (booking) => {
 const getAvailableSlots = async ({ garage_id, service_package_id, date } = {}) => {
     const garage = await getActiveGarage(garage_id);
     const servicePackage = await getActiveServicePackage(service_package_id);
+    await washBayService.assertGarageSupportsVehicleType(
+        garage._id,
+        servicePackage.vehicle_type
+    );
     const openingDate = createDateFromLocalTime(date, garage.opening_time);
     const closingDate = createDateFromLocalTime(date, garage.closing_time);
 
@@ -792,6 +797,14 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         getBookingRuleForCustomer(customerId),
     ]);
     const startTime = parseDateTime(createPayload.start_time, 'start_time');
+
+    assertServicePackageMatchesVehicleType(servicePackage, vehicle.vehicle_type);
+
+    await washBayService.assertGarageSupportsVehicleType(
+        garage._id,
+        servicePackage.vehicle_type
+    );
+
     const promotionResult = await promotionService.validatePromotionForBooking({
         promotion_code: createPayload.promotion_code,
         customer_id: customerId,
@@ -809,7 +822,6 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         promotionResult,
     });
 
-    assertServicePackageMatchesVehicleType(servicePackage, vehicle.vehicle_type);
     assertBookingStartTimeInFuture(startTime);
     assertBookingWithinWindow(startTime, bookingRule);
     assertBookingInsideGarageBusinessHours(garage, basePayload.start_time, basePayload.end_time);
@@ -853,6 +865,19 @@ const createWalkInBooking = async (user, payload = {}) => {
     ]);
     const startTime = parseDateTime(createPayload.start_time, 'start_time');
     const normalizedLicensePlate = normalizeLicensePlate(createPayload.license_plate);
+
+    await assertStaffCanAccessGarage(user, garage._id);
+
+    assertServicePackageMatchesVehicleType(
+        servicePackage,
+        createPayload.vehicle_type
+    );
+
+    await washBayService.assertGarageSupportsVehicleType(
+        garage._id,
+        servicePackage.vehicle_type
+    );
+
     const promotionResult = await promotionService.validatePromotionForBooking({
         promotion_code: createPayload.promotion_code,
         customer_id: null,
@@ -870,8 +895,6 @@ const createWalkInBooking = async (user, payload = {}) => {
         promotionResult,
     });
 
-    await assertStaffCanAccessGarage(user, garage._id);
-    assertServicePackageMatchesVehicleType(servicePackage, createPayload.vehicle_type);
     assertBookingStartTimeInFuture(startTime);
     assertBookingInsideGarageBusinessHours(garage, basePayload.start_time, basePayload.end_time);
 

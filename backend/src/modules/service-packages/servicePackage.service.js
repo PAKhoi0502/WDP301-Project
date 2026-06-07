@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const ServicePackage = require('./servicePackage.model');
 const ServicePackageMapper = require('./servicePackage.mapper');
+const washBayService = require('../wash-bays/washBay.service');
 const { AppError } = require('../../shared/utils/appError');
 const { SERVICE_PACKAGE_TYPES } = require('../../shared/constants/servicePackage.constant');
 
@@ -127,7 +128,9 @@ const buildSearchFilter = ({ search, vehicle_type, service_type, requires_wash_b
         ];
     }
 
-    if (vehicle_type) {
+    if (Array.isArray(vehicle_type)) {
+        filter.vehicle_type = { $in: vehicle_type };
+    } else if (vehicle_type) {
         filter.vehicle_type = vehicle_type;
     }
 
@@ -294,15 +297,54 @@ const assertIncludedServicesValid = async (includedServiceIds = [], servicePacka
     }
 };
 
-const getPublicServicePackages = async ({ page = 1, limit = 20, search, vehicle_type, service_type, requires_wash_bay } = {}) => {
+const resolveVehicleTypeFilterByGarage = async (garageId, vehicleType) => {
+    if (!garageId) {
+        return vehicleType;
+    }
+
+    const supportedVehicleTypes = await washBayService.getSupportedVehicleTypesByGarage(garageId);
+
+    if (!vehicleType) {
+        return supportedVehicleTypes;
+    }
+
+    return supportedVehicleTypes.includes(vehicleType) ? [vehicleType] : [];
+};
+
+const getPublicServicePackages = async ({
+    page = 1,
+    limit = 20,
+    search,
+    garage_id,
+    vehicle_type,
+    service_type,
+    requires_wash_bay,
+} = {}) => {
+    const resolvedVehicleType = await resolveVehicleTypeFilterByGarage(
+        garage_id,
+        vehicle_type
+    );
+
     const filter = buildSearchFilter({
         search,
-        vehicle_type,
+        vehicle_type: resolvedVehicleType,
         service_type,
         requires_wash_bay,
         is_active: true,
     });
     const skip = (page - 1) * limit;
+
+    if (Array.isArray(resolvedVehicleType) && resolvedVehicleType.length === 0) {
+        return {
+            data: [],
+            meta: {
+                page,
+                limit,
+                total: 0,
+                total_pages: 0,
+            },
+        };
+    }
 
     const [servicePackages, total] = await Promise.all([
         ServicePackage.find(filter)
