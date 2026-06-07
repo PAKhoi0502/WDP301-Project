@@ -30,12 +30,14 @@ const BOOKING_CUSTOMER_CANCELABLE_STATUSES = Object.freeze([
 
 const BOOKING_PAYMENT_METHOD = Object.freeze({
     CASH: 'CASH',
+    PAYOS: 'PAYOS',
 });
 
 const BOOKING_PAYMENT_METHOD_VALUES = Object.freeze(Object.values(BOOKING_PAYMENT_METHOD));
 
 const BOOKING_PAYMENT_STATUS = Object.freeze({
     UNPAID: 'UNPAID',
+    PENDING: 'PENDING',
     PAID: 'PAID',
 });
 

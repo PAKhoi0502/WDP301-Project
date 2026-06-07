@@ -9,7 +9,7 @@ const WashBay = require('../wash-bays/washBay.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
-const bookingRewardService = require('./bookingReward.service');
+const bookingPaymentService = require('./bookingPayment.service');
 const promotionService = require('../promotions/promotion.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
@@ -1040,40 +1040,24 @@ const markPaid = async (user, bookingId, { note } = {}) => {
             await assertStaffCanAccessBooking(user, booking);
             assertBookingStatusIn(booking, [BOOKING_STATUS.COMPLETED], 'BOOKING_MARK_PAID_NOT_ALLOWED');
 
-            if (booking.payment_status === BOOKING_PAYMENT_STATUS.PAID && booking.reward_processed) {
-                const populatedBooking = await populateBookingQuery(Booking.findById(booking._id).session(session));
-
-                response = {
-                    booking: BookingMapper.toBookingDto(populatedBooking),
-                    wash_history: null,
-                    loyalty: null,
-                    point_transaction: null,
-                    promotion_usage: null,
-                    notifications: [],
-                    already_processed: true,
-                };
-
-                return;
-            }
-
-            if (booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
-                booking.payment_status = BOOKING_PAYMENT_STATUS.PAID;
-                booking.payment_method = BOOKING_PAYMENT_METHOD.CASH;
-                booking.paid_at = new Date();
-            }
-
-            if (!booking.paid_at) {
-                booking.paid_at = new Date();
+            if (
+                booking.payment_method === BOOKING_PAYMENT_METHOD.PAYOS
+                && booking.payment_status === BOOKING_PAYMENT_STATUS.PENDING
+            ) {
+                throw new AppError(
+                    'Pending PayOS payment must be canceled before cash payment',
+                    409,
+                    'BOOKING_PENDING_PAYOS_PAYMENT'
+                );
             }
 
             if (note !== undefined) {
                 booking.note = normalizeText(note);
             }
 
-            await booking.save({ session });
-
-            const rewardResult = await bookingRewardService.processCompletedPaidBooking({
+            const paidResult = await bookingPaymentService.confirmBookingPaid({
                 booking,
+                paymentMethod: BOOKING_PAYMENT_METHOD.CASH,
                 actorId: user._id,
                 session,
             });
@@ -1081,12 +1065,12 @@ const markPaid = async (user, bookingId, { note } = {}) => {
 
             response = {
                 booking: BookingMapper.toBookingDto(populatedBooking),
-                wash_history: rewardResult.wash_history,
-                loyalty: rewardResult.loyalty,
-                point_transaction: rewardResult.point_transaction,
-                promotion_usage: rewardResult.promotion_usage,
-                notifications: rewardResult.notifications,
-                already_processed: rewardResult.already_processed,
+                wash_history: paidResult.wash_history,
+                loyalty: paidResult.loyalty,
+                point_transaction: paidResult.point_transaction,
+                promotion_usage: paidResult.promotion_usage,
+                notifications: paidResult.notifications,
+                already_processed: paidResult.already_processed,
             };
         });
 
