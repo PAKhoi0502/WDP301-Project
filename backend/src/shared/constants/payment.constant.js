@@ -1,0 +1,39 @@
+const PAYMENT_PROVIDER = Object.freeze({
+    PAYOS: 'PAYOS',
+});
+
+const PAYMENT_PROVIDER_VALUES = Object.freeze(Object.values(PAYMENT_PROVIDER));
+
+const PAYMENT_METHOD = Object.freeze({
+    QR: 'QR',
+});
+
+const PAYMENT_METHOD_VALUES = Object.freeze(Object.values(PAYMENT_METHOD));
+
+const PAYMENT_TRANSACTION_STATUS = Object.freeze({
+    INITIATED: 'INITIATED',
+    PENDING: 'PENDING',
+    PAID: 'PAID',
+    CANCELED: 'CANCELED',
+    EXPIRED: 'EXPIRED',
+    FAILED: 'FAILED',
+});
+
+const PAYMENT_TRANSACTION_STATUS_VALUES = Object.freeze(Object.values(PAYMENT_TRANSACTION_STATUS));
+
+const PAYMENT_CURRENCY = Object.freeze({
+    VND: 'VND',
+});
+
+const PAYMENT_CURRENCY_VALUES = Object.freeze(Object.values(PAYMENT_CURRENCY));
+
+module.exports = {
+    PAYMENT_PROVIDER,
+    PAYMENT_PROVIDER_VALUES,
+    PAYMENT_METHOD,
+    PAYMENT_METHOD_VALUES,
+    PAYMENT_TRANSACTION_STATUS,
+    PAYMENT_TRANSACTION_STATUS_VALUES,
+    PAYMENT_CURRENCY,
+    PAYMENT_CURRENCY_VALUES,
+};
