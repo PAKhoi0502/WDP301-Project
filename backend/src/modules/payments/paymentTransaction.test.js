@@ -40,6 +40,15 @@ describe('payment transaction model', () => {
         await expect(transaction.validate()).resolves.toBeUndefined();
     });
 
+    it('allows canceling transaction before final canceled timestamp is set', async () => {
+        const transaction = createPaymentTransaction({
+            status: 'CANCELING',
+            canceled_at: null,
+        });
+
+        await expect(transaction.validate()).resolves.toBeUndefined();
+    });
+
     it('requires PayOS link data for pending transaction', async () => {
         const transaction = createPaymentTransaction({
             payment_link_id: null,

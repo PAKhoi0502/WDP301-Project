@@ -142,7 +142,7 @@ paymentTransactionSchema.pre('validate', function (next) {
         this.invalidate('amount', 'Amount must be an integer');
     }
 
-    if ([PAYMENT_TRANSACTION_STATUS.PENDING, PAYMENT_TRANSACTION_STATUS.PAID].includes(this.status) && !this.payment_link_id) {
+    if ([PAYMENT_TRANSACTION_STATUS.PENDING, PAYMENT_TRANSACTION_STATUS.CANCELING, PAYMENT_TRANSACTION_STATUS.PAID].includes(this.status) && !this.payment_link_id) {
         this.invalidate('payment_link_id', 'Active PayOS transaction requires payment link id');
     }
 

@@ -44,6 +44,17 @@ const cancelPayosPayment = asyncHandler(async (req, res) => {
     });
 });
 
+const expirePayosPayment = asyncHandler(async (req, res) => {
+    const { paymentId } = req.validated.params;
+
+    const result = await paymentService.expirePayosPayment(req.user, paymentId);
+
+    return sendSuccess(res, {
+        message: 'Expire PayOS payment successfully',
+        data: result,
+    });
+});
+
 const handlePayosWebhook = asyncHandler(async (req, res) => {
     const { body } = req.validated;
 
@@ -59,5 +70,6 @@ module.exports = {
     createPayosPayment,
     getPaymentById,
     cancelPayosPayment,
+    expirePayosPayment,
     handlePayosWebhook,
 };

@@ -40,6 +40,12 @@ adminRouter.patch(
     paymentController.cancelPayosPayment
 );
 
+adminRouter.patch(
+    '/:paymentId/expire',
+    validate(paymentIdParamSchema),
+    paymentController.expirePayosPayment
+);
+
 module.exports = {
     publicRouter,
     adminRouter,

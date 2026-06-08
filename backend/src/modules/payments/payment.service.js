@@ -64,14 +64,21 @@ const assertBookingCanCreatePayosPayment = (booking) => {
     }
 };
 
-const findReusablePendingPayment = async (bookingId, now = new Date()) => {
+const findActivePayosPayment = async (bookingId, now = new Date()) => {
     const payment = await PaymentTransaction.findOne({
         booking_id: bookingId,
         provider: PAYMENT_PROVIDER.PAYOS,
-        status: PAYMENT_TRANSACTION_STATUS.PENDING,
         $or: [
-            { expires_at: null },
-            { expires_at: { $gt: now } },
+            {
+                status: PAYMENT_TRANSACTION_STATUS.CANCELING,
+            },
+            {
+                status: PAYMENT_TRANSACTION_STATUS.PENDING,
+                $or: [
+                    { expires_at: null },
+                    { expires_at: { $gt: now } },
+                ],
+            },
         ],
     }).sort({ created_at: -1 });
 
@@ -225,9 +232,13 @@ const createPayosPayment = async (user, bookingId, payload = {}) => {
 
     await expireOldPendingPayments(booking._id, now);
 
-    const pendingPayment = await findReusablePendingPayment(booking._id, now);
+    const pendingPayment = await findActivePayosPayment(booking._id, now);
 
     if (pendingPayment) {
+        if (pendingPayment.status === PAYMENT_TRANSACTION_STATUS.CANCELING) {
+            throw new AppError('Payment cancel is already in progress', 409, 'PAYMENT_CANCEL_IN_PROGRESS');
+        }
+
         if (booking.payment_method !== BOOKING_PAYMENT_METHOD.PAYOS
             || booking.payment_status !== BOOKING_PAYMENT_STATUS.PENDING) {
             booking.payment_method = BOOKING_PAYMENT_METHOD.PAYOS;
@@ -341,7 +352,68 @@ const assertPaymentCanBeCanceled = (payment) => {
     }
 };
 
-const cancelPayosPayment = async (user, paymentId, { reason } = {}) => {
+const beginPayosPaymentCancel = async (user, paymentId) => {
+    const session = await mongoose.startSession();
+
+    try {
+        let cancelContext;
+
+        await session.withTransaction(async () => {
+            const payment = await PaymentTransaction.findById(paymentId).session(session);
+
+            if (!payment) {
+                throw new AppError('Payment transaction not found', 404, 'PAYMENT_TRANSACTION_NOT_FOUND');
+            }
+
+            const booking = await Booking.findById(payment.booking_id).session(session);
+
+            if (!booking) {
+                throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+            }
+
+            await assertStaffCanAccessBooking(user, booking);
+
+            if (payment.status === PAYMENT_TRANSACTION_STATUS.CANCELING) {
+                cancelContext = {
+                    orderCode: payment.order_code,
+                };
+
+                return;
+            }
+
+            assertPaymentCanBeCanceled(payment);
+
+            payment.status = PAYMENT_TRANSACTION_STATUS.CANCELING;
+            await payment.save({ session });
+
+            cancelContext = {
+                orderCode: payment.order_code,
+            };
+        });
+
+        return cancelContext;
+    } finally {
+        await session.endSession();
+    }
+};
+
+const rollbackPayosPaymentCancel = async (paymentId, error) => {
+    const payment = await PaymentTransaction.findById(paymentId);
+
+    if (!payment || payment.status !== PAYMENT_TRANSACTION_STATUS.CANCELING) {
+        return;
+    }
+
+    payment.status = PAYMENT_TRANSACTION_STATUS.PENDING;
+    payment.raw_webhook = {
+        source: 'CANCEL_PAYMENT_LINK',
+        message: error.message,
+        error_code: error.errorCode || null,
+    };
+    await payment.save();
+};
+
+const finishPayosPaymentCancel = async (user, paymentId) => {
     const session = await mongoose.startSession();
 
     try {
@@ -361,15 +433,105 @@ const cancelPayosPayment = async (user, paymentId, { reason } = {}) => {
             }
 
             await assertStaffCanAccessBooking(user, booking);
-            assertPaymentCanBeCanceled(payment);
 
-            await payosService.cancelPaymentLink(payment.order_code, reason);
+            if (payment.status === PAYMENT_TRANSACTION_STATUS.PAID) {
+                throw new AppError('Paid payment cannot be canceled', 409, 'PAYMENT_ALREADY_PAID');
+            }
 
-            const canceledAt = new Date();
+            if (payment.status !== PAYMENT_TRANSACTION_STATUS.CANCELING) {
+                throw new AppError('Payment cannot be canceled in current status', 400, 'PAYMENT_CANCEL_NOT_ALLOWED');
+            }
 
             payment.status = PAYMENT_TRANSACTION_STATUS.CANCELED;
-            payment.canceled_at = canceledAt;
+            payment.canceled_at = new Date();
             await payment.save({ session });
+
+            if (
+                booking.payment_method === BOOKING_PAYMENT_METHOD.PAYOS
+                && booking.payment_status === BOOKING_PAYMENT_STATUS.PENDING
+            ) {
+                booking.payment_method = BOOKING_PAYMENT_METHOD.CASH;
+                booking.payment_status = BOOKING_PAYMENT_STATUS.UNPAID;
+                booking.paid_at = null;
+                await booking.save({ session });
+            }
+
+            response = buildPaymentDetailResponse(booking, payment);
+        });
+
+        return response;
+    } finally {
+        await session.endSession();
+    }
+};
+
+const cancelPayosPayment = async (user, paymentId, { reason } = {}) => {
+    const cancelContext = await beginPayosPaymentCancel(user, paymentId);
+
+    try {
+        await payosService.cancelPaymentLink(cancelContext.orderCode, reason);
+    } catch (error) {
+        await rollbackPayosPaymentCancel(paymentId, error);
+        throw error;
+    }
+
+    return finishPayosPaymentCancel(user, paymentId);
+};
+
+const assertPaymentCanBeExpired = (payment, now) => {
+    if (payment.status === PAYMENT_TRANSACTION_STATUS.EXPIRED) {
+        return;
+    }
+
+    if (payment.status === PAYMENT_TRANSACTION_STATUS.PAID) {
+        throw new AppError('Paid payment cannot be expired', 409, 'PAYMENT_ALREADY_PAID');
+    }
+
+    if (payment.status === PAYMENT_TRANSACTION_STATUS.CANCELING) {
+        throw new AppError('Payment cancel is already in progress', 409, 'PAYMENT_CANCEL_IN_PROGRESS');
+    }
+
+    if (payment.status !== PAYMENT_TRANSACTION_STATUS.PENDING) {
+        throw new AppError('Payment cannot be expired in current status', 400, 'PAYMENT_EXPIRE_NOT_ALLOWED');
+    }
+
+    if (!payment.expires_at) {
+        throw new AppError('Payment expiration time is missing', 400, 'PAYMENT_EXPIRES_AT_MISSING');
+    }
+
+    if (payment.expires_at.getTime() > now.getTime()) {
+        throw new AppError('Payment has not expired yet', 400, 'PAYMENT_NOT_EXPIRED');
+    }
+};
+
+const expirePayosPayment = async (user, paymentId) => {
+    const session = await mongoose.startSession();
+    const now = new Date();
+
+    try {
+        let response;
+
+        await session.withTransaction(async () => {
+            const payment = await PaymentTransaction.findById(paymentId).session(session);
+
+            if (!payment) {
+                throw new AppError('Payment transaction not found', 404, 'PAYMENT_TRANSACTION_NOT_FOUND');
+            }
+
+            const booking = await Booking.findById(payment.booking_id).session(session);
+
+            if (!booking) {
+                throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+            }
+
+            await assertStaffCanAccessBooking(user, booking);
+            assertPaymentCanBeExpired(payment, now);
+
+            if (payment.status !== PAYMENT_TRANSACTION_STATUS.EXPIRED) {
+                payment.status = PAYMENT_TRANSACTION_STATUS.EXPIRED;
+                payment.expired_at = now;
+                await payment.save({ session });
+            }
 
             if (
                 booking.payment_method === BOOKING_PAYMENT_METHOD.PAYOS
@@ -474,15 +636,9 @@ const handlePayosWebhook = async (payload = {}) => {
                 return;
             }
 
-            const booking = await Booking.findById(payment.booking_id).session(session);
-
-            if (!booking) {
-                throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
-            }
-
-            assertPayosWebhookAmountMatches(payment, booking, webhookData);
-
             if (payment.status === PAYMENT_TRANSACTION_STATUS.PAID) {
+                const booking = await Booking.findById(payment.booking_id).session(session);
+
                 response = buildWebhookResponse({
                     payment,
                     booking,
@@ -492,8 +648,29 @@ const handlePayosWebhook = async (payload = {}) => {
                 return;
             }
 
+            const booking = await Booking.findById(payment.booking_id).session(session);
+
+            if (!booking) {
+                response = buildWebhookResponse({
+                    payment,
+                    ignored: true,
+                    reason: 'BOOKING_NOT_FOUND',
+                });
+
+                return;
+            }
+
+            assertPayosWebhookAmountMatches(payment, booking, webhookData);
+
             if (booking.status !== BOOKING_STATUS.COMPLETED) {
-                throw new AppError('Booking cannot be processed in current status', 400, 'BOOKING_PAYOS_WEBHOOK_NOT_ALLOWED');
+                response = buildWebhookResponse({
+                    payment,
+                    booking,
+                    ignored: true,
+                    reason: 'BOOKING_NOT_PROCESSABLE',
+                });
+
+                return;
             }
 
             const paidAt = parsePayosTransactionTime(webhookData.transactionDateTime);
@@ -533,5 +710,6 @@ module.exports = {
     createPayosPayment,
     getPaymentById,
     cancelPayosPayment,
+    expirePayosPayment,
     handlePayosWebhook,
 };

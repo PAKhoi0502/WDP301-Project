@@ -23,7 +23,7 @@ const paymentTransactionSchema = {
         amount: { type: 'number' },
         currency: { type: 'string', enum: ['VND'] },
         description: { type: 'string' },
-        status: { type: 'string', enum: ['INITIATED', 'PENDING', 'PAID', 'CANCELED', 'EXPIRED', 'FAILED'] },
+        status: { type: 'string', enum: ['INITIATED', 'PENDING', 'CANCELING', 'PAID', 'CANCELED', 'EXPIRED', 'FAILED'] },
         paid_at: { type: 'string', format: 'date-time', nullable: true },
         expires_at: { type: 'string', format: 'date-time', nullable: true },
         canceled_at: { type: 'string', format: 'date-time', nullable: true },
@@ -152,7 +152,6 @@ const paths = {
                     },
                 },
                 400: { description: 'Invalid webhook or amount mismatch' },
-                404: { description: 'Payment transaction not found' },
             },
         },
     },
@@ -233,6 +232,27 @@ const paths = {
             responses: {
                 200: {
                     description: 'PayOS payment canceled',
+                    content: {
+                        'application/json': {
+                            schema: paymentDetailResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/payments/{paymentId}/expire': {
+        patch: {
+            tags: ['Admin Payments'],
+            summary: 'Expire overdue PayOS payment',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'paymentId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'PayOS payment expired',
                     content: {
                         'application/json': {
                             schema: paymentDetailResponse,
