@@ -799,6 +799,12 @@ const packageDefinitions = [
     },
 ];
 
+const hasVehicleCareStaffStep = (definition) => {
+    return (definition.steps_template || []).some((step) => {
+        return step.display_staff_type === STAFF_TYPES.VEHICLE_CARE_STAFF;
+    });
+};
+
 const toSeedPayload = (definition, idByKey) => {
     const includedServiceIds = (definition.included_service_keys || []).map((key) => {
         const serviceId = idByKey.get(key);
@@ -809,6 +815,10 @@ const toSeedPayload = (definition, idByKey) => {
 
         return serviceId;
     });
+    const requiresCareStaff = definition.requires_care_staff !== undefined
+        ? definition.requires_care_staff
+        : hasVehicleCareStaffStep(definition);
+    const requiresWashBay = Boolean(definition.requires_wash_bay);
 
     return {
         name: definition.name,
@@ -818,8 +828,25 @@ const toSeedPayload = (definition, idByKey) => {
         base_price: definition.base_price,
         duration_minutes: definition.duration_minutes,
         wash_bay_duration_minutes: definition.wash_bay_duration_minutes,
+        wash_bay_start_offset_minutes: requiresWashBay
+            ? definition.wash_bay_start_offset_minutes || 0
+            : 0,
         points_earned: definition.points_earned,
-        requires_wash_bay: definition.requires_wash_bay,
+        requires_wash_bay: requiresWashBay,
+        requires_care_staff: requiresCareStaff,
+        care_staff_type: requiresCareStaff
+            ? definition.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF
+            : null,
+        care_staff_required_count: requiresCareStaff
+            ? definition.care_staff_required_count || 1
+            : 0,
+        care_staff_duration_minutes: requiresCareStaff
+            ? definition.care_staff_duration_minutes || definition.duration_minutes
+            : 0,
+        care_staff_start_offset_minutes: requiresCareStaff
+            ? definition.care_staff_start_offset_minutes || 0
+            : 0,
+        allow_duplicate_in_booking: definition.allow_duplicate_in_booking || false,
         included_service_ids: includedServiceIds,
         steps_template: definition.steps_template,
         is_active: definition.is_active,

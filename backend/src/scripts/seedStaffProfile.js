@@ -12,6 +12,62 @@ const seedStaffProfiles = [
         garage_code: 'GAR001',
         is_active: true,
     },
+    {
+        phone: '0900000003',
+        staff_code: 'CARE001',
+        staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
+        garage_code: 'GAR001',
+        is_active: true,
+    },
+    {
+        phone: '0900000004',
+        staff_code: 'CARE002',
+        staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
+        garage_code: 'GAR001',
+        is_active: true,
+    },
+    {
+        phone: '0900000005',
+        staff_code: 'CARE003',
+        staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
+        garage_code: 'GAR002',
+        is_active: true,
+    },
+    {
+        phone: '0900000006',
+        staff_code: 'CARE004',
+        staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
+        garage_code: 'GAR002',
+        is_active: true,
+    },
+    {
+        phone: '0900000007',
+        staff_code: 'CARE005',
+        staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
+        garage_code: 'GAR003',
+        is_active: true,
+    },
+    {
+        phone: '0900000008',
+        staff_code: 'CARE006',
+        staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
+        garage_code: 'GAR003',
+        is_active: true,
+    },
+    {
+        phone: '0900000009',
+        staff_code: 'CARE007',
+        staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
+        garage_code: 'GAR004',
+        is_active: true,
+    },
+    {
+        phone: '0900000010',
+        staff_code: 'CARE008',
+        staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
+        garage_code: 'GAR004',
+        is_active: true,
+    },
 ];
 
 const seedStaffProfile = async () => {
