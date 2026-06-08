@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const ServicePackage = require('./servicePackage.model');
 
 describe('service package module', () => {
@@ -48,6 +49,41 @@ describe('service package module', () => {
         await expect(servicePackage.validate()).rejects.toMatchObject({
             errors: {
                 care_staff_duration_minutes: expect.anything(),
+            },
+        });
+    });
+
+    it('rejects combo package with operational steps template', async () => {
+        const servicePackage = createServicePackage({
+            service_type: 'COMBO',
+            included_service_ids: [new mongoose.Types.ObjectId()],
+            steps_template: [
+                {
+                    step_code: 'COMBO_PARENT_STEP',
+                    step_name: 'Combo parent process',
+                    order: 1,
+                    step_type: 'MANUAL_SERVICE_STEP',
+                    is_required: true,
+                },
+            ],
+        });
+
+        await expect(servicePackage.validate()).rejects.toMatchObject({
+            errors: {
+                steps_template: expect.anything(),
+            },
+        });
+    });
+
+    it('rejects combo package without included services', async () => {
+        const servicePackage = createServicePackage({
+            service_type: 'COMBO',
+            included_service_ids: [],
+        });
+
+        await expect(servicePackage.validate()).rejects.toMatchObject({
+            errors: {
+                included_service_ids: expect.anything(),
             },
         });
     });

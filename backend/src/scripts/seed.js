@@ -9,10 +9,25 @@ const seedVehicle = require('./seedVehicle');
 const seedServicePackage = require('./seedServicePackage');
 const seedTierRule = require('./seedTierRule');
 const seedLoyaltyRedeemRule = require('./seedLoyaltyRedeemRule');
+const { resetDatabase } = require('./resetDatabase');
+
+const shouldResetDatabase = process.argv.includes('--reset');
+const isDryRun = process.argv.includes('--dry-run');
 
 const run = async () => {
+    let exitCode = 0;
+
     try {
         await connectDB();
+
+        if (shouldResetDatabase) {
+            await resetDatabase();
+
+            if (isDryRun) {
+                console.log('Seed skipped after dry run reset');
+                return;
+            }
+        }
 
         await seedUser();
         await seedGarage();
@@ -24,12 +39,12 @@ const run = async () => {
         await seedLoyaltyRedeemRule();
 
         console.log('All seed completed');
-        process.exit(0);
     } catch (error) {
         console.error('Seed failed:', error);
-        process.exit(1);
+        exitCode = 1;
     } finally {
         await disconnectDB();
+        process.exitCode = exitCode;
     }
 };
 

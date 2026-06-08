@@ -164,7 +164,7 @@ describe('booking care staff capacity', () => {
     const allServices = [washService, careService, ironDustService];
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        jest.resetAllMocks();
         Garage.findById.mockResolvedValue(garage);
         ServicePackage.findById.mockResolvedValue(careStaffServicePackage);
         ServicePackage.find.mockImplementation((filter) => {
@@ -179,6 +179,7 @@ describe('booking care staff capacity', () => {
         Booking.aggregate.mockResolvedValue([{ total: 1 }]);
         bookingServiceStepService.markStepDone = jest.fn();
         bookingServiceStepService.areAllRequiredStepsDoneForBookingItem = jest.fn();
+        bookingServiceStepService.markResourceReleasedForBookingItem = jest.fn();
         Vehicle.findOne.mockResolvedValue({
             _id: vehicleId,
             customer_id: customerId,
@@ -215,6 +216,8 @@ describe('booking care staff capacity', () => {
         expect(result.slots).toHaveLength(1);
         expect(result.slots[0].is_available).toBe(true);
         expect(result.slots[0].available_care_staff_capacity).toBe(1);
+        expect(washBayService.assertGarageSupportsVehicleType).not.toHaveBeenCalled();
+        expect(WashBay.countDocuments).not.toHaveBeenCalled();
     });
 
     it('rejects customer booking when care staff capacity is full', async () => {
@@ -228,6 +231,76 @@ describe('booking care staff capacity', () => {
         })).rejects.toMatchObject({
             statusCode: 409,
             errorCode: 'CARE_STAFF_CAPACITY_FULL',
+        });
+
+        expect(Booking.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects combo booking when all matching wash bays are under maintenance', async () => {
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            closing_time: '18:00',
+        });
+        ServicePackage.findById.mockResolvedValue(comboServicePackage);
+        WashBay.countDocuments
+            .mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(0);
+
+        await expect(bookingService.createCustomerBooking(customerId, {
+            garage_id: garageId,
+            vehicle_id: vehicleId,
+            service_package_id: servicePackageId,
+            start_time: '2999-01-01T13:00:00+07:00',
+        })).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'WASH_BAY_TEMPORARILY_UNAVAILABLE',
+        });
+
+        expect(Booking.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects combo booking when garage has no matching wash bay type', async () => {
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            closing_time: '18:00',
+        });
+        ServicePackage.findById.mockResolvedValue(comboServicePackage);
+        WashBay.countDocuments.mockResolvedValueOnce(0);
+
+        await expect(bookingService.createCustomerBooking(customerId, {
+            garage_id: garageId,
+            vehicle_id: vehicleId,
+            service_package_id: servicePackageId,
+            start_time: '2999-01-01T13:00:00+07:00',
+        })).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'GARAGE_VEHICLE_TYPE_NOT_SUPPORTED',
+        });
+
+        expect(Booking.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects combo booking when matching wash bay slot capacity is full', async () => {
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            closing_time: '18:00',
+        });
+        ServicePackage.findById.mockResolvedValue(comboServicePackage);
+        WashBay.countDocuments
+            .mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(1)
+            .mockResolvedValueOnce(1);
+        Booking.aggregate.mockResolvedValueOnce([{ total: 1 }]);
+
+        await expect(bookingService.createCustomerBooking(customerId, {
+            garage_id: garageId,
+            vehicle_id: vehicleId,
+            service_package_id: servicePackageId,
+            start_time: '2999-01-01T13:00:00+07:00',
+        })).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'WASH_BAY_CAPACITY_FULL',
         });
 
         expect(Booking.create).not.toHaveBeenCalled();
@@ -290,6 +363,33 @@ describe('booking care staff capacity', () => {
         });
     });
 
+    it('rejects duplicate booking item even when service allows duplicate flag', async () => {
+        ServicePackage.findById.mockResolvedValue(comboServicePackage);
+        ServicePackage.find.mockImplementation((filter) => {
+            const ids = (filter._id?.$in || []).map((id) => id.toString());
+            const services = [
+                {
+                    ...washService,
+                    allow_duplicate_in_booking: true,
+                },
+                careService,
+                ironDustService,
+            ];
+
+            return Promise.resolve(services.filter((item) => ids.includes(item._id.toString())));
+        });
+
+        await expect(bookingService.getAvailableSlots({
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            add_on_service_ids: [washServiceId],
+            date: '2999-01-01',
+        })).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'DUPLICATE_SERVICE_ITEM',
+        });
+    });
+
     it('marks wash booking item done and releases wash bay when its required steps are done', async () => {
         const washBayId = '507f1f77bcf86cd799439018';
         const booking = {
@@ -331,6 +431,10 @@ describe('booking care staff capacity', () => {
 
         expect(booking.booking_items[0].status).toBe('DONE');
         expect(booking.markModified).toHaveBeenCalledWith('booking_items');
+        expect(bookingServiceStepService.markResourceReleasedForBookingItem).toHaveBeenCalledWith(
+            booking._id,
+            'ITEM_1_507F1F77BCF86CD799439015'
+        );
         expect(WashBay.findOneAndUpdate).toHaveBeenCalledWith(
             {
                 _id: washBayId,

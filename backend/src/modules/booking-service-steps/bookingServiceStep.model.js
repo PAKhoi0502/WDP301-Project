@@ -5,6 +5,8 @@ const { SERVICE_STEP_TYPE_VALUES } = require('../../shared/constants/servicePack
 const {
     BOOKING_SERVICE_STEP_STATUS,
     BOOKING_SERVICE_STEP_STATUS_VALUES,
+    BOOKING_SERVICE_STEP_WORKFLOW_TYPES,
+    BOOKING_SERVICE_STEP_WORKFLOW_TYPE_VALUES,
 } = require('../../shared/constants/bookingServiceStep.constant');
 
 const bookingServiceStepSchema = new mongoose.Schema(
@@ -59,9 +61,38 @@ const bookingServiceStepSchema = new mongoose.Schema(
             required: [true, 'Step type is required'],
         },
 
+        workflow_type: {
+            type: String,
+            enum: BOOKING_SERVICE_STEP_WORKFLOW_TYPE_VALUES,
+            default: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.SERVICE,
+        },
+
+        group_name: {
+            type: String,
+            trim: true,
+            maxlength: [150, 'Group name must not exceed 150 characters'],
+            default: null,
+        },
+
+        sequence: {
+            type: Number,
+            min: [1, 'Step sequence must be at least 1'],
+            default: null,
+        },
+
         is_required: {
             type: Boolean,
             default: true,
+        },
+
+        requires_wash_bay: {
+            type: Boolean,
+            default: false,
+        },
+
+        requires_care_staff: {
+            type: Boolean,
+            default: false,
         },
 
         display_staff_type: {
@@ -105,6 +136,11 @@ const bookingServiceStepSchema = new mongoose.Schema(
         },
 
         completed_at: {
+            type: Date,
+            default: null,
+        },
+
+        resource_released_at: {
             type: Date,
             default: null,
         },

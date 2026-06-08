@@ -183,10 +183,7 @@ const getSupportedVehicleTypesByGarage = async (garageId) => {
         garage_id: garageId,
         is_active: true,
         status: {
-            $nin: [
-                WASH_BAY_STATUS.INACTIVE,
-                WASH_BAY_STATUS.MAINTENANCE,
-            ],
+            $ne: WASH_BAY_STATUS.INACTIVE,
         },
     });
 };

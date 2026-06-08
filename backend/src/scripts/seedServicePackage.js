@@ -848,7 +848,9 @@ const toSeedPayload = (definition, idByKey) => {
             : 0,
         allow_duplicate_in_booking: definition.allow_duplicate_in_booking || false,
         included_service_ids: includedServiceIds,
-        steps_template: definition.steps_template,
+        steps_template: definition.service_type === SERVICE_PACKAGE_TYPES.COMBO
+            ? []
+            : definition.steps_template,
         is_active: definition.is_active,
     };
 };

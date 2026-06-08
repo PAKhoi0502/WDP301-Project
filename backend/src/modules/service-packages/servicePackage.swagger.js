@@ -122,6 +122,7 @@ const schemas = {
             },
             allow_duplicate_in_booking: {
                 type: 'boolean',
+                description: 'Deprecated for booking creation. Duplicate service items are rejected by booking flow.',
                 example: false,
             },
             included_service_ids: {
@@ -133,6 +134,7 @@ const schemas = {
             },
             steps_template: {
                 type: 'array',
+                description: 'Operational steps for non-combo services. Combo packages use included_service_ids instead.',
                 items: stepTemplateSchema,
             },
             is_active: {
@@ -211,6 +213,7 @@ const schemas = {
             },
             allow_duplicate_in_booking: {
                 type: 'boolean',
+                description: 'Deprecated for booking creation. Duplicate service items are rejected by booking flow.',
                 example: false,
             },
             included_service_ids: {
@@ -221,6 +224,7 @@ const schemas = {
             },
             steps_template: {
                 type: 'array',
+                description: 'Operational steps for non-combo services. Combo packages use included_service_ids instead.',
                 items: stepTemplateSchema,
             },
             is_active: {
@@ -235,6 +239,7 @@ const schemas = {
         properties: {
             steps_template: {
                 type: 'array',
+                description: 'Operational steps for non-combo services. Combo packages use included_service_ids instead.',
                 items: stepTemplateSchema,
             },
         },
@@ -324,6 +329,7 @@ const schemas = {
             },
             allow_duplicate_in_booking: {
                 type: 'boolean',
+                description: 'Deprecated for booking creation. Duplicate service items are rejected by booking flow.',
                 example: false,
             },
             included_service_ids: {
@@ -332,6 +338,7 @@ const schemas = {
             },
             steps_template: {
                 type: 'array',
+                description: 'Operational steps for non-combo services. Combo packages use included_service_ids instead.',
                 items: stepTemplateSchema,
             },
             is_active: {

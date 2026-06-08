@@ -6,7 +6,6 @@ const User = require('../users/user.model');
 const Vehicle = require('../vehicles/vehicle.model');
 const Garage = require('../garages/garage.model');
 const WashBay = require('../wash-bays/washBay.model');
-const washBayService = require('../wash-bays/washBay.service');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
@@ -337,7 +336,7 @@ const assertNoDuplicateBookingItems = (serviceItems = []) => {
         const servicePackageId = toObjectIdString(item.servicePackage._id);
         const previous = seen.get(servicePackageId);
 
-        if (previous && !item.servicePackage.allow_duplicate_in_booking) {
+        if (previous) {
             throw new AppError('Duplicate service item is not allowed', 409, 'DUPLICATE_SERVICE_ITEM');
         }
 
@@ -600,7 +599,23 @@ const buildCustomerSearchFilter = (customerId, { status, garage_id, vehicle_id, 
     });
 };
 
-const countActiveWashBays = async (garageId, vehicleType) => {
+const countConfiguredWashBays = async (garageId, vehicleType) => {
+    return WashBay.countDocuments({
+        garage_id: garageId,
+        vehicle_type: vehicleType,
+    });
+};
+
+const countActiveWashBayInventory = async (garageId, vehicleType) => {
+    return WashBay.countDocuments({
+        garage_id: garageId,
+        vehicle_type: vehicleType,
+        is_active: true,
+        status: { $ne: WASH_BAY_STATUS.INACTIVE },
+    });
+};
+
+const countBookableWashBays = async (garageId, vehicleType) => {
     return WashBay.countDocuments({
         garage_id: garageId,
         vehicle_type: vehicleType,
@@ -700,20 +715,46 @@ const countOverlappedCareStaffBookings = async (garageId, careStaffType, careSta
     return result[0]?.total || 0;
 };
 
-const assertWashBayCapacityAvailable = async ({ garageId, vehicleType, requiresWashBay, washBayStartTime, washBayEndTime }) => {
-    if (!requiresWashBay) {
-        return;
+const getBookableWashBayCount = async (garageId, vehicleType) => {
+    const configuredWashBayCount = await countConfiguredWashBays(garageId, vehicleType);
+
+    if (configuredWashBayCount <= 0) {
+        throw new AppError(
+            'Garage does not support this vehicle type',
+            400,
+            'GARAGE_VEHICLE_TYPE_NOT_SUPPORTED'
+        );
     }
 
-    const activeWashBayCount = await countActiveWashBays(garageId, vehicleType);
+    const activeWashBayInventoryCount = await countActiveWashBayInventory(garageId, vehicleType);
 
-    if (activeWashBayCount <= 0) {
+    if (activeWashBayInventoryCount <= 0) {
         throw new AppError(
             'No active wash bay is available for this vehicle type',
             400,
             'NO_ACTIVE_WASH_BAY_FOR_VEHICLE_TYPE'
         );
     }
+
+    const bookableWashBayCount = await countBookableWashBays(garageId, vehicleType);
+
+    if (bookableWashBayCount <= 0) {
+        throw new AppError(
+            'Wash bay is temporarily unavailable for this vehicle type',
+            409,
+            'WASH_BAY_TEMPORARILY_UNAVAILABLE'
+        );
+    }
+
+    return bookableWashBayCount;
+};
+
+const assertWashBayCapacityAvailable = async ({ garageId, vehicleType, requiresWashBay, washBayStartTime, washBayEndTime }) => {
+    if (!requiresWashBay) {
+        return;
+    }
+
+    const bookableWashBayCount = await getBookableWashBayCount(garageId, vehicleType);
 
     const overlappedBookingCount = await countOverlappedWashBayBookings(
         garageId,
@@ -722,8 +763,8 @@ const assertWashBayCapacityAvailable = async ({ garageId, vehicleType, requiresW
         washBayEndTime
     );
 
-    if (overlappedBookingCount >= activeWashBayCount) {
-        throw new AppError('Garage capacity is full for this time', 409, 'GARAGE_CAPACITY_FULL');
+    if (overlappedBookingCount >= bookableWashBayCount) {
+        throw new AppError('Wash bay capacity is full for this time', 409, 'WASH_BAY_CAPACITY_FULL');
     }
 };
 
@@ -1008,6 +1049,10 @@ const markBookingItemDoneIfReady = async (booking, bookingItemKey) => {
     bookingItem.status = 'DONE';
     booking.markModified('booking_items');
     await booking.save();
+    await bookingServiceStepService.markResourceReleasedForBookingItem(
+        booking._id,
+        normalizedBookingItemKey
+    );
 
     const hasPendingWashBayItem = (booking.booking_items || []).some((item) => {
         return item.requires_wash_bay && BOOKING_ITEM_HOLD_STATUSES.includes(item.status);
@@ -1026,10 +1071,6 @@ const getAvailableSlots = async ({ garage_id, service_package_id, add_on_service
         addOnServiceIds: add_on_service_ids,
         vehicleType: servicePackage.vehicle_type,
     });
-    await washBayService.assertGarageSupportsVehicleType(
-        garage._id,
-        servicePackage.vehicle_type
-    );
     const openingDate = createDateFromLocalTime(date, garage.opening_time);
     const closingDate = createDateFromLocalTime(date, garage.closing_time);
 
@@ -1042,7 +1083,7 @@ const getAvailableSlots = async ({ garage_id, service_package_id, add_on_service
         .filter((item) => item.servicePackage.requires_care_staff)
         .map((item) => item.servicePackage.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF))];
     const activeWashBayCount = hasWashBayItem
-        ? await countActiveWashBays(garage._id, servicePackage.vehicle_type)
+        ? await getBookableWashBayCount(garage._id, servicePackage.vehicle_type)
         : null;
     const activeCareStaffByType = {};
 
@@ -1243,11 +1284,6 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         addOnServices,
     });
 
-    await washBayService.assertGarageSupportsVehicleType(
-        garage._id,
-        servicePackage.vehicle_type
-    );
-
     const promotionResult = await promotionService.validatePromotionForBooking({
         promotion_code: createPayload.promotion_code,
         customer_id: customerId,
@@ -1326,11 +1362,6 @@ const createWalkInBooking = async (user, payload = {}) => {
         serviceItems,
         addOnServices,
     });
-
-    await washBayService.assertGarageSupportsVehicleType(
-        garage._id,
-        servicePackage.vehicle_type
-    );
 
     const promotionResult = await promotionService.validatePromotionForBooking({
         promotion_code: createPayload.promotion_code,

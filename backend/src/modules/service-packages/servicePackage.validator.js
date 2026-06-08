@@ -113,6 +113,14 @@ const servicePackageBusinessRule = (data) => {
         return false;
     }
 
+    if (data.service_type === SERVICE_PACKAGE_TYPES.COMBO && (!data.included_service_ids || data.included_service_ids.length === 0)) {
+        return false;
+    }
+
+    if (data.service_type === SERVICE_PACKAGE_TYPES.COMBO && data.steps_template && data.steps_template.length > 0) {
+        return false;
+    }
+
     if (data.steps_template) {
         const orders = data.steps_template.map((step) => step.order);
         const codes = data.steps_template.map((step) => step.step_code.trim().toUpperCase());
@@ -126,6 +134,14 @@ const servicePackageBusinessRule = (data) => {
 };
 
 const updateServicePackageBusinessRule = (data) => {
+    if (data.service_type === SERVICE_PACKAGE_TYPES.COMBO && data.included_service_ids && data.included_service_ids.length === 0) {
+        return false;
+    }
+
+    if (data.service_type === SERVICE_PACKAGE_TYPES.COMBO && data.steps_template && data.steps_template.length > 0) {
+        return false;
+    }
+
     if (data.steps_template) {
         const orders = data.steps_template.map((step) => step.order);
         const codes = data.steps_template.map((step) => step.step_code.trim().toUpperCase());

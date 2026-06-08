@@ -4,8 +4,14 @@ const ServicePackage = require('../service-packages/servicePackage.model');
 const { AppError } = require('../../shared/utils/appError');
 const {
     BOOKING_SERVICE_STEP_STATUS,
+    BOOKING_SERVICE_STEP_WORKFLOW_TYPES,
 } = require('../../shared/constants/bookingServiceStep.constant');
 const { SERVICE_STEP_TYPES } = require('../../shared/constants/servicePackage.constant');
+
+const PRE_SERVICE_GROUP_NAME = 'Pre-service';
+const ADD_ON_GROUP_NAME = 'Add-on Services';
+const POST_SERVICE_GROUP_NAME = 'Post-service';
+const PRIMARY_SERVICE_GROUP_NAME = 'Service';
 
 const normalizeText = (value) => {
     if (value === null || value === undefined) {
@@ -57,10 +63,23 @@ const buildFallbackTemplate = (bookingItem) => {
     }];
 };
 
-const buildStepDocumentsForItem = (booking, bookingItem, servicePackage) => {
+const getServiceStepGroupName = (bookingItem, fallbackServicePackage) => {
+    if (bookingItem.source === 'COMBO_INCLUDED') {
+        return fallbackServicePackage?.name || PRIMARY_SERVICE_GROUP_NAME;
+    }
+
+    if (bookingItem.source === 'ADD_ON') {
+        return ADD_ON_GROUP_NAME;
+    }
+
+    return PRIMARY_SERVICE_GROUP_NAME;
+};
+
+const buildStepDocumentsForItem = (booking, bookingItem, servicePackage, fallbackServicePackage) => {
     const templates = [...(servicePackage?.steps_template || [])].sort((a, b) => a.order - b.order);
     const effectiveTemplates = templates.length > 0 ? templates : buildFallbackTemplate(bookingItem);
     const bookingItemKey = normalizeStepCode(bookingItem.item_key);
+    const groupName = getServiceStepGroupName(bookingItem, fallbackServicePackage);
 
     return effectiveTemplates.map((step) => ({
         booking_id: booking._id,
@@ -70,7 +89,12 @@ const buildStepDocumentsForItem = (booking, bookingItem, servicePackage) => {
         step_name: step.step_name,
         order: (bookingItem.sequence * 1000) + step.order,
         step_type: step.step_type,
+        workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.SERVICE,
+        group_name: groupName,
+        sequence: (bookingItem.sequence * 1000) + step.order,
         is_required: step.is_required,
+        requires_wash_bay: bookingItem.requires_wash_bay,
+        requires_care_staff: bookingItem.requires_care_staff,
         display_staff_type: step.display_staff_type || bookingItem.care_staff_type || null,
         assigned_staff_id: null,
         confirmed_by_staff_id: null,
@@ -78,8 +102,83 @@ const buildStepDocumentsForItem = (booking, bookingItem, servicePackage) => {
         instructions: step.instructions || [],
         started_at: null,
         completed_at: null,
+        resource_released_at: null,
         note: null,
     }));
+};
+
+const buildPreServiceDocument = (booking, fallbackServicePackage) => ({
+    booking_id: booking._id,
+    service_package_id: fallbackServicePackage?._id || booking.service_package_id,
+    booking_item_key: null,
+    step_code: 'PRE_SERVICE_CHECK_IN',
+    step_name: 'Pre-service inspection',
+    order: 1,
+    step_type: SERVICE_STEP_TYPES.MANUAL_SERVICE_STEP,
+    workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.PRE_SERVICE,
+    group_name: PRE_SERVICE_GROUP_NAME,
+    sequence: 1,
+    is_required: true,
+    requires_wash_bay: false,
+    requires_care_staff: false,
+    display_staff_type: null,
+    assigned_staff_id: null,
+    confirmed_by_staff_id: null,
+    status: BOOKING_SERVICE_STEP_STATUS.PENDING,
+    instructions: [
+        'Verify booking and vehicle information',
+        'Inspect and record vehicle condition before service',
+        'Protect sensitive equipment if needed',
+        'Protect electric vehicle charging areas if applicable',
+    ],
+    started_at: null,
+    completed_at: null,
+    resource_released_at: null,
+    note: null,
+});
+
+const buildPostServiceDocument = (booking, fallbackServicePackage, order) => ({
+    booking_id: booking._id,
+    service_package_id: fallbackServicePackage?._id || booking.service_package_id,
+    booking_item_key: null,
+    step_code: 'POST_SERVICE_HANDOVER',
+    step_name: 'Final inspection and handover',
+    order,
+    step_type: SERVICE_STEP_TYPES.MANUAL_SERVICE_STEP,
+    workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.POST_SERVICE,
+    group_name: POST_SERVICE_GROUP_NAME,
+    sequence: order,
+    is_required: true,
+    requires_wash_bay: false,
+    requires_care_staff: false,
+    display_staff_type: null,
+    assigned_staff_id: null,
+    confirmed_by_staff_id: null,
+    status: BOOKING_SERVICE_STEP_STATUS.PENDING,
+    instructions: [
+        'Perform final overall inspection',
+        'Take after-service photos if needed',
+        'Record post-service condition',
+        'Handover vehicle to customer',
+    ],
+    started_at: null,
+    completed_at: null,
+    resource_released_at: null,
+    note: null,
+});
+
+const wrapWorkflowDocuments = (booking, fallbackServicePackage, serviceDocuments = [], bookingItems = []) => {
+    const maxServiceOrder = serviceDocuments.reduce(
+        (maxOrder, step) => Math.max(maxOrder, step.order || 0),
+        (bookingItems.length || 1) * 1000
+    );
+    const postServiceOrder = maxServiceOrder + 1000;
+
+    return [
+        buildPreServiceDocument(booking, fallbackServicePackage),
+        ...serviceDocuments,
+        buildPostServiceDocument(booking, fallbackServicePackage, postServiceOrder),
+    ];
 };
 
 const createStepsFromTemplate = async (booking, servicePackage) => {
@@ -91,10 +190,6 @@ const createStepsFromTemplate = async (booking, servicePackage) => {
 
     const templates = [...(servicePackage.steps_template || [])].sort((a, b) => a.order - b.order);
 
-    if (templates.length === 0) {
-        return [];
-    }
-
     const documents = templates.map((step) => ({
         booking_id: booking._id,
         service_package_id: servicePackage._id,
@@ -102,7 +197,12 @@ const createStepsFromTemplate = async (booking, servicePackage) => {
         step_name: step.step_name,
         order: step.order,
         step_type: step.step_type,
+        workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.SERVICE,
+        group_name: servicePackage?.name || PRIMARY_SERVICE_GROUP_NAME,
+        sequence: step.order,
         is_required: step.is_required,
+        requires_wash_bay: false,
+        requires_care_staff: false,
         display_staff_type: step.display_staff_type || null,
         assigned_staff_id: null,
         confirmed_by_staff_id: null,
@@ -110,10 +210,11 @@ const createStepsFromTemplate = async (booking, servicePackage) => {
         instructions: step.instructions || [],
         started_at: null,
         completed_at: null,
+        resource_released_at: null,
         note: null,
     }));
 
-    await BookingServiceStep.insertMany(documents, { ordered: true });
+    await BookingServiceStep.insertMany(wrapWorkflowDocuments(booking, servicePackage, documents), { ordered: true });
 
     return getStepsByBookingId(booking._id);
 };
@@ -135,11 +236,13 @@ const createStepsForBooking = async (booking, fallbackServicePackage) => {
     const servicePackages = await ServicePackage.find({ _id: { $in: servicePackageIds } });
     const servicePackageMap = new Map(servicePackages.map((item) => [item._id.toString(), item]));
 
-    const documents = bookingItems.flatMap((item) => buildStepDocumentsForItem(
+    const serviceDocuments = bookingItems.flatMap((item) => buildStepDocumentsForItem(
         booking,
         item,
-        servicePackageMap.get(item.service_package_id.toString())
+        servicePackageMap.get(item.service_package_id.toString()),
+        fallbackServicePackage
     ));
+    const documents = wrapWorkflowDocuments(booking, fallbackServicePackage, serviceDocuments, bookingItems);
 
     if (documents.length === 0) {
         return [];
@@ -219,6 +322,25 @@ const areAllRequiredStepsDoneForBookingItem = async (bookingId, bookingItemKey) 
     return !pendingRequiredStep;
 };
 
+const markResourceReleasedForBookingItem = async (bookingId, bookingItemKey, releasedAt = new Date()) => {
+    if (!bookingItemKey) {
+        return;
+    }
+
+    await BookingServiceStep.updateMany(
+        {
+            booking_id: bookingId,
+            booking_item_key: bookingItemKey,
+            resource_released_at: null,
+        },
+        {
+            $set: {
+                resource_released_at: releasedAt,
+            },
+        }
+    );
+};
+
 module.exports = {
     getStepsByBookingId,
     countStepsByBookingId,
@@ -227,4 +349,5 @@ module.exports = {
     markStepDone,
     assertAllRequiredStepsDone,
     areAllRequiredStepsDoneForBookingItem,
+    markResourceReleasedForBookingItem,
 };

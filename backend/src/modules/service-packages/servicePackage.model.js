@@ -5,6 +5,7 @@ const { STAFF_TYPES, STAFF_TYPE_VALUES } = require('../../shared/constants/staff
 const {
     SERVICE_PACKAGE_TYPE_VALUES,
     SERVICE_STEP_TYPE_VALUES,
+    SERVICE_PACKAGE_TYPES,
 } = require('../../shared/constants/servicePackage.constant');
 
 const stepTemplateSchema = new mongoose.Schema(
@@ -205,6 +206,18 @@ servicePackageSchema.index({ included_service_ids: 1 });
 servicePackageSchema.index({ created_at: -1 });
 
 servicePackageSchema.pre('validate', function (next) {
+    if (this.service_type === SERVICE_PACKAGE_TYPES.COMBO && this.steps_template?.length > 0) {
+        this.invalidate('steps_template', 'Combo service package must not define operational steps');
+    }
+
+    if (this.service_type === SERVICE_PACKAGE_TYPES.COMBO && !this.included_service_ids?.length) {
+        this.invalidate('included_service_ids', 'Combo service package must include at least one child service');
+    }
+
+    if (this.service_type !== SERVICE_PACKAGE_TYPES.COMBO && this.included_service_ids?.length > 0) {
+        this.invalidate('included_service_ids', 'Only combo service packages can include child services');
+    }
+
     if (!this.requires_wash_bay) {
         this.wash_bay_duration_minutes = 0;
         this.wash_bay_start_offset_minutes = 0;

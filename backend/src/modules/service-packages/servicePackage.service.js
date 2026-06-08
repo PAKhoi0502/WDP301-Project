@@ -358,12 +358,19 @@ const getServicePackageDocumentById = async (servicePackageId) => {
 
 const assertIncludedServicesValid = async (includedServiceIds = [], servicePackagePayload = {}, currentServicePackage = null) => {
     const normalizedIncludedServiceIds = normalizeObjectIdList(includedServiceIds);
+    const serviceType = servicePackagePayload.service_type || currentServicePackage?.service_type;
 
     if (!normalizedIncludedServiceIds.length) {
+        if (serviceType === SERVICE_PACKAGE_TYPES.COMBO) {
+            throw new AppError(
+                'Combo service package must include at least one service',
+                400,
+                'COMBO_INCLUDED_SERVICES_REQUIRED'
+            );
+        }
+
         return;
     }
-
-    const serviceType = servicePackagePayload.service_type || currentServicePackage?.service_type;
 
     if (serviceType !== SERVICE_PACKAGE_TYPES.COMBO) {
         throw new AppError(
@@ -418,18 +425,59 @@ const assertIncludedServicesValid = async (includedServiceIds = [], servicePacka
     }
 };
 
-const resolveVehicleTypeFilterByGarage = async (garageId, vehicleType) => {
+const assertComboStepsTemplateEmpty = (serviceType, stepsTemplate = []) => {
+    if (serviceType === SERVICE_PACKAGE_TYPES.COMBO && stepsTemplate.length > 0) {
+        throw new AppError(
+            'Combo service package must not define operational steps',
+            400,
+            'COMBO_STEPS_TEMPLATE_NOT_ALLOWED'
+        );
+    }
+};
+
+const mergeFilter = (baseFilter, extraFilter) => {
+    if (!extraFilter || Object.keys(extraFilter).length === 0) {
+        return baseFilter;
+    }
+
+    if (!baseFilter || Object.keys(baseFilter).length === 0) {
+        return extraFilter;
+    }
+
+    return {
+        $and: [
+            baseFilter,
+            extraFilter,
+        ],
+    };
+};
+
+const buildGarageWashBayServiceFilter = async (garageId, requiresWashBay) => {
     if (!garageId) {
-        return vehicleType;
+        return {};
     }
 
     const supportedVehicleTypes = await washBayService.getSupportedVehicleTypesByGarage(garageId);
 
-    if (!vehicleType) {
-        return supportedVehicleTypes;
+    if (requiresWashBay === true) {
+        return {
+            vehicle_type: { $in: supportedVehicleTypes },
+        };
     }
 
-    return supportedVehicleTypes.includes(vehicleType) ? [vehicleType] : [];
+    if (requiresWashBay === false) {
+        return {};
+    }
+
+    return {
+        $or: [
+            { requires_wash_bay: false },
+            {
+                requires_wash_bay: true,
+                vehicle_type: { $in: supportedVehicleTypes },
+            },
+        ],
+    };
 };
 
 const getPublicServicePackages = async ({
@@ -442,32 +490,21 @@ const getPublicServicePackages = async ({
     requires_wash_bay,
     requires_care_staff,
 } = {}) => {
-    const resolvedVehicleType = await resolveVehicleTypeFilterByGarage(
+    const garageWashBayFilter = await buildGarageWashBayServiceFilter(
         garage_id,
-        vehicle_type
+        requires_wash_bay
     );
 
-    const filter = buildSearchFilter({
+    const baseFilter = buildSearchFilter({
         search,
-        vehicle_type: resolvedVehicleType,
+        vehicle_type,
         service_type,
         requires_wash_bay,
         requires_care_staff,
         is_active: true,
     });
+    const filter = mergeFilter(baseFilter, garageWashBayFilter);
     const skip = (page - 1) * limit;
-
-    if (Array.isArray(resolvedVehicleType) && resolvedVehicleType.length === 0) {
-        return {
-            data: [],
-            meta: {
-                page,
-                limit,
-                total: 0,
-                total_pages: 0,
-            },
-        };
-    }
 
     const [servicePackages, total] = await Promise.all([
         ServicePackage.find(filter)
@@ -543,6 +580,7 @@ const createServicePackage = async (payload = {}) => {
         createPayload.care_staff_duration_minutes = createPayload.care_staff_duration_minutes || createPayload.duration_minutes;
     }
     assertDurationRuleValid(createPayload);
+    assertComboStepsTemplateEmpty(createPayload.service_type, createPayload.steps_template || []);
     await assertNameAvailable(createPayload.name, createPayload.vehicle_type);
     await assertIncludedServicesValid(createPayload.included_service_ids || [], createPayload);
 
@@ -580,7 +618,15 @@ const updateServicePackage = async (servicePackageId, payload = {}) => {
 
     const nextName = updatePayload.name || servicePackage.name;
     const nextVehicleType = updatePayload.vehicle_type || servicePackage.vehicle_type;
+    const nextServiceType = updatePayload.service_type || servicePackage.service_type;
+    const nextStepsTemplate = updatePayload.steps_template !== undefined
+        ? updatePayload.steps_template
+        : nextServiceType === SERVICE_PACKAGE_TYPES.COMBO ? [] : servicePackage.steps_template || [];
 
+    assertComboStepsTemplateEmpty(nextServiceType, nextStepsTemplate);
+    if (nextServiceType === SERVICE_PACKAGE_TYPES.COMBO) {
+        updatePayload.steps_template = [];
+    }
     await assertNameAvailable(nextName, nextVehicleType, servicePackageId);
 
     if (updatePayload.included_service_ids !== undefined || updatePayload.service_type !== undefined || updatePayload.vehicle_type !== undefined) {
@@ -618,8 +664,10 @@ const updateServicePackageStatus = async (servicePackageId, isActive) => {
 
 const updateStepsTemplate = async (servicePackageId, stepsTemplate = []) => {
     const servicePackage = await getServicePackageDocumentById(servicePackageId);
+    const normalizedStepsTemplate = normalizeStepTemplate(stepsTemplate);
+    assertComboStepsTemplateEmpty(servicePackage.service_type, normalizedStepsTemplate);
     const updatePayload = {
-        steps_template: normalizeStepTemplate(stepsTemplate),
+        steps_template: normalizedStepsTemplate,
     };
 
     const updatedServicePackage = await ServicePackage.findByIdAndUpdate(
@@ -637,9 +685,17 @@ const updateIncludedServices = async (servicePackageId, includedServiceIds = [])
 
     await assertIncludedServicesValid(normalizedIncludedServiceIds, {}, servicePackage);
 
+    const updatePayload = {
+        included_service_ids: normalizedIncludedServiceIds,
+    };
+
+    if (servicePackage.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
+        updatePayload.steps_template = [];
+    }
+
     const updatedServicePackage = await ServicePackage.findByIdAndUpdate(
         servicePackage._id,
-        { $set: { included_service_ids: normalizedIncludedServiceIds } },
+        { $set: updatePayload },
         { new: true, runValidators: true }
     ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active');
 

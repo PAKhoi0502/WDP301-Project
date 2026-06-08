@@ -7,6 +7,8 @@
     "start": "node src/server.js",
     "test": "jest",
     "seed": "node src/scripts/seed.js",
+    "seed:reset": "node src/scripts/seed.js --reset",
+    "db:reset": "node src/scripts/resetDatabase.js",
     "seed:user": "node src/scripts/seed.js"
   },
   "keywords": [],
