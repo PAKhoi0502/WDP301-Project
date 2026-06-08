@@ -53,6 +53,22 @@ const optionalObjectIdField = z.preprocess(
     objectIdField.optional()
 );
 
+const optionalObjectIdListField = z.preprocess((value) => {
+    if (value === undefined || value === null || value === '') {
+        return [];
+    }
+
+    if (Array.isArray(value)) {
+        return value;
+    }
+
+    if (typeof value === 'string') {
+        return value.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+
+    return value;
+}, z.array(objectIdField).default([]));
+
 const optionalTextField = (max = 100) => z.preprocess(
     emptyToUndefined,
     z.string().trim().max(max).optional()
@@ -83,6 +99,7 @@ const getAvailableSlotsSchema = z.object({
         .object({
             garage_id: objectIdField,
             service_package_id: objectIdField,
+            add_on_service_ids: optionalObjectIdListField,
             date: dateOnlyField,
         })
         .strict(),
@@ -126,6 +143,7 @@ const createCustomerBookingSchema = z.object({
             garage_id: objectIdField,
             vehicle_id: objectIdField,
             service_package_id: objectIdField,
+            add_on_service_ids: z.array(objectIdField).default([]),
             start_time: isoDateTimeField,
             promotion_code: optionalPromotionCodeField,
             note: optionalTextField(1000),
@@ -138,6 +156,7 @@ const createWalkInBookingSchema = z.object({
         .object({
             garage_id: objectIdField,
             service_package_id: objectIdField,
+            add_on_service_ids: z.array(objectIdField).default([]),
             start_time: isoDateTimeField,
             guest_name: z.string().trim().min(2).max(120),
             guest_phone: z.string().trim().min(8).max(20),

@@ -40,6 +40,7 @@ const toBookingServiceStepDto = (step) => {
         id: plainStep._id?.toString() || plainStep.id || null,
         booking_id: toId(plainStep.booking_id),
         service_package_id: toId(plainStep.service_package_id),
+        booking_item_key: plainStep.booking_item_key,
         step_code: plainStep.step_code,
         step_name: plainStep.step_name,
         order: plainStep.order,

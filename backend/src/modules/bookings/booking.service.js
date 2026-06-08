@@ -17,7 +17,9 @@ const TierRule = require('../loyalty/tierRule.model');
 const { LOYALTY_TIERS } = require('../../shared/constants/loyalty.constant');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
+const { STAFF_TYPES } = require('../../shared/constants/staff.constant');
 const { WASH_BAY_STATUS } = require('../../shared/constants/washBay.constant');
+const { SERVICE_PACKAGE_TYPES } = require('../../shared/constants/servicePackage.constant');
 const {
     BOOKING_STATUS,
     BOOKING_HOLD_SLOT_STATUSES,
@@ -28,6 +30,7 @@ const {
 } = require('../../shared/constants/booking.constant');
 
 const DEFAULT_TIMEZONE_OFFSET = process.env.APP_TIMEZONE_OFFSET || '+07:00';
+const BOOKING_ITEM_HOLD_STATUSES = ['PENDING', 'IN_PROGRESS'];
 
 const normalizeText = (value) => {
     if (value === null) {
@@ -89,6 +92,14 @@ const parseDateTime = (value, fieldName = 'datetime') => {
 
 const addMinutes = (date, minutes) => {
     return new Date(date.getTime() + minutes * 60 * 1000);
+};
+
+const toObjectIdString = (value) => {
+    if (!value) {
+        return null;
+    }
+
+    return value._id ? value._id.toString() : value.toString();
 };
 
 const startOfBookingDate = (date) => {
@@ -162,7 +173,7 @@ const populateBookingQuery = (query) => {
         .populate('vehicle_id', 'raw_license_plate normalized_license_plate vehicle_type engine_type brand model color is_active')
         .populate('garage_id', 'name garage_code address city opening_time closing_time slot_interval_minutes is_active')
         .populate('wash_bay_id', 'name bay_code vehicle_type status is_active')
-        .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active')
+        .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes is_active')
         .populate('promotion_id', 'code name discount_type discount_value max_discount_amount min_order_amount start_at end_at is_active')
         .populate('created_by_staff_id', 'full_name email phone role is_active')
         .populate('canceled_by_id', 'full_name email phone role is_active');
@@ -285,29 +296,198 @@ const assertBookingWithinWindow = (startTime, bookingRule) => {
     }
 };
 
-const calculateBookingTimes = (startTime, servicePackage) => {
-    const endTime = addMinutes(startTime, servicePackage.duration_minutes);
+const loadActiveServicePackagesByIds = async (servicePackageIds = []) => {
+    const uniqueIds = [...new Set(servicePackageIds.map((id) => toObjectIdString(id)))];
 
-    if (!servicePackage.requires_wash_bay) {
-        return {
-            end_time: endTime,
-            wash_bay_start_time: null,
-            wash_bay_end_time: null,
-        };
+    if (uniqueIds.length === 0) {
+        return [];
     }
 
-    const washBayDuration = servicePackage.wash_bay_duration_minutes || servicePackage.duration_minutes;
+    const servicePackages = await ServicePackage.find({
+        _id: { $in: uniqueIds },
+        is_active: true,
+    });
+    const servicePackageMap = new Map(servicePackages.map((item) => [item._id.toString(), item]));
+
+    return uniqueIds.map((id) => {
+        const servicePackage = servicePackageMap.get(id);
+
+        if (!servicePackage) {
+            throw new AppError('One or more selected services are invalid or inactive', 400, 'INVALID_BOOKING_SERVICE_ITEM');
+        }
+
+        return servicePackage;
+    });
+};
+
+const assertBookingServiceItemValid = (servicePackage, vehicleType) => {
+    if (servicePackage.vehicle_type !== vehicleType) {
+        throw new AppError(
+            'Selected services must match vehicle type',
+            400,
+            'BOOKING_SERVICE_ITEM_VEHICLE_TYPE_MISMATCH'
+        );
+    }
+};
+
+const assertNoDuplicateBookingItems = (serviceItems = []) => {
+    const seen = new Map();
+
+    for (const item of serviceItems) {
+        const servicePackageId = toObjectIdString(item.servicePackage._id);
+        const previous = seen.get(servicePackageId);
+
+        if (previous && !item.servicePackage.allow_duplicate_in_booking) {
+            throw new AppError('Duplicate service item is not allowed', 409, 'DUPLICATE_SERVICE_ITEM');
+        }
+
+        seen.set(servicePackageId, item);
+    }
+};
+
+const resolveBookingServiceItems = async ({ servicePackage, addOnServiceIds = [], vehicleType }) => {
+    const serviceItems = [];
+    let includedServices = [];
+
+    if (servicePackage.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
+        includedServices = await loadActiveServicePackagesByIds(servicePackage.included_service_ids || []);
+
+        if (includedServices.length === 0) {
+            throw new AppError('Combo service package must include at least one service', 400, 'COMBO_INCLUDED_SERVICES_REQUIRED');
+        }
+
+        includedServices.forEach((item) => {
+            serviceItems.push({
+                servicePackage: item,
+                source: 'COMBO_INCLUDED',
+                parentComboId: servicePackage._id,
+                priceSnapshot: 0,
+            });
+        });
+    } else {
+        serviceItems.push({
+            servicePackage,
+            source: 'PRIMARY',
+            parentComboId: null,
+            priceSnapshot: servicePackage.base_price,
+        });
+    }
+
+    const addOnServices = await loadActiveServicePackagesByIds(addOnServiceIds || []);
+
+    addOnServices.forEach((item) => {
+        if (item.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
+            throw new AppError('Add-on service cannot be a combo package', 400, 'INVALID_ADD_ON_SERVICE');
+        }
+
+        serviceItems.push({
+            servicePackage: item,
+            source: 'ADD_ON',
+            parentComboId: null,
+            priceSnapshot: item.base_price,
+        });
+    });
+
+    serviceItems.forEach((item) => assertBookingServiceItemValid(item.servicePackage, vehicleType));
+    assertNoDuplicateBookingItems(serviceItems);
 
     return {
-        end_time: endTime,
-        wash_bay_start_time: startTime,
-        wash_bay_end_time: addMinutes(startTime, washBayDuration),
+        serviceItems,
+        addOnServices,
     };
 };
 
-const buildBookingBasePayload = ({ garage, servicePackage, startTime, vehicleType, note, promotionResult = null }) => {
-    const bookingTimes = calculateBookingTimes(startTime, servicePackage);
-    const originalPrice = servicePackage.base_price;
+const buildBookingItems = ({ startTime, serviceItems }) => {
+    let elapsedMinutes = 0;
+
+    return serviceItems.map((item, index) => {
+        const servicePackage = item.servicePackage;
+        const itemStartTime = addMinutes(startTime, elapsedMinutes);
+        const washBayStartTime = servicePackage.requires_wash_bay
+            ? addMinutes(itemStartTime, servicePackage.wash_bay_start_offset_minutes || 0)
+            : null;
+        const washBayEndTime = washBayStartTime
+            ? addMinutes(washBayStartTime, servicePackage.wash_bay_duration_minutes || servicePackage.duration_minutes)
+            : null;
+        const careStaffStartTime = servicePackage.requires_care_staff
+            ? addMinutes(itemStartTime, servicePackage.care_staff_start_offset_minutes || 0)
+            : null;
+        const careStaffEndTime = careStaffStartTime
+            ? addMinutes(careStaffStartTime, servicePackage.care_staff_duration_minutes || servicePackage.duration_minutes)
+            : null;
+
+        elapsedMinutes += servicePackage.duration_minutes;
+
+        return {
+            item_key: `ITEM_${index + 1}_${toObjectIdString(servicePackage._id).toUpperCase()}`,
+            service_package_id: servicePackage._id,
+            source: item.source,
+            parent_combo_id: item.parentComboId || null,
+            name_snapshot: servicePackage.name,
+            price_snapshot: item.priceSnapshot,
+            duration_minutes: servicePackage.duration_minutes,
+            sequence: index + 1,
+            requires_wash_bay: servicePackage.requires_wash_bay,
+            wash_bay_start_time: washBayStartTime,
+            wash_bay_end_time: washBayEndTime,
+            requires_care_staff: servicePackage.requires_care_staff,
+            care_staff_type: servicePackage.requires_care_staff
+                ? servicePackage.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF
+                : null,
+            care_staff_required_count: servicePackage.requires_care_staff
+                ? servicePackage.care_staff_required_count || 1
+                : 0,
+            care_staff_start_time: careStaffStartTime,
+            care_staff_end_time: careStaffEndTime,
+            status: 'PENDING',
+        };
+    });
+};
+
+const getBookingResourceSummary = (bookingItems = []) => {
+    const washBayItems = bookingItems.filter((item) => item.requires_wash_bay);
+    const careStaffItems = bookingItems.filter((item) => item.requires_care_staff);
+
+    return {
+        requires_wash_bay: washBayItems.length > 0,
+        wash_bay_start_time: washBayItems.length > 0
+            ? new Date(Math.min(...washBayItems.map((item) => item.wash_bay_start_time.getTime())))
+            : null,
+        wash_bay_end_time: washBayItems.length > 0
+            ? new Date(Math.max(...washBayItems.map((item) => item.wash_bay_end_time.getTime())))
+            : null,
+        requires_care_staff: careStaffItems.length > 0,
+        care_staff_type: careStaffItems.length > 0 ? careStaffItems[0].care_staff_type : null,
+        care_staff_required_count: careStaffItems.length > 0
+            ? Math.max(...careStaffItems.map((item) => item.care_staff_required_count))
+            : 0,
+        care_staff_start_time: careStaffItems.length > 0
+            ? new Date(Math.min(...careStaffItems.map((item) => item.care_staff_start_time.getTime())))
+            : null,
+        care_staff_end_time: careStaffItems.length > 0
+            ? new Date(Math.max(...careStaffItems.map((item) => item.care_staff_end_time.getTime())))
+            : null,
+    };
+};
+
+const buildBookingPlan = ({ startTime, servicePackage, serviceItems, addOnServices }) => {
+    const bookingItems = buildBookingItems({ startTime, serviceItems });
+    const totalDurationMinutes = bookingItems.reduce((total, item) => total + item.duration_minutes, 0);
+    const originalPrice = servicePackage.base_price + addOnServices.reduce((total, item) => total + item.base_price, 0);
+    const resourceSummary = getBookingResourceSummary(bookingItems);
+
+    return {
+        bookingItems,
+        totalDurationMinutes,
+        originalPrice,
+        addOnServiceIds: addOnServices.map((item) => item._id),
+        ...resourceSummary,
+    };
+};
+
+const buildBookingBasePayload = ({ garage, servicePackage, bookingPlan, startTime, vehicleType, note, promotionResult = null }) => {
+    const endTime = addMinutes(startTime, bookingPlan.totalDurationMinutes);
+    const originalPrice = bookingPlan.originalPrice;
     const promotionDiscountAmount = promotionResult?.discount_amount || 0;
     const pointsDiscountAmount = 0;
     const discountAmount = promotionDiscountAmount + pointsDiscountAmount;
@@ -319,9 +499,17 @@ const buildBookingBasePayload = ({ garage, servicePackage, startTime, vehicleTyp
         vehicle_type: vehicleType,
         booking_date: startOfBookingDate(startTime),
         start_time: startTime,
-        end_time: bookingTimes.end_time,
-        wash_bay_start_time: bookingTimes.wash_bay_start_time,
-        wash_bay_end_time: bookingTimes.wash_bay_end_time,
+        end_time: endTime,
+        add_on_service_ids: bookingPlan.addOnServiceIds,
+        booking_items: bookingPlan.bookingItems,
+        wash_bay_start_time: bookingPlan.wash_bay_start_time,
+        wash_bay_end_time: bookingPlan.wash_bay_end_time,
+        requires_care_staff: bookingPlan.requires_care_staff,
+        care_staff_type: bookingPlan.care_staff_type,
+        care_staff_required_count: bookingPlan.care_staff_required_count,
+        care_staff_start_time: bookingPlan.care_staff_start_time,
+        care_staff_end_time: bookingPlan.care_staff_end_time,
+        assigned_care_staff_ids: [],
         original_price: originalPrice,
         promotion_discount_amount: promotionDiscountAmount,
         points_discount_amount: pointsDiscountAmount,
@@ -332,7 +520,7 @@ const buildBookingBasePayload = ({ garage, servicePackage, startTime, vehicleTyp
         used_points: 0,
         earned_points: 0,
         promotion_id: promotionResult?.promotion?._id || null,
-        requires_wash_bay: servicePackage.requires_wash_bay,
+        requires_wash_bay: bookingPlan.requires_wash_bay,
         status: BOOKING_STATUS.CONFIRMED,
         reward_processed: false,
         reward_processed_at: null,
@@ -425,20 +613,94 @@ const countOverlappedWashBayBookings = async (garageId, vehicleType, washBayStar
     const filter = {
         garage_id: garageId,
         vehicle_type: vehicleType,
-        requires_wash_bay: true,
         status: { $in: BOOKING_HOLD_SLOT_STATUSES },
-        wash_bay_start_time: { $lt: washBayEndTime },
-        wash_bay_end_time: { $gt: washBayStartTime },
+        booking_items: {
+            $elemMatch: {
+                requires_wash_bay: true,
+                status: { $in: BOOKING_ITEM_HOLD_STATUSES },
+                wash_bay_start_time: { $lt: washBayEndTime },
+                wash_bay_end_time: { $gt: washBayStartTime },
+            },
+        },
     };
 
     if (excludedBookingId) {
         filter._id = { $ne: excludedBookingId };
     }
 
-    return Booking.countDocuments(filter);
+    const result = await Booking.aggregate([
+        { $match: filter },
+        { $unwind: '$booking_items' },
+        {
+            $match: {
+                'booking_items.requires_wash_bay': true,
+                'booking_items.status': { $in: BOOKING_ITEM_HOLD_STATUSES },
+                'booking_items.wash_bay_start_time': { $lt: washBayEndTime },
+                'booking_items.wash_bay_end_time': { $gt: washBayStartTime },
+            },
+        },
+        {
+            $group: {
+                _id: null,
+                total: { $sum: 1 },
+            },
+        },
+    ]);
+
+    return result[0]?.total || 0;
 };
 
-const assertGarageCapacityAvailable = async ({ garageId, vehicleType, requiresWashBay, washBayStartTime, washBayEndTime }) => {
+const countActiveCareStaff = async (garageId, careStaffType = STAFF_TYPES.VEHICLE_CARE_STAFF) => {
+    return StaffProfile.countDocuments({
+        garage_id: garageId,
+        staff_type: careStaffType,
+        is_active: true,
+    });
+};
+
+const countOverlappedCareStaffBookings = async (garageId, careStaffType, careStaffStartTime, careStaffEndTime, excludedBookingId = null) => {
+    const filter = {
+        garage_id: garageId,
+        status: { $in: BOOKING_HOLD_SLOT_STATUSES },
+        booking_items: {
+            $elemMatch: {
+                requires_care_staff: true,
+                status: { $in: BOOKING_ITEM_HOLD_STATUSES },
+                care_staff_type: careStaffType,
+                care_staff_start_time: { $lt: careStaffEndTime },
+                care_staff_end_time: { $gt: careStaffStartTime },
+            },
+        },
+    };
+
+    if (excludedBookingId) {
+        filter._id = { $ne: excludedBookingId };
+    }
+
+    const result = await Booking.aggregate([
+        { $match: filter },
+        { $unwind: '$booking_items' },
+        {
+            $match: {
+                'booking_items.requires_care_staff': true,
+                'booking_items.status': { $in: BOOKING_ITEM_HOLD_STATUSES },
+                'booking_items.care_staff_type': careStaffType,
+                'booking_items.care_staff_start_time': { $lt: careStaffEndTime },
+                'booking_items.care_staff_end_time': { $gt: careStaffStartTime },
+            },
+        },
+        {
+            $group: {
+                _id: null,
+                total: { $sum: '$booking_items.care_staff_required_count' },
+            },
+        },
+    ]);
+
+    return result[0]?.total || 0;
+};
+
+const assertWashBayCapacityAvailable = async ({ garageId, vehicleType, requiresWashBay, washBayStartTime, washBayEndTime }) => {
     if (!requiresWashBay) {
         return;
     }
@@ -462,6 +724,64 @@ const assertGarageCapacityAvailable = async ({ garageId, vehicleType, requiresWa
 
     if (overlappedBookingCount >= activeWashBayCount) {
         throw new AppError('Garage capacity is full for this time', 409, 'GARAGE_CAPACITY_FULL');
+    }
+};
+
+const assertCareStaffCapacityAvailable = async ({
+    garageId,
+    requiresCareStaff,
+    careStaffType,
+    careStaffRequiredCount,
+    careStaffStartTime,
+    careStaffEndTime,
+}) => {
+    if (!requiresCareStaff) {
+        return;
+    }
+
+    const activeCareStaffCount = await countActiveCareStaff(garageId, careStaffType);
+
+    if (activeCareStaffCount <= 0) {
+        throw new AppError(
+            'No active care staff is available for this garage',
+            400,
+            'NO_ACTIVE_CARE_STAFF'
+        );
+    }
+
+    const busyCareStaffCount = await countOverlappedCareStaffBookings(
+        garageId,
+        careStaffType,
+        careStaffStartTime,
+        careStaffEndTime
+    );
+
+    if (busyCareStaffCount + careStaffRequiredCount > activeCareStaffCount) {
+        throw new AppError('Care staff capacity is full for this time', 409, 'CARE_STAFF_CAPACITY_FULL');
+    }
+};
+
+const assertGarageCapacityAvailable = async ({
+    garageId,
+    vehicleType,
+    bookingItems = [],
+}) => {
+    for (const item of bookingItems) {
+        await assertWashBayCapacityAvailable({
+            garageId,
+            vehicleType,
+            requiresWashBay: item.requires_wash_bay,
+            washBayStartTime: item.wash_bay_start_time,
+            washBayEndTime: item.wash_bay_end_time,
+        });
+        await assertCareStaffCapacityAvailable({
+            garageId,
+            requiresCareStaff: item.requires_care_staff,
+            careStaffType: item.care_staff_type,
+            careStaffRequiredCount: item.care_staff_required_count,
+            careStaffStartTime: item.care_staff_start_time,
+            careStaffEndTime: item.care_staff_end_time,
+        });
     }
 };
 
@@ -659,9 +979,53 @@ const releaseWashBayForBooking = async (booking) => {
 
 };
 
-const getAvailableSlots = async ({ garage_id, service_package_id, date } = {}) => {
+const normalizeBookingItemKey = (value) => normalizeText(value)?.toUpperCase() || null;
+
+const markBookingItemDoneIfReady = async (booking, bookingItemKey) => {
+    const normalizedBookingItemKey = normalizeBookingItemKey(bookingItemKey);
+
+    if (!normalizedBookingItemKey) {
+        return;
+    }
+
+    const bookingItem = (booking.booking_items || []).find((item) => {
+        return normalizeBookingItemKey(item.item_key) === normalizedBookingItemKey;
+    });
+
+    if (!bookingItem || bookingItem.status === 'DONE') {
+        return;
+    }
+
+    const isReady = await bookingServiceStepService.areAllRequiredStepsDoneForBookingItem(
+        booking._id,
+        normalizedBookingItemKey
+    );
+
+    if (!isReady) {
+        return;
+    }
+
+    bookingItem.status = 'DONE';
+    booking.markModified('booking_items');
+    await booking.save();
+
+    const hasPendingWashBayItem = (booking.booking_items || []).some((item) => {
+        return item.requires_wash_bay && BOOKING_ITEM_HOLD_STATUSES.includes(item.status);
+    });
+
+    if (bookingItem.requires_wash_bay && !hasPendingWashBayItem) {
+        await releaseWashBayForBooking(booking);
+    }
+};
+
+const getAvailableSlots = async ({ garage_id, service_package_id, add_on_service_ids = [], date } = {}) => {
     const garage = await getActiveGarage(garage_id);
     const servicePackage = await getActiveServicePackage(service_package_id);
+    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+        servicePackage,
+        addOnServiceIds: add_on_service_ids,
+        vehicleType: servicePackage.vehicle_type,
+    });
     await washBayService.assertGarageSupportsVehicleType(
         garage._id,
         servicePackage.vehicle_type
@@ -673,39 +1037,94 @@ const getAvailableSlots = async ({ garage_id, service_package_id, date } = {}) =
         throw new AppError('Invalid garage business hours', 400, 'INVALID_GARAGE_BUSINESS_HOURS');
     }
 
-    const activeWashBayCount = servicePackage.requires_wash_bay
+    const hasWashBayItem = serviceItems.some((item) => item.servicePackage.requires_wash_bay);
+    const careStaffTypes = [...new Set(serviceItems
+        .filter((item) => item.servicePackage.requires_care_staff)
+        .map((item) => item.servicePackage.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF))];
+    const activeWashBayCount = hasWashBayItem
         ? await countActiveWashBays(garage._id, servicePackage.vehicle_type)
         : null;
+    const activeCareStaffByType = {};
+
+    for (const careStaffType of careStaffTypes) {
+        activeCareStaffByType[careStaffType] = await countActiveCareStaff(garage._id, careStaffType);
+    }
 
     const slots = [];
     let currentStartTime = new Date(openingDate);
 
     while (currentStartTime < closingDate) {
-        const bookingTimes = calculateBookingTimes(currentStartTime, servicePackage);
+        const bookingPlan = buildBookingPlan({
+            startTime: currentStartTime,
+            servicePackage,
+            serviceItems,
+            addOnServices,
+        });
+        const endTime = addMinutes(currentStartTime, bookingPlan.totalDurationMinutes);
 
-        if (bookingTimes.end_time <= closingDate) {
+        if (endTime <= closingDate) {
             let isAvailable = currentStartTime > new Date();
             let availableCapacity = null;
+            let availableWashBayCapacity = null;
+            let availableCareStaffCapacity = null;
 
-            if (servicePackage.requires_wash_bay) {
-                const overlappedBookingCount = await countOverlappedWashBayBookings(
-                    garage._id,
-                    servicePackage.vehicle_type,
-                    bookingTimes.wash_bay_start_time,
-                    bookingTimes.wash_bay_end_time
-                );
+            for (const item of bookingPlan.bookingItems) {
+                if (item.requires_wash_bay) {
+                    const overlappedBookingCount = await countOverlappedWashBayBookings(
+                        garage._id,
+                        servicePackage.vehicle_type,
+                        item.wash_bay_start_time,
+                        item.wash_bay_end_time
+                    );
+                    const itemAvailableWashBayCapacity = Math.max(activeWashBayCount - overlappedBookingCount, 0);
 
-                availableCapacity = Math.max(activeWashBayCount - overlappedBookingCount, 0);
-                isAvailable = isAvailable && activeWashBayCount > 0 && availableCapacity > 0;
+                    availableWashBayCapacity = availableWashBayCapacity === null
+                        ? itemAvailableWashBayCapacity
+                        : Math.min(availableWashBayCapacity, itemAvailableWashBayCapacity);
+                    isAvailable = isAvailable && activeWashBayCount > 0 && itemAvailableWashBayCapacity > 0;
+                }
+
+                if (item.requires_care_staff) {
+                    const activeCareStaffCount = activeCareStaffByType[item.care_staff_type] || 0;
+                    const busyCareStaffCount = await countOverlappedCareStaffBookings(
+                        garage._id,
+                        item.care_staff_type,
+                        item.care_staff_start_time,
+                        item.care_staff_end_time
+                    );
+                    const itemAvailableCareStaffCapacity = Math.max(activeCareStaffCount - busyCareStaffCount, 0);
+
+                    availableCareStaffCapacity = availableCareStaffCapacity === null
+                        ? itemAvailableCareStaffCapacity
+                        : Math.min(availableCareStaffCapacity, itemAvailableCareStaffCapacity);
+                    isAvailable = isAvailable
+                        && activeCareStaffCount > 0
+                        && itemAvailableCareStaffCapacity >= item.care_staff_required_count;
+                }
+            }
+
+            if (availableWashBayCapacity !== null) {
+                availableCapacity = availableWashBayCapacity;
+            }
+
+            if (availableCareStaffCapacity !== null) {
+                availableCapacity = availableCapacity === null
+                    ? availableCareStaffCapacity
+                    : Math.min(availableCapacity, availableCareStaffCapacity);
             }
 
             slots.push({
                 start_time: currentStartTime,
-                end_time: bookingTimes.end_time,
-                wash_bay_start_time: bookingTimes.wash_bay_start_time,
-                wash_bay_end_time: bookingTimes.wash_bay_end_time,
+                end_time: endTime,
+                wash_bay_start_time: bookingPlan.wash_bay_start_time,
+                wash_bay_end_time: bookingPlan.wash_bay_end_time,
+                care_staff_start_time: bookingPlan.care_staff_start_time,
+                care_staff_end_time: bookingPlan.care_staff_end_time,
+                booking_items: bookingPlan.bookingItems,
                 is_available: isAvailable,
                 available_capacity: availableCapacity,
+                available_wash_bay_capacity: availableWashBayCapacity,
+                available_care_staff_capacity: availableCareStaffCapacity,
             });
         }
 
@@ -715,11 +1134,23 @@ const getAvailableSlots = async ({ garage_id, service_package_id, date } = {}) =
     return {
         garage_id: garage._id.toString(),
         service_package_id: servicePackage._id.toString(),
+        add_on_service_ids: addOnServices.map((item) => item._id.toString()),
         date,
         vehicle_type: servicePackage.vehicle_type,
-        requires_wash_bay: servicePackage.requires_wash_bay,
+        requires_wash_bay: serviceItems.some((item) => item.servicePackage.requires_wash_bay),
+        requires_care_staff: serviceItems.some((item) => item.servicePackage.requires_care_staff),
+        care_staff_type: careStaffTypes.length === 1 ? careStaffTypes[0] : null,
+        care_staff_required_count: serviceItems.reduce((max, item) => {
+            if (!item.servicePackage.requires_care_staff) {
+                return max;
+            }
+
+            return Math.max(max, item.servicePackage.care_staff_required_count || 1);
+        }, 0),
         slot_interval_minutes: garage.slot_interval_minutes,
         active_wash_bay_count: activeWashBayCount,
+        active_care_staff_count: careStaffTypes.length === 1 ? activeCareStaffByType[careStaffTypes[0]] : null,
+        active_care_staff_by_type: activeCareStaffByType,
         slots,
     };
 };
@@ -800,6 +1231,18 @@ const createCustomerBooking = async (customerId, payload = {}) => {
 
     assertServicePackageMatchesVehicleType(servicePackage, vehicle.vehicle_type);
 
+    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+        servicePackage,
+        addOnServiceIds: createPayload.add_on_service_ids || [],
+        vehicleType: vehicle.vehicle_type,
+    });
+    const bookingPlan = buildBookingPlan({
+        startTime,
+        servicePackage,
+        serviceItems,
+        addOnServices,
+    });
+
     await washBayService.assertGarageSupportsVehicleType(
         garage._id,
         servicePackage.vehicle_type
@@ -810,12 +1253,13 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         customer_id: customerId,
         servicePackage,
         vehicleType: vehicle.vehicle_type,
-        orderAmount: servicePackage.base_price,
+        orderAmount: bookingPlan.originalPrice,
         bookingStartTime: startTime,
     });
     const basePayload = buildBookingBasePayload({
         garage,
         servicePackage,
+        bookingPlan,
         startTime,
         vehicleType: vehicle.vehicle_type,
         note: createPayload.note,
@@ -834,9 +1278,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
     await assertGarageCapacityAvailable({
         garageId: garage._id,
         vehicleType: vehicle.vehicle_type,
-        requiresWashBay: basePayload.requires_wash_bay,
-        washBayStartTime: basePayload.wash_bay_start_time,
-        washBayEndTime: basePayload.wash_bay_end_time,
+        bookingItems: basePayload.booking_items,
     });
 
     const booking = await Booking.create({
@@ -873,6 +1315,18 @@ const createWalkInBooking = async (user, payload = {}) => {
         createPayload.vehicle_type
     );
 
+    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+        servicePackage,
+        addOnServiceIds: createPayload.add_on_service_ids || [],
+        vehicleType: createPayload.vehicle_type,
+    });
+    const bookingPlan = buildBookingPlan({
+        startTime,
+        servicePackage,
+        serviceItems,
+        addOnServices,
+    });
+
     await washBayService.assertGarageSupportsVehicleType(
         garage._id,
         servicePackage.vehicle_type
@@ -883,12 +1337,13 @@ const createWalkInBooking = async (user, payload = {}) => {
         customer_id: null,
         servicePackage,
         vehicleType: createPayload.vehicle_type,
-        orderAmount: servicePackage.base_price,
+        orderAmount: bookingPlan.originalPrice,
         bookingStartTime: startTime,
     });
     const basePayload = buildBookingBasePayload({
         garage,
         servicePackage,
+        bookingPlan,
         startTime,
         vehicleType: createPayload.vehicle_type,
         note: createPayload.note,
@@ -912,9 +1367,7 @@ const createWalkInBooking = async (user, payload = {}) => {
     await assertGarageCapacityAvailable({
         garageId: garage._id,
         vehicleType: createPayload.vehicle_type,
-        requiresWashBay: basePayload.requires_wash_bay,
-        washBayStartTime: basePayload.wash_bay_start_time,
-        washBayEndTime: basePayload.wash_bay_end_time,
+        bookingItems: basePayload.booking_items,
     });
 
     const booking = await Booking.create({
@@ -1015,7 +1468,7 @@ const startService = async (user, bookingId, { note } = {}) => {
 
     await booking.save();
 
-    const serviceSteps = await bookingServiceStepService.createStepsFromTemplate(booking, servicePackage);
+    const serviceSteps = await bookingServiceStepService.createStepsForBooking(booking, servicePackage);
     const populatedBooking = await getBookingDocumentById(booking._id);
 
     return {
@@ -1038,12 +1491,16 @@ const markBookingServiceStepDone = async (user, bookingId, stepId, { note } = {}
     await assertStaffCanAccessBooking(user, booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_STEP_DONE_NOT_ALLOWED');
 
-    return bookingServiceStepService.markStepDone({
+    const step = await bookingServiceStepService.markStepDone({
         bookingId: booking._id,
         stepId,
         staffId: user._id,
         note,
     });
+
+    await markBookingItemDoneIfReady(booking, step.booking_item_key);
+
+    return step;
 };
 
 

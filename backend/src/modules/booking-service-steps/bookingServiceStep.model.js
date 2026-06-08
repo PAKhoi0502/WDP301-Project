@@ -21,6 +21,14 @@ const bookingServiceStepSchema = new mongoose.Schema(
             required: [true, 'Service package is required'],
         },
 
+        booking_item_key: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            maxlength: [80, 'Booking item key must not exceed 80 characters'],
+            default: null,
+        },
+
         step_code: {
             type: String,
             required: [true, 'Step code is required'],
@@ -118,7 +126,7 @@ const bookingServiceStepSchema = new mongoose.Schema(
 );
 
 bookingServiceStepSchema.index({ booking_id: 1, order: 1 }, { unique: true });
-bookingServiceStepSchema.index({ booking_id: 1, step_code: 1 }, { unique: true });
+bookingServiceStepSchema.index({ booking_id: 1, booking_item_key: 1, step_code: 1 }, { unique: true });
 bookingServiceStepSchema.index({ booking_id: 1, status: 1 });
 bookingServiceStepSchema.index({ service_package_id: 1 });
 bookingServiceStepSchema.index({ assigned_staff_id: 1 });

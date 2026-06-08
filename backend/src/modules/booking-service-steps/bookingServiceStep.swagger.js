@@ -11,6 +11,7 @@ const bookingServiceStepSchema = {
         id: { type: 'string' },
         booking_id: { type: 'string' },
         service_package_id: { type: 'string' },
+        booking_item_key: { type: 'string', nullable: true },
         step_code: { type: 'string' },
         step_name: { type: 'string' },
         order: { type: 'number' },
