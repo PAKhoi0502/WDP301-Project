@@ -1,7 +1,7 @@
 const { z } = require('zod');
 
 const { VEHICLE_TYPE_VALUES } = require('../../shared/constants/vehicle.constant');
-const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
+const { STAFF_TYPES, STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
 const {
     SERVICE_PACKAGE_TYPE_VALUES,
     SERVICE_STEP_TYPE_VALUES,
@@ -83,7 +83,29 @@ const servicePackageBusinessRule = (data) => {
         return false;
     }
 
-    if (data.wash_bay_duration_minutes && data.duration_minutes && data.wash_bay_duration_minutes > data.duration_minutes) {
+    if (!data.requires_wash_bay && data.wash_bay_start_offset_minutes && data.wash_bay_start_offset_minutes > 0) {
+        return false;
+    }
+
+    if (data.wash_bay_duration_minutes && data.duration_minutes && data.wash_bay_duration_minutes + (data.wash_bay_start_offset_minutes || 0) > data.duration_minutes) {
+        return false;
+    }
+
+    if (!data.requires_care_staff) {
+        if (data.care_staff_required_count && data.care_staff_required_count > 0) {
+            return false;
+        }
+
+        if (data.care_staff_duration_minutes && data.care_staff_duration_minutes > 0) {
+            return false;
+        }
+
+        if (data.care_staff_start_offset_minutes && data.care_staff_start_offset_minutes > 0) {
+            return false;
+        }
+    }
+
+    if (data.requires_care_staff && data.care_staff_duration_minutes && data.duration_minutes && data.care_staff_duration_minutes + (data.care_staff_start_offset_minutes || 0) > data.duration_minutes) {
         return false;
     }
 
@@ -137,6 +159,7 @@ const getServicePackagesSchema = z.object({
             vehicle_type: vehicleTypeField.optional(),
             service_type: serviceTypeField.optional(),
             requires_wash_bay: stringBooleanField.optional(),
+            requires_care_staff: stringBooleanField.optional(),
         })
         .strict(),
 });
@@ -153,6 +176,7 @@ const getAdminServicePackagesSchema = z.object({
             vehicle_type: vehicleTypeField.optional(),
             service_type: serviceTypeField.optional(),
             requires_wash_bay: stringBooleanField.optional(),
+            requires_care_staff: stringBooleanField.optional(),
             is_active: stringBooleanField.optional(),
         })
         .strict(),
@@ -168,8 +192,15 @@ const createServicePackageSchema = z.object({
             base_price: z.coerce.number().min(0),
             duration_minutes: z.coerce.number().int().min(1).max(1440),
             wash_bay_duration_minutes: z.coerce.number().int().min(0).max(1440).default(0),
+            wash_bay_start_offset_minutes: z.coerce.number().int().min(0).max(1440).default(0),
             points_earned: z.coerce.number().int().min(0).default(0),
             requires_wash_bay: z.boolean().default(false),
+            requires_care_staff: z.boolean().default(false),
+            care_staff_type: staffTypeField.default(STAFF_TYPES.VEHICLE_CARE_STAFF).nullable().optional(),
+            care_staff_required_count: z.coerce.number().int().min(0).max(50).default(0),
+            care_staff_duration_minutes: z.coerce.number().int().min(0).max(1440).default(0),
+            care_staff_start_offset_minutes: z.coerce.number().int().min(0).max(1440).default(0),
+            allow_duplicate_in_booking: z.boolean().default(false),
             included_service_ids: includedServiceIdsField,
             steps_template: stepsTemplateField,
             is_active: z.boolean().optional(),
@@ -195,8 +226,15 @@ const updateServicePackageSchema = z.object({
             base_price: z.preprocess(emptyToUndefined, z.coerce.number().min(0).optional()),
             duration_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(1440).optional()),
             wash_bay_duration_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(1440).optional()),
+            wash_bay_start_offset_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(1440).optional()),
             points_earned: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).optional()),
             requires_wash_bay: z.boolean().optional(),
+            requires_care_staff: z.boolean().optional(),
+            care_staff_type: z.preprocess(emptyToUndefined, staffTypeField.nullable().optional()),
+            care_staff_required_count: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(50).optional()),
+            care_staff_duration_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(1440).optional()),
+            care_staff_start_offset_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(1440).optional()),
+            allow_duplicate_in_booking: z.boolean().optional(),
             included_service_ids: z.array(objectIdField).optional(),
             steps_template: z.array(stepTemplateField).optional(),
             is_active: z.boolean().optional(),

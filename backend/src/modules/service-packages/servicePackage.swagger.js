@@ -86,6 +86,10 @@ const schemas = {
                 type: 'integer',
                 example: 30,
             },
+            wash_bay_start_offset_minutes: {
+                type: 'integer',
+                example: 0,
+            },
             points_earned: {
                 type: 'integer',
                 example: 30,
@@ -93,6 +97,32 @@ const schemas = {
             requires_wash_bay: {
                 type: 'boolean',
                 example: true,
+            },
+            requires_care_staff: {
+                type: 'boolean',
+                example: true,
+            },
+            care_staff_type: {
+                type: 'string',
+                nullable: true,
+                enum: ['CUSTOMER_SERVICE_STAFF', 'VEHICLE_INSPECTION_STAFF', 'WASH_OPERATOR', 'VEHICLE_CARE_STAFF'],
+                example: 'VEHICLE_CARE_STAFF',
+            },
+            care_staff_required_count: {
+                type: 'integer',
+                example: 1,
+            },
+            care_staff_duration_minutes: {
+                type: 'integer',
+                example: 90,
+            },
+            care_staff_start_offset_minutes: {
+                type: 'integer',
+                example: 30,
+            },
+            allow_duplicate_in_booking: {
+                type: 'boolean',
+                example: false,
             },
             included_service_ids: {
                 type: 'array',
@@ -145,6 +175,10 @@ const schemas = {
                 type: 'integer',
                 example: 30,
             },
+            wash_bay_start_offset_minutes: {
+                type: 'integer',
+                example: 0,
+            },
             points_earned: {
                 type: 'integer',
                 example: 35,
@@ -152,6 +186,32 @@ const schemas = {
             requires_wash_bay: {
                 type: 'boolean',
                 example: true,
+            },
+            requires_care_staff: {
+                type: 'boolean',
+                example: true,
+            },
+            care_staff_type: {
+                type: 'string',
+                nullable: true,
+                enum: ['CUSTOMER_SERVICE_STAFF', 'VEHICLE_INSPECTION_STAFF', 'WASH_OPERATOR', 'VEHICLE_CARE_STAFF'],
+                example: 'VEHICLE_CARE_STAFF',
+            },
+            care_staff_required_count: {
+                type: 'integer',
+                example: 1,
+            },
+            care_staff_duration_minutes: {
+                type: 'integer',
+                example: 90,
+            },
+            care_staff_start_offset_minutes: {
+                type: 'integer',
+                example: 30,
+            },
+            allow_duplicate_in_booking: {
+                type: 'boolean',
+                example: false,
             },
             included_service_ids: {
                 type: 'array',
@@ -228,6 +288,10 @@ const schemas = {
                 type: 'integer',
                 example: 30,
             },
+            wash_bay_start_offset_minutes: {
+                type: 'integer',
+                example: 0,
+            },
             points_earned: {
                 type: 'integer',
                 example: 30,
@@ -235,6 +299,32 @@ const schemas = {
             requires_wash_bay: {
                 type: 'boolean',
                 example: true,
+            },
+            requires_care_staff: {
+                type: 'boolean',
+                example: true,
+            },
+            care_staff_type: {
+                type: 'string',
+                nullable: true,
+                enum: ['CUSTOMER_SERVICE_STAFF', 'VEHICLE_INSPECTION_STAFF', 'WASH_OPERATOR', 'VEHICLE_CARE_STAFF'],
+                example: 'VEHICLE_CARE_STAFF',
+            },
+            care_staff_required_count: {
+                type: 'integer',
+                example: 1,
+            },
+            care_staff_duration_minutes: {
+                type: 'integer',
+                example: 90,
+            },
+            care_staff_start_offset_minutes: {
+                type: 'integer',
+                example: 30,
+            },
+            allow_duplicate_in_booking: {
+                type: 'boolean',
+                example: false,
             },
             included_service_ids: {
                 type: 'array',
@@ -341,6 +431,13 @@ const listParameters = [
     {
         in: 'query',
         name: 'requires_wash_bay',
+        schema: {
+            type: 'boolean',
+        },
+    },
+    {
+        in: 'query',
+        name: 'requires_care_staff',
         schema: {
             type: 'boolean',
         },

@@ -5,6 +5,7 @@ const ServicePackageMapper = require('./servicePackage.mapper');
 const washBayService = require('../wash-bays/washBay.service');
 const { AppError } = require('../../shared/utils/appError');
 const { SERVICE_PACKAGE_TYPES } = require('../../shared/constants/servicePackage.constant');
+const { STAFF_TYPES } = require('../../shared/constants/staff.constant');
 
 const normalizeText = (value) => {
     if (typeof value !== 'string') {
@@ -93,12 +94,40 @@ const normalizeBasePayload = (payload = {}) => {
         normalizedPayload.wash_bay_duration_minutes = payload.wash_bay_duration_minutes;
     }
 
+    if (payload.wash_bay_start_offset_minutes !== undefined) {
+        normalizedPayload.wash_bay_start_offset_minutes = payload.wash_bay_start_offset_minutes;
+    }
+
     if (payload.points_earned !== undefined) {
         normalizedPayload.points_earned = payload.points_earned;
     }
 
     if (payload.requires_wash_bay !== undefined) {
         normalizedPayload.requires_wash_bay = payload.requires_wash_bay;
+    }
+
+    if (payload.requires_care_staff !== undefined) {
+        normalizedPayload.requires_care_staff = payload.requires_care_staff;
+    }
+
+    if (payload.care_staff_type !== undefined) {
+        normalizedPayload.care_staff_type = payload.care_staff_type;
+    }
+
+    if (payload.care_staff_required_count !== undefined) {
+        normalizedPayload.care_staff_required_count = payload.care_staff_required_count;
+    }
+
+    if (payload.care_staff_duration_minutes !== undefined) {
+        normalizedPayload.care_staff_duration_minutes = payload.care_staff_duration_minutes;
+    }
+
+    if (payload.care_staff_start_offset_minutes !== undefined) {
+        normalizedPayload.care_staff_start_offset_minutes = payload.care_staff_start_offset_minutes;
+    }
+
+    if (payload.allow_duplicate_in_booking !== undefined) {
+        normalizedPayload.allow_duplicate_in_booking = payload.allow_duplicate_in_booking;
     }
 
     if (payload.included_service_ids !== undefined) {
@@ -116,7 +145,7 @@ const normalizeBasePayload = (payload = {}) => {
     return normalizedPayload;
 };
 
-const buildSearchFilter = ({ search, vehicle_type, service_type, requires_wash_bay, is_active } = {}) => {
+const buildSearchFilter = ({ search, vehicle_type, service_type, requires_wash_bay, requires_care_staff, is_active } = {}) => {
     const filter = {};
 
     if (search) {
@@ -140,6 +169,10 @@ const buildSearchFilter = ({ search, vehicle_type, service_type, requires_wash_b
 
     if (requires_wash_bay !== undefined) {
         filter.requires_wash_bay = requires_wash_bay;
+    }
+
+    if (requires_care_staff !== undefined) {
+        filter.requires_care_staff = requires_care_staff;
     }
 
     if (is_active !== undefined) {
@@ -172,6 +205,26 @@ const assertDurationRuleValid = (payload, currentServicePackage = null) => {
         ? payload.wash_bay_duration_minutes
         : currentServicePackage?.wash_bay_duration_minutes;
 
+    const washBayStartOffsetMinutes = payload.wash_bay_start_offset_minutes !== undefined
+        ? payload.wash_bay_start_offset_minutes
+        : currentServicePackage?.wash_bay_start_offset_minutes;
+
+    const requiresCareStaff = payload.requires_care_staff !== undefined
+        ? payload.requires_care_staff
+        : currentServicePackage?.requires_care_staff;
+
+    const careStaffDurationMinutes = payload.care_staff_duration_minutes !== undefined
+        ? payload.care_staff_duration_minutes
+        : currentServicePackage?.care_staff_duration_minutes;
+
+    const careStaffStartOffsetMinutes = payload.care_staff_start_offset_minutes !== undefined
+        ? payload.care_staff_start_offset_minutes
+        : currentServicePackage?.care_staff_start_offset_minutes;
+
+    const careStaffRequiredCount = payload.care_staff_required_count !== undefined
+        ? payload.care_staff_required_count
+        : currentServicePackage?.care_staff_required_count;
+
     if (requiresWashBay && (!washBayDurationMinutes || washBayDurationMinutes < 1)) {
         throw new AppError(
             'Wash bay duration is required when service package requires wash bay',
@@ -188,11 +241,79 @@ const assertDurationRuleValid = (payload, currentServicePackage = null) => {
         );
     }
 
-    if (durationMinutes && washBayDurationMinutes && washBayDurationMinutes > durationMinutes) {
+    if (!requiresWashBay && washBayStartOffsetMinutes && washBayStartOffsetMinutes > 0) {
+        throw new AppError(
+            'Wash bay start offset must be 0 when service package does not require wash bay',
+            400,
+            'INVALID_WASH_BAY_OFFSET'
+        );
+    }
+
+    if (durationMinutes && washBayDurationMinutes && washBayDurationMinutes + (washBayStartOffsetMinutes || 0) > durationMinutes) {
         throw new AppError(
             'Wash bay duration must not exceed total duration',
             400,
             'INVALID_WASH_BAY_DURATION'
+        );
+    }
+
+    if (requiresCareStaff) {
+        if (payload.care_staff_type === null) {
+            throw new AppError(
+                'Care staff type is required when service package requires care staff',
+                400,
+                'CARE_STAFF_TYPE_REQUIRED'
+            );
+        }
+
+        if (careStaffRequiredCount !== undefined && careStaffRequiredCount < 1) {
+            throw new AppError(
+                'Care staff required count must be greater than 0',
+                400,
+                'INVALID_CARE_STAFF_REQUIRED_COUNT'
+            );
+        }
+
+        if (careStaffDurationMinutes !== undefined && careStaffDurationMinutes < 1) {
+            throw new AppError(
+                'Care staff duration must be greater than 0',
+                400,
+                'INVALID_CARE_STAFF_DURATION'
+            );
+        }
+    }
+
+    if (!requiresCareStaff) {
+        if (careStaffRequiredCount && careStaffRequiredCount > 0) {
+            throw new AppError(
+                'Care staff required count must be 0 when service package does not require care staff',
+                400,
+                'INVALID_CARE_STAFF_REQUIRED_COUNT'
+            );
+        }
+
+        if (careStaffDurationMinutes && careStaffDurationMinutes > 0) {
+            throw new AppError(
+                'Care staff duration must be 0 when service package does not require care staff',
+                400,
+                'INVALID_CARE_STAFF_DURATION'
+            );
+        }
+
+        if (careStaffStartOffsetMinutes && careStaffStartOffsetMinutes > 0) {
+            throw new AppError(
+                'Care staff start offset must be 0 when service package does not require care staff',
+                400,
+                'INVALID_CARE_STAFF_OFFSET'
+            );
+        }
+    }
+
+    if (durationMinutes && careStaffDurationMinutes && careStaffDurationMinutes + (careStaffStartOffsetMinutes || 0) > durationMinutes) {
+        throw new AppError(
+            'Care staff duration must not exceed total duration',
+            400,
+            'INVALID_CARE_STAFF_DURATION'
         );
     }
 };
@@ -225,7 +346,7 @@ const assertNameAvailable = async (name, vehicleType, ignoredServicePackageId = 
 const getServicePackageDocumentById = async (servicePackageId) => {
     const servicePackage = await ServicePackage.findById(servicePackageId).populate(
         'included_service_ids',
-        'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active'
+        'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active'
     );
 
     if (!servicePackage) {
@@ -319,6 +440,7 @@ const getPublicServicePackages = async ({
     vehicle_type,
     service_type,
     requires_wash_bay,
+    requires_care_staff,
 } = {}) => {
     const resolvedVehicleType = await resolveVehicleTypeFilterByGarage(
         garage_id,
@@ -330,6 +452,7 @@ const getPublicServicePackages = async ({
         vehicle_type: resolvedVehicleType,
         service_type,
         requires_wash_bay,
+        requires_care_staff,
         is_active: true,
     });
     const skip = (page - 1) * limit;
@@ -348,7 +471,7 @@ const getPublicServicePackages = async ({
 
     const [servicePackages, total] = await Promise.all([
         ServicePackage.find(filter)
-            .populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active')
+            .populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active')
             .sort({ vehicle_type: 1, service_type: 1, base_price: 1, created_at: -1 })
             .skip(skip)
             .limit(limit),
@@ -370,7 +493,7 @@ const getPublicServicePackageById = async (servicePackageId) => {
     const servicePackage = await ServicePackage.findOne({
         _id: servicePackageId,
         is_active: true,
-    }).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active');
+    }).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active');
 
     if (!servicePackage) {
         throw new AppError('Service package not found', 404, 'SERVICE_PACKAGE_NOT_FOUND');
@@ -379,13 +502,13 @@ const getPublicServicePackageById = async (servicePackageId) => {
     return ServicePackageMapper.toServicePackageDto(servicePackage);
 };
 
-const getAllServicePackages = async ({ page = 1, limit = 20, search, vehicle_type, service_type, requires_wash_bay, is_active } = {}) => {
-    const filter = buildSearchFilter({ search, vehicle_type, service_type, requires_wash_bay, is_active });
+const getAllServicePackages = async ({ page = 1, limit = 20, search, vehicle_type, service_type, requires_wash_bay, requires_care_staff, is_active } = {}) => {
+    const filter = buildSearchFilter({ search, vehicle_type, service_type, requires_wash_bay, requires_care_staff, is_active });
     const skip = (page - 1) * limit;
 
     const [servicePackages, total] = await Promise.all([
         ServicePackage.find(filter)
-            .populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active')
+            .populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active')
             .sort({ vehicle_type: 1, service_type: 1, base_price: 1, created_at: -1 })
             .skip(skip)
             .limit(limit),
@@ -414,6 +537,11 @@ const createServicePackage = async (payload = {}) => {
         ServicePackageMapper.toCreatePayload(payload)
     );
 
+    if (createPayload.requires_care_staff) {
+        createPayload.care_staff_type = createPayload.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF;
+        createPayload.care_staff_required_count = createPayload.care_staff_required_count || 1;
+        createPayload.care_staff_duration_minutes = createPayload.care_staff_duration_minutes || createPayload.duration_minutes;
+    }
     assertDurationRuleValid(createPayload);
     await assertNameAvailable(createPayload.name, createPayload.vehicle_type);
     await assertIncludedServicesValid(createPayload.included_service_ids || [], createPayload);
@@ -431,6 +559,23 @@ const updateServicePackage = async (servicePackageId, payload = {}) => {
     );
 
     assertUpdatePayloadNotEmpty(updatePayload);
+    if (updatePayload.requires_care_staff === true) {
+        updatePayload.care_staff_type = updatePayload.care_staff_type || servicePackage.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF;
+        updatePayload.care_staff_required_count = updatePayload.care_staff_required_count || servicePackage.care_staff_required_count || 1;
+        updatePayload.care_staff_duration_minutes = updatePayload.care_staff_duration_minutes || servicePackage.care_staff_duration_minutes || updatePayload.duration_minutes || servicePackage.duration_minutes;
+    }
+
+    if (updatePayload.requires_care_staff === false) {
+        updatePayload.care_staff_type = null;
+        updatePayload.care_staff_required_count = 0;
+        updatePayload.care_staff_duration_minutes = 0;
+        updatePayload.care_staff_start_offset_minutes = 0;
+    }
+
+    if (updatePayload.requires_wash_bay === false) {
+        updatePayload.wash_bay_duration_minutes = 0;
+        updatePayload.wash_bay_start_offset_minutes = 0;
+    }
     assertDurationRuleValid(updatePayload, servicePackage);
 
     const nextName = updatePayload.name || servicePackage.name;
@@ -450,7 +595,7 @@ const updateServicePackage = async (servicePackageId, payload = {}) => {
         servicePackageId,
         { $set: updatePayload },
         { new: true, runValidators: true }
-    ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active');
+    ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active');
 
     return ServicePackageMapper.toServicePackageDto(updatedServicePackage);
 };
@@ -466,7 +611,7 @@ const updateServicePackageStatus = async (servicePackageId, isActive) => {
         servicePackageId,
         { $set: { is_active: isActive } },
         { new: true, runValidators: true }
-    ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active');
+    ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active');
 
     return ServicePackageMapper.toServicePackageDto(updatedServicePackage);
 };
@@ -481,7 +626,7 @@ const updateStepsTemplate = async (servicePackageId, stepsTemplate = []) => {
         servicePackage._id,
         { $set: updatePayload },
         { new: true, runValidators: true }
-    ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active');
+    ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active');
 
     return ServicePackageMapper.toServicePackageDto(updatedServicePackage);
 };
@@ -496,7 +641,7 @@ const updateIncludedServices = async (servicePackageId, includedServiceIds = [])
         servicePackage._id,
         { $set: { included_service_ids: normalizedIncludedServiceIds } },
         { new: true, runValidators: true }
-    ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay is_active');
+    ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active');
 
     return ServicePackageMapper.toServicePackageDto(updatedServicePackage);
 };
