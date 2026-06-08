@@ -1,3 +1,5 @@
+const StaffProfileMapper = require('../staff-profiles/staffProfile.mapper');
+
 const toId = (value) => {
     if (!value) {
         return null;
@@ -88,6 +90,25 @@ const toServicePackageSummaryDto = (servicePackage) => {
     };
 };
 
+const toStaffProfileSummaryDto = (staffProfile) => {
+    if (!staffProfile || typeof staffProfile !== 'object' || !staffProfile._id) {
+        return null;
+    }
+
+    return StaffProfileMapper.toStaffProfileDto(staffProfile);
+};
+
+const toCareStaffAssignmentDto = (assignment = {}) => {
+    return {
+        staff_profile_id: toId(assignment.staff_profile_id),
+        staff_profile: toStaffProfileSummaryDto(assignment.staff_profile_id),
+        user_id: toId(assignment.user_id),
+        user: toUserSummaryDto(assignment.user_id),
+        assigned_at: assignment.assigned_at,
+        released_at: assignment.released_at,
+    };
+};
+
 const toBookingItemDto = (item = {}) => {
     return {
         item_key: item.item_key,
@@ -106,6 +127,7 @@ const toBookingItemDto = (item = {}) => {
         care_staff_required_count: item.care_staff_required_count,
         care_staff_start_time: item.care_staff_start_time,
         care_staff_end_time: item.care_staff_end_time,
+        assigned_care_staff: (item.assigned_care_staff || []).map((assignment) => toCareStaffAssignmentDto(assignment)),
         status: item.status,
     };
 };
@@ -185,6 +207,9 @@ const toBookingDto = (booking) => {
         care_staff_start_time: plainBooking.care_staff_start_time,
         care_staff_end_time: plainBooking.care_staff_end_time,
         assigned_care_staff_ids: (plainBooking.assigned_care_staff_ids || []).map((item) => toId(item)),
+        assigned_care_staff: (plainBooking.assigned_care_staff_ids || [])
+            .map((item) => toStaffProfileSummaryDto(item))
+            .filter(Boolean),
         original_price: plainBooking.original_price,
         promotion_discount_amount: plainBooking.promotion_discount_amount,
         points_discount_amount: plainBooking.points_discount_amount,

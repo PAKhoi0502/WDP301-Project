@@ -38,6 +38,7 @@ describe('booking service step service', () => {
         const washServiceId = '507f1f77bcf86cd799439003';
         const careServiceId = '507f1f77bcf86cd799439004';
         const addOnServiceId = '507f1f77bcf86cd799439005';
+        const careStaffUserId = '507f1f77bcf86cd799439006';
         const booking = {
             _id: bookingId,
             service_package_id: comboId,
@@ -60,6 +61,14 @@ describe('booking service step service', () => {
                     requires_wash_bay: false,
                     requires_care_staff: true,
                     care_staff_type: 'VEHICLE_CARE_STAFF',
+                    assigned_care_staff: [
+                        {
+                            staff_profile_id: '507f1f77bcf86cd799439007',
+                            user_id: careStaffUserId,
+                            assigned_at: new Date('2999-01-01T06:30:00.000Z'),
+                            released_at: null,
+                        },
+                    ],
                 },
                 {
                     item_key: 'ITEM_3_507F1F77BCF86CD799439005',
@@ -164,6 +173,10 @@ describe('booking service step service', () => {
             group_name: 'Add-on Services',
             requires_wash_bay: false,
             requires_care_staff: true,
+        });
+        expect(inserted[2]).toMatchObject({
+            booking_item_key: 'ITEM_2_507F1F77BCF86CD799439004',
+            assigned_staff_id: careStaffUserId,
         });
         expect(inserted[4]).toMatchObject({
             workflow_type: 'POST_SERVICE',

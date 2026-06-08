@@ -11,6 +11,35 @@ const {
     BOOKING_PAYMENT_STATUS_VALUES,
 } = require('../../shared/constants/booking.constant');
 
+const bookingItemCareStaffAssignmentSchema = new mongoose.Schema(
+    {
+        staff_profile_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'StaffProfile',
+            required: [true, 'Staff profile is required'],
+        },
+
+        user_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: [true, 'Staff user is required'],
+        },
+
+        assigned_at: {
+            type: Date,
+            required: [true, 'Care staff assigned time is required'],
+        },
+
+        released_at: {
+            type: Date,
+            default: null,
+        },
+    },
+    {
+        _id: false,
+    }
+);
+
 const bookingItemSchema = new mongoose.Schema(
     {
         item_key: {
@@ -103,6 +132,11 @@ const bookingItemSchema = new mongoose.Schema(
         care_staff_end_time: {
             type: Date,
             default: null,
+        },
+
+        assigned_care_staff: {
+            type: [bookingItemCareStaffAssignmentSchema],
+            default: [],
         },
 
         status: {
@@ -527,6 +561,7 @@ bookingSchema.pre('validate', function (next) {
             item.care_staff_required_count = 0;
             item.care_staff_start_time = null;
             item.care_staff_end_time = null;
+            item.assigned_care_staff = [];
         }
     }
 

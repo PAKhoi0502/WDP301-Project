@@ -75,6 +75,13 @@ const getServiceStepGroupName = (bookingItem, fallbackServicePackage) => {
     return PRIMARY_SERVICE_GROUP_NAME;
 };
 
+const getFirstAssignedCareStaffUserId = (bookingItem) => {
+    const assignment = (bookingItem.assigned_care_staff || []).find((item) => !item.released_at)
+        || (bookingItem.assigned_care_staff || [])[0];
+
+    return assignment?.user_id?._id || assignment?.user_id || null;
+};
+
 const buildStepDocumentsForItem = (booking, bookingItem, servicePackage, fallbackServicePackage) => {
     const templates = [...(servicePackage?.steps_template || [])].sort((a, b) => a.order - b.order);
     const effectiveTemplates = templates.length > 0 ? templates : buildFallbackTemplate(bookingItem);
@@ -96,7 +103,7 @@ const buildStepDocumentsForItem = (booking, bookingItem, servicePackage, fallbac
         requires_wash_bay: bookingItem.requires_wash_bay,
         requires_care_staff: bookingItem.requires_care_staff,
         display_staff_type: step.display_staff_type || bookingItem.care_staff_type || null,
-        assigned_staff_id: null,
+        assigned_staff_id: getFirstAssignedCareStaffUserId(bookingItem),
         confirmed_by_staff_id: null,
         status: BOOKING_SERVICE_STEP_STATUS.PENDING,
         instructions: step.instructions || [],

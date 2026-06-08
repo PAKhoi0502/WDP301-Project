@@ -62,4 +62,39 @@ describe('booking module', () => {
         expect(booking.care_staff_end_time).toBeNull();
         expect(booking.assigned_care_staff_ids).toHaveLength(0);
     });
+
+    it('clears booking item care staff assignments when item does not require care staff', async () => {
+        const booking = createBooking({
+            booking_items: [
+                {
+                    item_key: 'ITEM_1',
+                    service_package_id: new mongoose.Types.ObjectId(),
+                    source: 'PRIMARY',
+                    name_snapshot: 'Manual inspection',
+                    duration_minutes: 30,
+                    sequence: 1,
+                    requires_care_staff: false,
+                    care_staff_type: 'VEHICLE_CARE_STAFF',
+                    care_staff_required_count: 1,
+                    care_staff_start_time: new Date('2999-01-01T06:00:00.000Z'),
+                    care_staff_end_time: new Date('2999-01-01T06:30:00.000Z'),
+                    assigned_care_staff: [
+                        {
+                            staff_profile_id: new mongoose.Types.ObjectId(),
+                            user_id: new mongoose.Types.ObjectId(),
+                            assigned_at: new Date('2999-01-01T06:00:00.000Z'),
+                        },
+                    ],
+                },
+            ],
+        });
+
+        await expect(booking.validate()).resolves.toBeUndefined();
+
+        expect(booking.booking_items[0].care_staff_type).toBeNull();
+        expect(booking.booking_items[0].care_staff_required_count).toBe(0);
+        expect(booking.booking_items[0].care_staff_start_time).toBeNull();
+        expect(booking.booking_items[0].care_staff_end_time).toBeNull();
+        expect(booking.booking_items[0].assigned_care_staff).toHaveLength(0);
+    });
 });

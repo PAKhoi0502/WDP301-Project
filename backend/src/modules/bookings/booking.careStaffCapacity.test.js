@@ -23,6 +23,7 @@ jest.mock('../wash-bays/washBay.service', () => ({
 }));
 jest.mock('../staff-profiles/staffProfile.model', () => ({
     countDocuments: jest.fn(),
+    find: jest.fn(),
     findOne: jest.fn(),
 }));
 jest.mock('../service-packages/servicePackage.model', () => ({
@@ -53,6 +54,19 @@ const promotionService = require('../promotions/promotion.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
 const bookingService = require('./booking.service');
+
+const createFindSortLeanQuery = (result = []) => ({
+    sort: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(result),
+    }),
+});
+
+const createPopulateQuery = (result) => ({
+    populate: jest.fn().mockReturnThis(),
+    then(resolve, reject) {
+        return Promise.resolve(result).then(resolve, reject);
+    },
+});
 
 describe('booking care staff capacity', () => {
     const garageId = '507f1f77bcf86cd799439011';
@@ -174,12 +188,15 @@ describe('booking care staff capacity', () => {
         washBayService.assertGarageSupportsVehicleType.mockResolvedValue(undefined);
         WashBay.countDocuments.mockResolvedValue(1);
         StaffProfile.countDocuments.mockResolvedValue(2);
+        StaffProfile.find.mockReturnValue(createFindSortLeanQuery([]));
         Booking.countDocuments.mockResolvedValue(0);
         Booking.exists.mockResolvedValue(null);
         Booking.aggregate.mockResolvedValue([{ total: 1 }]);
         bookingServiceStepService.markStepDone = jest.fn();
+        bookingServiceStepService.createStepsForBooking = jest.fn();
         bookingServiceStepService.areAllRequiredStepsDoneForBookingItem = jest.fn();
         bookingServiceStepService.markResourceReleasedForBookingItem = jest.fn();
+        bookingServiceStepService.assertAllRequiredStepsDone = jest.fn();
         Vehicle.findOne.mockResolvedValue({
             _id: vehicleId,
             customer_id: customerId,
@@ -202,6 +219,102 @@ describe('booking care staff capacity', () => {
                 priority_level: 1,
             }),
         });
+    });
+
+    it('assigns a concrete available care staff when service starts', async () => {
+        const bookingId = '507f1f77bcf86cd799439030';
+        const staffAId = '507f1f77bcf86cd799439031';
+        const userAId = '507f1f77bcf86cd799439032';
+        const staffBId = '507f1f77bcf86cd799439033';
+        const userBId = '507f1f77bcf86cd799439034';
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            vehicle_type: 'CAR',
+            status: 'CHECKED_IN',
+            requires_wash_bay: false,
+            requires_care_staff: true,
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    service_package_id: careServiceId,
+                    source: 'PRIMARY',
+                    name_snapshot: 'Interior care',
+                    sequence: 1,
+                    requires_wash_bay: false,
+                    requires_care_staff: true,
+                    care_staff_type: 'VEHICLE_CARE_STAFF',
+                    care_staff_required_count: 1,
+                    care_staff_start_time: new Date('2999-01-01T06:00:00.000Z'),
+                    care_staff_end_time: new Date('2999-01-01T07:30:00.000Z'),
+                    assigned_care_staff: [],
+                    status: 'PENDING',
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+        StaffProfile.find.mockReturnValue(createFindSortLeanQuery([
+            {
+                _id: staffAId,
+                user_id: userAId,
+                staff_code: 'STAFF_A',
+                staff_type: 'VEHICLE_CARE_STAFF',
+                garage_id: garageId,
+                is_active: true,
+            },
+            {
+                _id: staffBId,
+                user_id: userBId,
+                staff_code: 'STAFF_B',
+                staff_type: 'VEHICLE_CARE_STAFF',
+                garage_id: garageId,
+                is_active: true,
+            },
+        ]));
+        Booking.aggregate
+            .mockResolvedValueOnce([{ total: 1 }])
+            .mockResolvedValueOnce([{ _id: staffAId }]);
+        bookingServiceStepService.createStepsForBooking.mockResolvedValue([
+            {
+                assigned_staff_id: userBId,
+            },
+        ]);
+
+        await bookingService.startService(
+            { _id: '507f1f77bcf86cd799439035', role: 'ADMIN' },
+            bookingId,
+            {}
+        );
+
+        expect(booking.booking_items[0].assigned_care_staff).toHaveLength(1);
+        expect(booking.booking_items[0].assigned_care_staff[0]).toMatchObject({
+            staff_profile_id: staffBId,
+            user_id: userBId,
+            released_at: null,
+        });
+        expect(booking.booking_items[0].assigned_care_staff[0].assigned_at).toBeInstanceOf(Date);
+        expect(booking.assigned_care_staff_ids).toEqual([staffBId]);
+        expect(booking.status).toBe('IN_PROGRESS');
+        expect(bookingServiceStepService.createStepsForBooking).toHaveBeenCalledWith(
+            expect.objectContaining({
+                booking_items: expect.arrayContaining([
+                    expect.objectContaining({
+                        assigned_care_staff: expect.arrayContaining([
+                            expect.objectContaining({
+                                user_id: userBId,
+                            }),
+                        ]),
+                    }),
+                ]),
+            }),
+            careStaffServicePackage
+        );
     });
 
     it('marks slot available when care staff capacity remains', async () => {
@@ -433,7 +546,8 @@ describe('booking care staff capacity', () => {
         expect(booking.markModified).toHaveBeenCalledWith('booking_items');
         expect(bookingServiceStepService.markResourceReleasedForBookingItem).toHaveBeenCalledWith(
             booking._id,
-            'ITEM_1_507F1F77BCF86CD799439015'
+            'ITEM_1_507F1F77BCF86CD799439015',
+            expect.any(Date)
         );
         expect(WashBay.findOneAndUpdate).toHaveBeenCalledWith(
             {
@@ -444,6 +558,104 @@ describe('booking care staff capacity', () => {
                 status: 'AVAILABLE',
                 current_booking_id: null,
             }
+        );
+    });
+
+    it('releases assigned care staff when a care booking item is done', async () => {
+        const staffProfileId = '507f1f77bcf86cd799439031';
+        const userId = '507f1f77bcf86cd799439032';
+        const booking = {
+            _id: '507f1f77bcf86cd799439019',
+            garage_id: garageId,
+            status: 'IN_PROGRESS',
+            wash_bay_id: null,
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    requires_wash_bay: false,
+                    requires_care_staff: true,
+                    status: 'PENDING',
+                    assigned_care_staff: [
+                        {
+                            staff_profile_id: staffProfileId,
+                            user_id: userId,
+                            assigned_at: new Date('2999-01-01T06:00:00.000Z'),
+                            released_at: null,
+                        },
+                    ],
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById.mockResolvedValue(booking);
+        bookingServiceStepService.markStepDone.mockResolvedValue({
+            id: '507f1f77bcf86cd799439020',
+            booking_item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+        });
+        bookingServiceStepService.areAllRequiredStepsDoneForBookingItem.mockResolvedValue(true);
+
+        await bookingService.markBookingServiceStepDone(
+            { _id: '507f1f77bcf86cd799439021', role: 'ADMIN' },
+            booking._id,
+            '507f1f77bcf86cd799439020',
+            {}
+        );
+
+        expect(booking.booking_items[0].status).toBe('DONE');
+        expect(booking.booking_items[0].assigned_care_staff[0].released_at).toBeInstanceOf(Date);
+        expect(bookingServiceStepService.markResourceReleasedForBookingItem).toHaveBeenCalledWith(
+            booking._id,
+            'ITEM_1_507F1F77BCF86CD799439016',
+            booking.booking_items[0].assigned_care_staff[0].released_at
+        );
+    });
+
+    it('releases remaining active care staff assignments when service is completed', async () => {
+        const bookingId = '507f1f77bcf86cd799439019';
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'IN_PROGRESS',
+            wash_bay_id: null,
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    requires_care_staff: true,
+                    status: 'IN_PROGRESS',
+                    assigned_care_staff: [
+                        {
+                            staff_profile_id: '507f1f77bcf86cd799439031',
+                            user_id: '507f1f77bcf86cd799439032',
+                            assigned_at: new Date('2999-01-01T06:00:00.000Z'),
+                            released_at: null,
+                        },
+                    ],
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+        bookingServiceStepService.assertAllRequiredStepsDone.mockResolvedValue(undefined);
+
+        await bookingService.completeService(
+            { _id: '507f1f77bcf86cd799439021', role: 'ADMIN' },
+            bookingId,
+            {}
+        );
+
+        expect(booking.status).toBe('COMPLETED');
+        expect(booking.completed_at).toBeInstanceOf(Date);
+        expect(booking.booking_items[0].assigned_care_staff[0].released_at).toBe(booking.completed_at);
+        expect(bookingServiceStepService.markResourceReleasedForBookingItem).toHaveBeenCalledWith(
+            booking._id,
+            'ITEM_1_507F1F77BCF86CD799439016',
+            booking.completed_at
         );
     });
 });

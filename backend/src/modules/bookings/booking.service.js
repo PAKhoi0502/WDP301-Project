@@ -175,7 +175,24 @@ const populateBookingQuery = (query) => {
         .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes is_active')
         .populate('promotion_id', 'code name discount_type discount_value max_discount_amount min_order_amount start_at end_at is_active')
         .populate('created_by_staff_id', 'full_name email phone role is_active')
-        .populate('canceled_by_id', 'full_name email phone role is_active');
+        .populate('canceled_by_id', 'full_name email phone role is_active')
+        .populate({
+            path: 'assigned_care_staff_ids',
+            select: 'user_id staff_code staff_type garage_id is_active created_at updated_at',
+            populate: {
+                path: 'user_id',
+                select: 'full_name email phone role is_active',
+            },
+        })
+        .populate({
+            path: 'booking_items.assigned_care_staff.staff_profile_id',
+            select: 'user_id staff_code staff_type garage_id is_active created_at updated_at',
+            populate: {
+                path: 'user_id',
+                select: 'full_name email phone role is_active',
+            },
+        })
+        .populate('booking_items.assigned_care_staff.user_id', 'full_name email phone role is_active');
 };
 
 const getBookingDocumentById = async (bookingId) => {
@@ -715,6 +732,68 @@ const countOverlappedCareStaffBookings = async (garageId, careStaffType, careSta
     return result[0]?.total || 0;
 };
 
+const hasTimeOverlap = (startTime, endTime, comparedStartTime, comparedEndTime) => {
+    return startTime < comparedEndTime && endTime > comparedStartTime;
+};
+
+const findActiveCareStaffProfiles = async (garageId, careStaffType = STAFF_TYPES.VEHICLE_CARE_STAFF) => {
+    return StaffProfile.find({
+        garage_id: garageId,
+        staff_type: careStaffType,
+        is_active: true,
+    })
+        .sort({ staff_code: 1, created_at: 1, _id: 1 })
+        .lean();
+};
+
+const getOverlappedAssignedCareStaffProfileIds = async (garageId, careStaffType, careStaffStartTime, careStaffEndTime, excludedBookingId = null) => {
+    const filter = {
+        garage_id: garageId,
+        status: { $in: BOOKING_HOLD_SLOT_STATUSES },
+        booking_items: {
+            $elemMatch: {
+                requires_care_staff: true,
+                status: { $in: BOOKING_ITEM_HOLD_STATUSES },
+                care_staff_type: careStaffType,
+                care_staff_start_time: { $lt: careStaffEndTime },
+                care_staff_end_time: { $gt: careStaffStartTime },
+                'assigned_care_staff.released_at': null,
+            },
+        },
+    };
+
+    if (excludedBookingId) {
+        filter._id = { $ne: excludedBookingId };
+    }
+
+    const result = await Booking.aggregate([
+        { $match: filter },
+        { $unwind: '$booking_items' },
+        {
+            $match: {
+                'booking_items.requires_care_staff': true,
+                'booking_items.status': { $in: BOOKING_ITEM_HOLD_STATUSES },
+                'booking_items.care_staff_type': careStaffType,
+                'booking_items.care_staff_start_time': { $lt: careStaffEndTime },
+                'booking_items.care_staff_end_time': { $gt: careStaffStartTime },
+            },
+        },
+        { $unwind: '$booking_items.assigned_care_staff' },
+        {
+            $match: {
+                'booking_items.assigned_care_staff.released_at': null,
+            },
+        },
+        {
+            $group: {
+                _id: '$booking_items.assigned_care_staff.staff_profile_id',
+            },
+        },
+    ]);
+
+    return new Set(result.map((item) => toObjectIdString(item._id)).filter(Boolean));
+};
+
 const getBookableWashBayCount = async (garageId, vehicleType) => {
     const configuredWashBayCount = await countConfiguredWashBays(garageId, vehicleType);
 
@@ -1022,6 +1101,205 @@ const releaseWashBayForBooking = async (booking) => {
 
 const normalizeBookingItemKey = (value) => normalizeText(value)?.toUpperCase() || null;
 
+const getCareStaffAssignmentStaffProfileId = (assignment) => {
+    return assignment?.staff_profile_id?._id || assignment?.staff_profile_id || null;
+};
+
+const getStaffProfileUserId = (staffProfile) => {
+    return staffProfile?.user_id?._id || staffProfile?.user_id || null;
+};
+
+const getActiveCareStaffAssignments = (bookingItem) => {
+    return (bookingItem.assigned_care_staff || []).filter((assignment) => !assignment.released_at);
+};
+
+const getPlannedBusyCareStaffProfileIds = (plannedAssignments, careStaffType, careStaffStartTime, careStaffEndTime) => {
+    return new Set(plannedAssignments
+        .filter((assignment) => {
+            return assignment.careStaffType === careStaffType
+                && hasTimeOverlap(
+                    assignment.careStaffStartTime,
+                    assignment.careStaffEndTime,
+                    careStaffStartTime,
+                    careStaffEndTime
+                );
+        })
+        .map((assignment) => assignment.staffProfileId)
+        .filter(Boolean));
+};
+
+const addPlannedCareStaffAssignments = (plannedAssignments, bookingItem, assignments) => {
+    for (const assignment of assignments) {
+        const staffProfileId = toObjectIdString(getCareStaffAssignmentStaffProfileId(assignment));
+
+        if (!staffProfileId) {
+            continue;
+        }
+
+        plannedAssignments.push({
+            staffProfileId,
+            careStaffType: bookingItem.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF,
+            careStaffStartTime: bookingItem.care_staff_start_time,
+            careStaffEndTime: bookingItem.care_staff_end_time,
+        });
+    }
+};
+
+const syncAssignedCareStaffIds = (booking) => {
+    const staffProfileIds = [];
+    const seenStaffProfileIds = new Set();
+
+    for (const item of booking.booking_items || []) {
+        for (const assignment of item.assigned_care_staff || []) {
+            const staffProfileId = getCareStaffAssignmentStaffProfileId(assignment);
+            const staffProfileIdString = toObjectIdString(staffProfileId);
+
+            if (!staffProfileIdString || seenStaffProfileIds.has(staffProfileIdString)) {
+                continue;
+            }
+
+            seenStaffProfileIds.add(staffProfileIdString);
+            staffProfileIds.push(staffProfileId);
+        }
+    }
+
+    booking.assigned_care_staff_ids = staffProfileIds;
+
+    if (typeof booking.markModified === 'function') {
+        booking.markModified('assigned_care_staff_ids');
+    }
+};
+
+const releaseCareStaffAssignmentsForBookingItem = (bookingItem, releasedAt) => {
+    let released = false;
+
+    for (const assignment of bookingItem.assigned_care_staff || []) {
+        if (!assignment.released_at) {
+            assignment.released_at = releasedAt;
+            released = true;
+        }
+    }
+
+    return released;
+};
+
+const releaseActiveCareStaffAssignmentsForBooking = (booking, releasedAt) => {
+    const releasedBookingItemKeys = [];
+
+    for (const bookingItem of booking.booking_items || []) {
+        if (releaseCareStaffAssignmentsForBookingItem(bookingItem, releasedAt)) {
+            const bookingItemKey = normalizeBookingItemKey(bookingItem.item_key);
+
+            if (bookingItemKey) {
+                releasedBookingItemKeys.push(bookingItemKey);
+            }
+        }
+    }
+
+    if (releasedBookingItemKeys.length > 0 && typeof booking.markModified === 'function') {
+        booking.markModified('booking_items');
+    }
+
+    return releasedBookingItemKeys;
+};
+
+const assignCareStaffToBookingIfNeeded = async (booking) => {
+    const careStaffItems = [...(booking.booking_items || [])]
+        .filter((item) => item.requires_care_staff)
+        .sort((a, b) => a.sequence - b.sequence);
+
+    if (careStaffItems.length === 0) {
+        syncAssignedCareStaffIds(booking);
+        return;
+    }
+
+    const assignedAt = new Date();
+    const plannedAssignments = [];
+
+    for (const bookingItem of careStaffItems) {
+        bookingItem.assigned_care_staff = bookingItem.assigned_care_staff || [];
+
+        const careStaffType = bookingItem.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF;
+        const requiredCount = bookingItem.care_staff_required_count || 1;
+        const activeAssignments = getActiveCareStaffAssignments(bookingItem);
+
+        addPlannedCareStaffAssignments(plannedAssignments, bookingItem, activeAssignments);
+
+        if (activeAssignments.length >= requiredCount) {
+            continue;
+        }
+
+        const activeProfiles = await findActiveCareStaffProfiles(booking.garage_id, careStaffType);
+
+        if (activeProfiles.length <= 0) {
+            throw new AppError(
+                'No active care staff is available for this garage',
+                400,
+                'NO_ACTIVE_CARE_STAFF'
+            );
+        }
+
+        const busyCareStaffCount = await countOverlappedCareStaffBookings(
+            booking.garage_id,
+            careStaffType,
+            bookingItem.care_staff_start_time,
+            bookingItem.care_staff_end_time,
+            booking._id
+        );
+
+        if (busyCareStaffCount + requiredCount > activeProfiles.length) {
+            throw new AppError('Care staff capacity is full for this time', 409, 'CARE_STAFF_CAPACITY_FULL');
+        }
+
+        const busyAssignedCareStaffProfileIds = await getOverlappedAssignedCareStaffProfileIds(
+            booking.garage_id,
+            careStaffType,
+            bookingItem.care_staff_start_time,
+            bookingItem.care_staff_end_time,
+            booking._id
+        );
+        const plannedBusyCareStaffProfileIds = getPlannedBusyCareStaffProfileIds(
+            plannedAssignments,
+            careStaffType,
+            bookingItem.care_staff_start_time,
+            bookingItem.care_staff_end_time
+        );
+        const activeAssignmentIds = new Set(activeAssignments
+            .map((assignment) => toObjectIdString(getCareStaffAssignmentStaffProfileId(assignment)))
+            .filter(Boolean));
+        const selectedProfiles = activeProfiles
+            .filter((profile) => {
+                const staffProfileId = toObjectIdString(profile._id);
+
+                return staffProfileId
+                    && !busyAssignedCareStaffProfileIds.has(staffProfileId)
+                    && !plannedBusyCareStaffProfileIds.has(staffProfileId)
+                    && !activeAssignmentIds.has(staffProfileId);
+            })
+            .slice(0, requiredCount - activeAssignments.length);
+
+        if (selectedProfiles.length < requiredCount - activeAssignments.length) {
+            throw new AppError('Care staff capacity is full for this time', 409, 'CARE_STAFF_CAPACITY_FULL');
+        }
+
+        const newAssignments = selectedProfiles.map((profile) => ({
+            staff_profile_id: profile._id,
+            user_id: getStaffProfileUserId(profile),
+            assigned_at: assignedAt,
+            released_at: null,
+        }));
+
+        bookingItem.assigned_care_staff.push(...newAssignments);
+        addPlannedCareStaffAssignments(plannedAssignments, bookingItem, newAssignments);
+    }
+
+    syncAssignedCareStaffIds(booking);
+
+    if (typeof booking.markModified === 'function') {
+        booking.markModified('booking_items');
+    }
+};
+
 const markBookingItemDoneIfReady = async (booking, bookingItemKey) => {
     const normalizedBookingItemKey = normalizeBookingItemKey(bookingItemKey);
 
@@ -1046,12 +1324,16 @@ const markBookingItemDoneIfReady = async (booking, bookingItemKey) => {
         return;
     }
 
+    const releasedAt = new Date();
+
     bookingItem.status = 'DONE';
+    releaseCareStaffAssignmentsForBookingItem(bookingItem, releasedAt);
     booking.markModified('booking_items');
     await booking.save();
     await bookingServiceStepService.markResourceReleasedForBookingItem(
         booking._id,
-        normalizedBookingItemKey
+        normalizedBookingItemKey,
+        releasedAt
     );
 
     const hasPendingWashBayItem = (booking.booking_items || []).some((item) => {
@@ -1488,6 +1770,7 @@ const startService = async (user, bookingId, { note } = {}) => {
 
     const servicePackage = await getServicePackageForBooking(booking);
 
+    await assignCareStaffToBookingIfNeeded(booking);
     await assignWashBayToBookingIfNeeded(booking);
 
     booking.status = BOOKING_STATUS.IN_PROGRESS;
@@ -1599,14 +1882,25 @@ const completeService = async (user, bookingId, { note } = {}) => {
     await bookingServiceStepService.assertAllRequiredStepsDone(booking._id);
     await releaseWashBayForBooking(booking);
 
+    const completedAt = new Date();
+    const releasedBookingItemKeys = releaseActiveCareStaffAssignmentsForBooking(booking, completedAt);
+
     booking.status = BOOKING_STATUS.COMPLETED;
-    booking.completed_at = new Date();
+    booking.completed_at = completedAt;
 
     if (note !== undefined) {
         booking.note = normalizeText(note);
     }
 
     await booking.save();
+
+    for (const bookingItemKey of releasedBookingItemKeys) {
+        await bookingServiceStepService.markResourceReleasedForBookingItem(
+            booking._id,
+            bookingItemKey,
+            completedAt
+        );
+    }
 
     const populatedBooking = await getBookingDocumentById(booking._id);
 

@@ -9,6 +9,18 @@ const tags = [
     },
 ];
 
+const careStaffAssignmentSchema = {
+    type: 'object',
+    properties: {
+        staff_profile_id: { type: 'string' },
+        staff_profile: { type: 'object', nullable: true },
+        user_id: { type: 'string' },
+        user: { type: 'object', nullable: true },
+        assigned_at: { type: 'string', format: 'date-time' },
+        released_at: { type: 'string', format: 'date-time', nullable: true },
+    },
+};
+
 const bookingSchema = {
     type: 'object',
     properties: {
@@ -51,6 +63,10 @@ const bookingSchema = {
                     care_staff_required_count: { type: 'number' },
                     care_staff_start_time: { type: 'string', format: 'date-time', nullable: true },
                     care_staff_end_time: { type: 'string', format: 'date-time', nullable: true },
+                    assigned_care_staff: {
+                        type: 'array',
+                        items: careStaffAssignmentSchema,
+                    },
                     status: { type: 'string' },
                 },
             },
@@ -72,6 +88,10 @@ const bookingSchema = {
         assigned_care_staff_ids: {
             type: 'array',
             items: { type: 'string' },
+        },
+        assigned_care_staff: {
+            type: 'array',
+            items: { type: 'object' },
         },
         original_price: { type: 'number' },
         promotion_discount_amount: { type: 'number' },
