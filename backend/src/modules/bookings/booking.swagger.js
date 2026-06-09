@@ -527,6 +527,25 @@ const paths = {
             },
         },
     },
+    '/admin/bookings/{id}/cancel': {
+        patch: {
+            tags: ['Admin Bookings'],
+            summary: 'Cancel booking as staff or admin',
+            security: [{ bearerAuth: [] }],
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            requestBody: {
+                required: false,
+                content: { 'application/json': { schema: cancelBookingRequest } },
+            },
+            responses: {
+                200: {
+                    description: 'Booking canceled',
+                    content: { 'application/json': { schema: successBookingResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/bookings/{id}/check-in': {
         patch: {
             tags: ['Admin Bookings'],

@@ -23,6 +23,7 @@ const {
     BOOKING_STATUS,
     BOOKING_HOLD_SLOT_STATUSES,
     BOOKING_CUSTOMER_CANCELABLE_STATUSES,
+    BOOKING_STAFF_CANCELABLE_STATUSES,
     BOOKING_PAYMENT_METHOD,
     BOOKING_PAYMENT_STATUS,
     DEFAULT_BOOKING_RULE,
@@ -1728,6 +1729,48 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
+const cancelBooking = async (user, bookingId, { reason } = {}) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+
+    if (booking.payment_status === BOOKING_PAYMENT_STATUS.PAID) {
+        throw new AppError('Paid booking cannot be canceled', 409, 'BOOKING_PAID_CANNOT_CANCEL');
+    }
+
+    if (booking.payment_status === BOOKING_PAYMENT_STATUS.PENDING) {
+        throw new AppError('Pending payment booking cannot be canceled', 409, 'BOOKING_PENDING_PAYMENT_CANNOT_CANCEL');
+    }
+
+    if (!BOOKING_STAFF_CANCELABLE_STATUSES.includes(booking.status)) {
+        throw new AppError('Booking cannot be canceled in current status', 400, 'BOOKING_CANCEL_NOT_ALLOWED');
+    }
+
+    await releaseWashBayForBooking(booking);
+
+    const canceledAt = new Date();
+    const releasedBookingItemKeys = releaseActiveCareStaffAssignmentsForBooking(booking, canceledAt);
+
+    booking.status = BOOKING_STATUS.CANCELED;
+    booking.canceled_at = canceledAt;
+    booking.canceled_by_id = user._id;
+    booking.cancel_reason = normalizeText(reason);
+
+    await booking.save();
+
+    for (const bookingItemKey of releasedBookingItemKeys) {
+        await bookingServiceStepService.markResourceReleasedForBookingItem(
+            booking._id,
+            bookingItemKey,
+            canceledAt
+        );
+    }
+
+    const populatedBooking = await getBookingDocumentById(booking._id);
+
+    return BookingMapper.toBookingDto(populatedBooking);
+};
+
 
 const checkInBooking = async (user, bookingId, { note } = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
@@ -1915,6 +1958,7 @@ module.exports = {
     createCustomerBooking,
     createWalkInBooking,
     cancelMyBooking,
+    cancelBooking,
     checkInBooking,
     assignWashBay,
     startService,

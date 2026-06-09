@@ -59,6 +59,18 @@ const cancelMyBooking = asyncHandler(async (req, res) => {
     });
 });
 
+const cancelBooking = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const { body } = req.validated;
+
+    const result = await bookingService.cancelBooking(req.user, id, body || {});
+
+    return sendSuccess(res, {
+        message: 'Cancel booking successfully',
+        data: result,
+    });
+});
+
 const getAllBookings = asyncHandler(async (req, res) => {
     const { query } = req.validated;
 
@@ -149,6 +161,7 @@ module.exports = {
     getMyBookingById,
     createCustomerBooking,
     cancelMyBooking,
+    cancelBooking,
     getAllBookings,
     createWalkInBooking,
     checkInBooking,

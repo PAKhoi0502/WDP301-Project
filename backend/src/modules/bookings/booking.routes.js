@@ -79,6 +79,12 @@ adminRouter.post(
 );
 
 adminRouter.patch(
+    '/:id/cancel',
+    validate(cancelBookingSchema),
+    bookingController.cancelBooking
+);
+
+adminRouter.patch(
     '/:id/check-in',
     validate(bookingOperationSchema),
     bookingController.checkInBooking

@@ -317,6 +317,123 @@ describe('booking care staff capacity', () => {
         );
     });
 
+    it('cancels a confirmed booking as staff or admin', async () => {
+        const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
+        const booking = {
+            _id: '507f1f77bcf86cd799439040',
+            garage_id: garageId,
+            status: 'CONFIRMED',
+            payment_status: 'UNPAID',
+            wash_bay_id: null,
+            booking_items: [],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+
+        const result = await bookingService.cancelBooking(adminUser, booking._id, {
+            reason: 'Customer asked staff to cancel',
+        });
+
+        expect(booking.status).toBe('CANCELED');
+        expect(booking.canceled_at).toBeInstanceOf(Date);
+        expect(booking.canceled_by_id).toBe(adminUser._id);
+        expect(booking.cancel_reason).toBe('Customer asked staff to cancel');
+        expect(booking.save).toHaveBeenCalledTimes(1);
+        expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(bookingServiceStepService.markResourceReleasedForBookingItem).not.toHaveBeenCalled();
+        expect(result.status).toBe('CANCELED');
+    });
+
+    it('cancels an in-progress booking and releases assigned resources', async () => {
+        const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
+        const washBayId = '507f1f77bcf86cd799439042';
+        const booking = {
+            _id: '507f1f77bcf86cd799439040',
+            garage_id: garageId,
+            status: 'IN_PROGRESS',
+            payment_status: 'UNPAID',
+            wash_bay_id: washBayId,
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    requires_care_staff: true,
+                    status: 'IN_PROGRESS',
+                    assigned_care_staff: [
+                        {
+                            staff_profile_id: '507f1f77bcf86cd799439043',
+                            user_id: '507f1f77bcf86cd799439044',
+                            assigned_at: new Date('2999-01-01T06:00:00.000Z'),
+                            released_at: null,
+                        },
+                    ],
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+        WashBay.findOneAndUpdate.mockResolvedValue({});
+
+        await bookingService.cancelBooking(adminUser, booking._id, {
+            reason: 'Garage cannot continue service',
+        });
+
+        expect(booking.status).toBe('CANCELED');
+        expect(booking.canceled_at).toBeInstanceOf(Date);
+        expect(booking.booking_items[0].assigned_care_staff[0].released_at).toBe(booking.canceled_at);
+        expect(booking.markModified).toHaveBeenCalledWith('booking_items');
+        expect(WashBay.findOneAndUpdate).toHaveBeenCalledWith(
+            {
+                _id: washBayId,
+                current_booking_id: booking._id,
+            },
+            {
+                status: 'AVAILABLE',
+                current_booking_id: null,
+            }
+        );
+        expect(bookingServiceStepService.markResourceReleasedForBookingItem).toHaveBeenCalledWith(
+            booking._id,
+            'ITEM_1_507F1F77BCF86CD799439016',
+            booking.canceled_at
+        );
+    });
+
+    it('rejects staff cancel when booking is completed or paid', async () => {
+        const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
+
+        Booking.findById.mockReturnValueOnce({
+            _id: '507f1f77bcf86cd799439040',
+            garage_id: garageId,
+            status: 'COMPLETED',
+            payment_status: 'UNPAID',
+        });
+
+        await expect(bookingService.cancelBooking(adminUser, '507f1f77bcf86cd799439040')).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'BOOKING_CANCEL_NOT_ALLOWED',
+        });
+
+        Booking.findById.mockReturnValueOnce({
+            _id: '507f1f77bcf86cd799439045',
+            garage_id: garageId,
+            status: 'CONFIRMED',
+            payment_status: 'PAID',
+        });
+
+        await expect(bookingService.cancelBooking(adminUser, '507f1f77bcf86cd799439045')).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'BOOKING_PAID_CANNOT_CANCEL',
+        });
+    });
+
     it('marks slot available when care staff capacity remains', async () => {
         const result = await bookingService.getAvailableSlots({
             garage_id: garageId,
