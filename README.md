@@ -119,6 +119,12 @@ PAYOS_WEBHOOK_URL
 PAYOS_PAYMENT_EXPIRE_MINUTES
 
 WAITLIST_OFFER_EXPIRE_MINUTES
+SCHEDULER_ENABLED
+WAITLIST_EXPIRE_JOB_INTERVAL_MS
+WAITLIST_EXPIRE_BATCH_SIZE
+EMAIL_RETRY_JOB_INTERVAL_MS
+EMAIL_RETRY_BATCH_SIZE
+POINT_EXPIRATION_JOB_INTERVAL_MS
 
 SMTP_HOST
 SMTP_PORT
@@ -227,6 +233,7 @@ Customer booking:
 
 - Get available slots
 - Create booking for registered customer vehicle
+- Redeem loyalty points while creating booking
 - View own bookings
 - Cancel own booking before check-in
 
@@ -342,6 +349,8 @@ Staff/Admin endpoints:
 
 ```txt
 GET /api/v1/admin/waitlists
+PATCH /api/v1/admin/waitlists/:id/offer
+PATCH /api/v1/admin/waitlists/:id/expire
 PATCH /api/v1/admin/waitlists/:id/cancel
 ```
 
@@ -362,6 +371,8 @@ Rules:
 - When a customer/staff/admin cancel or staff/admin mark no-show releases a slot, the system offers the slot to the oldest matching `WAITING` waitlist entry.
 - Matching uses garage, service package, vehicle type, start time and add-on set.
 - If the released booking has a customer, that same customer is skipped for the offer.
+- Staff/Admin can manually offer a `WAITING` waitlist entry when its desired slot is currently available.
+- Staff/Admin can manually expire an `OFFERED` waitlist entry.
 - Accepting an offer creates a real booking through the normal customer booking flow, so capacity is rechecked.
 - Waitlist notifications are in-app notifications.
 - Offer expiration is checked when the customer accepts or cancels the waitlist entry.
@@ -397,6 +408,7 @@ COMPLETED + PAID
 
 - WashHistory creation
 - Loyalty point earning
+- Loyalty point redeem/refund transactions
 - PointTransaction creation
 - PromotionUsage creation
 - Payment/reward notification
@@ -414,10 +426,11 @@ Implemented:
 - Email notification delivery with `PENDING`, `SENT` and `FAILED` statuses
 - Forgot password email with reset token when the user account has email
 
-Not implemented yet:
+Background jobs:
 
-- Background worker for automatic email retry
-- Background job for automatic waitlist offer expiration
+- Automatic waitlist offer expiration
+- Automatic email retry for `PENDING` and `FAILED` email notifications
+- Automatic loyalty point expiration
 
 ## Testing
 
@@ -431,8 +444,8 @@ npm test -- --runInBand
 Current verified state:
 
 ```txt
-26 test suites passed
-125 tests passed
+27 test suites passed
+138 tests passed
 ```
 
 ## Current Gaps
@@ -444,6 +457,6 @@ These items are future work. They are not implemented as modules in the current 
 - Survey module
 - Upload module
 - Audit log module
-- Automated background jobs
+- Advanced job dashboard, distributed locks and retry backoff controls
 
 Some npm dependencies are already installed for future capabilities, such as `multer` and `cloudinary`, but the corresponding full modules are not currently implemented.
