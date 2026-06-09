@@ -83,6 +83,29 @@ const cancelWaitlist = asyncHandler(async (req, res) => {
     });
 });
 
+const offerWaitlist = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const { body } = req.validated;
+
+    const result = await bookingWaitlistService.offerWaitlist(req.user, id, body || {});
+
+    return sendSuccess(res, {
+        message: 'Offer waitlist successfully',
+        data: result,
+    });
+});
+
+const expireWaitlistOffer = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+
+    const result = await bookingWaitlistService.expireWaitlistOffer(req.user, id);
+
+    return sendSuccess(res, {
+        message: 'Expire waitlist offer successfully',
+        data: result,
+    });
+});
+
 module.exports = {
     createMyWaitlist,
     getMyWaitlists,
@@ -91,4 +114,6 @@ module.exports = {
     acceptMyWaitlist,
     getAllWaitlists,
     cancelWaitlist,
+    offerWaitlist,
+    expireWaitlistOffer,
 };

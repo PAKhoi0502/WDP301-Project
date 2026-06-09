@@ -96,10 +96,25 @@ const cancelWaitlistSchema = z.object({
         .default({}),
 });
 
+const offerWaitlistSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object({
+            offer_expires_in_minutes: z.coerce.number().int().min(1).max(1440).optional(),
+        })
+        .strict()
+        .default({}),
+});
+
 module.exports = {
     idParamSchema,
     createWaitlistSchema,
     getMyWaitlistsSchema,
     getAdminWaitlistsSchema,
     cancelWaitlistSchema,
+    offerWaitlistSchema,
 };

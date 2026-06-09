@@ -7,6 +7,7 @@ const {
     getMyWaitlistsSchema,
     getAdminWaitlistsSchema,
     cancelWaitlistSchema,
+    offerWaitlistSchema,
 } = require('./bookingWaitlist.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
 const { authenticate, authorize } = require('../../shared/middlewares/auth.middleware');
@@ -53,6 +54,18 @@ adminRouter.get(
     '/',
     validate(getAdminWaitlistsSchema),
     bookingWaitlistController.getAllWaitlists
+);
+
+adminRouter.patch(
+    '/:id/offer',
+    validate(offerWaitlistSchema),
+    bookingWaitlistController.offerWaitlist
+);
+
+adminRouter.patch(
+    '/:id/expire',
+    validate(idParamSchema),
+    bookingWaitlistController.expireWaitlistOffer
 );
 
 adminRouter.patch(

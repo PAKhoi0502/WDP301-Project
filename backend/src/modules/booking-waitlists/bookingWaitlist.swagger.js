@@ -72,6 +72,18 @@ const cancelWaitlistRequest = {
     },
 };
 
+const offerWaitlistRequest = {
+    type: 'object',
+    properties: {
+        offer_expires_in_minutes: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 1440,
+            example: 15,
+        },
+    },
+};
+
 const waitlistResponse = {
     type: 'object',
     properties: {
@@ -258,12 +270,47 @@ const paths = {
             },
         },
     },
+    '/admin/waitlists/{id}/offer': {
+        patch: {
+            tags: ['Admin Waitlists'],
+            summary: 'Offer a waitlist slot as staff or admin',
+            security: [{ bearerAuth: [] }],
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            requestBody: {
+                required: false,
+                content: { 'application/json': { schema: offerWaitlistRequest } },
+            },
+            responses: {
+                200: {
+                    description: 'Waitlist offered',
+                    content: { 'application/json': { schema: waitlistResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/waitlists/{id}/expire': {
+        patch: {
+            tags: ['Admin Waitlists'],
+            summary: 'Expire a waitlist offer as staff or admin',
+            security: [{ bearerAuth: [] }],
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            responses: {
+                200: {
+                    description: 'Waitlist offer expired',
+                    content: { 'application/json': { schema: waitlistResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
 };
 
 const schemas = {
     BookingWaitlist: bookingWaitlistSchema,
     CreateWaitlistRequest: createWaitlistRequest,
     CancelWaitlistRequest: cancelWaitlistRequest,
+    OfferWaitlistRequest: offerWaitlistRequest,
 };
 
 module.exports = {

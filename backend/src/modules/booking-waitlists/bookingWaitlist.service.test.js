@@ -61,7 +61,12 @@ describe('booking waitlist service', () => {
     const addOnServiceId = '507f1f77bcf86cd799439016';
     const waitlistId = '507f1f77bcf86cd799439017';
     const bookingId = '507f1f77bcf86cd799439018';
+    const adminId = '507f1f77bcf86cd799439019';
     const desiredStartTime = new Date('2099-06-10T09:00:00+07:00');
+    const adminUser = {
+        _id: adminId,
+        role: 'ADMIN',
+    };
 
     const baseVehicle = {
         _id: vehicleId,
@@ -234,6 +239,136 @@ describe('booking waitlist service', () => {
         expect(result).toMatchObject({
             id: waitlistId,
             status: WAITLIST_STATUS.OFFERED,
+        });
+    });
+
+    it('allows admin to manually offer a waiting waitlist when the slot is available', async () => {
+        const waitlist = makeWaitlist();
+
+        BookingWaitlist.findById
+            .mockReturnValueOnce(waitlist)
+            .mockReturnValueOnce(createQuery(waitlist));
+        bookingService.getAvailableSlots.mockResolvedValue({
+            slots: [
+                {
+                    start_time: desiredStartTime,
+                    is_available: true,
+                },
+            ],
+        });
+
+        const result = await bookingWaitlistService.offerWaitlist(adminUser, waitlistId, {
+            offer_expires_in_minutes: 30,
+        });
+
+        expect(bookingService.getAvailableSlots).toHaveBeenCalledWith(expect.objectContaining({
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            add_on_service_ids: [],
+            date: '2099-06-10',
+        }));
+        expect(waitlist.status).toBe(WAITLIST_STATUS.OFFERED);
+        expect(waitlist.offered_at).toBeInstanceOf(Date);
+        expect(waitlist.offer_expires_at).toBeInstanceOf(Date);
+        expect(waitlist.source_booking_id).toBeNull();
+        expect(waitlist.save).toHaveBeenCalledTimes(1);
+        expect(notificationService.createInAppNotification).toHaveBeenCalledWith(expect.objectContaining({
+            userId: customerId,
+            type: NOTIFICATION_TYPES.WAITLIST_OFFERED,
+            metadata: expect.objectContaining({
+                offered_by_id: adminId,
+                offer_expires_at: waitlist.offer_expires_at,
+            }),
+        }));
+        expect(result).toMatchObject({
+            id: waitlistId,
+            status: WAITLIST_STATUS.OFFERED,
+        });
+    });
+
+    it('rejects manual waitlist offer when the slot is not available', async () => {
+        const waitlist = makeWaitlist();
+
+        BookingWaitlist.findById.mockReturnValue(waitlist);
+        bookingService.getAvailableSlots.mockResolvedValue({
+            slots: [
+                {
+                    start_time: desiredStartTime,
+                    is_available: false,
+                },
+            ],
+        });
+
+        await expect(bookingWaitlistService.offerWaitlist(adminUser, waitlistId))
+            .rejects
+            .toMatchObject({
+                errorCode: 'WAITLIST_SLOT_NOT_AVAILABLE_FOR_OFFER',
+            });
+
+        expect(waitlist.save).not.toHaveBeenCalled();
+        expect(notificationService.createInAppNotification).not.toHaveBeenCalled();
+    });
+
+    it('allows admin to expire an offered waitlist', async () => {
+        const waitlist = makeWaitlist({
+            status: WAITLIST_STATUS.OFFERED,
+            offered_at: new Date('2099-06-09T08:00:00+07:00'),
+            offer_expires_at: new Date('2099-06-09T08:15:00+07:00'),
+        });
+
+        BookingWaitlist.findById
+            .mockReturnValueOnce(waitlist)
+            .mockReturnValueOnce(createQuery(waitlist));
+
+        const result = await bookingWaitlistService.expireWaitlistOffer(adminUser, waitlistId);
+
+        expect(waitlist.status).toBe(WAITLIST_STATUS.EXPIRED);
+        expect(waitlist.expired_at).toBeInstanceOf(Date);
+        expect(waitlist.save).toHaveBeenCalledTimes(1);
+        expect(notificationService.createInAppNotification).toHaveBeenCalledWith(expect.objectContaining({
+            userId: customerId,
+            type: NOTIFICATION_TYPES.WAITLIST_OFFER_EXPIRED,
+            metadata: expect.objectContaining({
+                expired_by_id: adminId,
+            }),
+        }));
+        expect(result).toMatchObject({
+            id: waitlistId,
+            status: WAITLIST_STATUS.EXPIRED,
+        });
+    });
+
+    it('expires overdue waitlist offers in batches', async () => {
+        const waitlist = makeWaitlist({
+            status: WAITLIST_STATUS.OFFERED,
+            offered_at: new Date('2026-01-01T08:00:00+07:00'),
+            offer_expires_at: new Date('2026-01-01T08:15:00+07:00'),
+        });
+
+        BookingWaitlist.find.mockReturnValue(createQuery([waitlist]));
+
+        const result = await bookingWaitlistService.expireExpiredOffers({ limit: 10 });
+
+        expect(BookingWaitlist.find).toHaveBeenCalledWith({
+            status: WAITLIST_STATUS.OFFERED,
+            offer_expires_at: { $lte: expect.any(Date) },
+        });
+        expect(waitlist.status).toBe(WAITLIST_STATUS.EXPIRED);
+        expect(waitlist.expired_at).toBeInstanceOf(Date);
+        expect(waitlist.save).toHaveBeenCalledTimes(1);
+        expect(notificationService.createInAppNotification).toHaveBeenCalledWith(expect.objectContaining({
+            userId: customerId,
+            type: NOTIFICATION_TYPES.WAITLIST_OFFER_EXPIRED,
+        }));
+        expect(result).toMatchObject({
+            attempted: 1,
+            expired: 1,
+            data: [
+                {
+                    id: waitlistId,
+                    status: WAITLIST_STATUS.EXPIRED,
+                },
+            ],
         });
     });
 

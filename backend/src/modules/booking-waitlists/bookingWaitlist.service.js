@@ -73,6 +73,20 @@ const addMinutes = (date, minutes) => {
     return new Date(date.getTime() + minutes * 60 * 1000);
 };
 
+const normalizeOfferExpireMinutes = (value) => {
+    if (value === undefined || value === null) {
+        return DEFAULT_OFFER_EXPIRE_MINUTES;
+    }
+
+    const minutes = Number(value);
+
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+        throw new AppError('Offer expiration minutes must be between 1 and 1440', 400, 'INVALID_WAITLIST_OFFER_EXPIRE_MINUTES');
+    }
+
+    return minutes;
+};
+
 const getTimezoneOffsetMinutes = (offset) => {
     const match = /^([+-])(\d{2}):(\d{2})$/.exec(offset);
 
@@ -255,6 +269,33 @@ const assertDesiredSlotCanUseWaitlist = async ({
     }
 };
 
+const assertDesiredSlotIsAvailableForOffer = async ({
+    garageId,
+    servicePackageId,
+    addOnServiceIds,
+    desiredStartTime,
+}) => {
+    const bookingService = require('../bookings/booking.service');
+    const slotsResult = await bookingService.getAvailableSlots({
+        garage_id: toObjectIdString(garageId),
+        service_package_id: toObjectIdString(servicePackageId),
+        add_on_service_ids: normalizeAddOnServiceIds(addOnServiceIds),
+        date: toLocalDateString(desiredStartTime),
+    });
+    const desiredStartTimeValue = desiredStartTime.getTime();
+    const slot = (slotsResult.slots || []).find((item) => {
+        return new Date(item.start_time).getTime() === desiredStartTimeValue;
+    });
+
+    if (!slot) {
+        throw new AppError('Waitlist desired slot does not exist', 400, 'WAITLIST_SLOT_NOT_FOUND');
+    }
+
+    if (!slot.is_available) {
+        throw new AppError('Waitlist slot is not currently available for offer', 409, 'WAITLIST_SLOT_NOT_AVAILABLE_FOR_OFFER');
+    }
+};
+
 const emitWaitlistNotification = async ({ userId, type, title, message, waitlist, metadata = {} }) => {
     return notificationService.createInAppNotification({
         userId,
@@ -381,6 +422,31 @@ const expireOfferIfNeeded = async (waitlist) => {
     });
 
     return true;
+};
+
+const expireExpiredOffers = async ({ limit = 50 } = {}) => {
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const now = new Date();
+    const waitlists = await BookingWaitlist.find({
+        status: WAITLIST_STATUS.OFFERED,
+        offer_expires_at: { $lte: now },
+    })
+        .sort({ offer_expires_at: 1, created_at: 1 })
+        .limit(safeLimit);
+    const expiredWaitlists = [];
+
+    for (const waitlist of waitlists) {
+        if (await expireOfferIfNeeded(waitlist)) {
+            expiredWaitlists.push(waitlist);
+        }
+    }
+
+    return {
+        checked_at: now,
+        attempted: waitlists.length,
+        expired: expiredWaitlists.length,
+        data: BookingWaitlistMapper.toBookingWaitlistDtoList(expiredWaitlists),
+    };
 };
 
 const createMyWaitlist = async (customerId, payload = {}) => {
@@ -570,6 +636,81 @@ const cancelWaitlist = async (user, waitlistId, { reason } = {}) => {
     return BookingWaitlistMapper.toBookingWaitlistDto(canceledWaitlist);
 };
 
+const offerWaitlist = async (user, waitlistId, { offer_expires_in_minutes } = {}) => {
+    const waitlist = await getRawWaitlistDocumentById(waitlistId);
+
+    await assertStaffCanAccessWaitlist(user, waitlist);
+    await expireOfferIfNeeded(waitlist);
+
+    if (waitlist.status !== WAITLIST_STATUS.WAITING) {
+        throw new AppError('Waitlist cannot be offered in current status', 400, 'WAITLIST_OFFER_NOT_ALLOWED');
+    }
+
+    const desiredStartTime = parseDateTime(waitlist.desired_start_time, 'desired_start_time');
+
+    assertDesiredStartTimeIsFuture(desiredStartTime);
+    await assertDesiredSlotIsAvailableForOffer({
+        garageId: waitlist.garage_id,
+        servicePackageId: waitlist.service_package_id,
+        addOnServiceIds: waitlist.add_on_service_ids,
+        desiredStartTime,
+    });
+
+    const now = new Date();
+    const offerExpireMinutes = normalizeOfferExpireMinutes(offer_expires_in_minutes);
+
+    waitlist.status = WAITLIST_STATUS.OFFERED;
+    waitlist.offered_at = now;
+    waitlist.offer_expires_at = addMinutes(now, offerExpireMinutes);
+    waitlist.source_booking_id = null;
+
+    await waitlist.save();
+    await emitWaitlistNotification({
+        userId: waitlist.customer_id,
+        type: NOTIFICATION_TYPES.WAITLIST_OFFERED,
+        title: 'Waitlist slot available',
+        message: 'A slot from your waitlist is now available. Accept it before the offer expires.',
+        waitlist,
+        metadata: {
+            offered_by_id: toObjectIdString(user._id),
+            offer_expires_at: waitlist.offer_expires_at,
+        },
+    });
+
+    const populatedWaitlist = await getWaitlistDocumentById(waitlist._id);
+
+    return BookingWaitlistMapper.toBookingWaitlistDto(populatedWaitlist);
+};
+
+const expireWaitlistOffer = async (user, waitlistId) => {
+    const waitlist = await getRawWaitlistDocumentById(waitlistId);
+
+    await assertStaffCanAccessWaitlist(user, waitlist);
+
+    if (waitlist.status !== WAITLIST_STATUS.OFFERED) {
+        throw new AppError('Waitlist offer cannot be expired in current status', 400, 'WAITLIST_EXPIRE_NOT_ALLOWED');
+    }
+
+    waitlist.status = WAITLIST_STATUS.EXPIRED;
+    waitlist.expired_at = new Date();
+
+    await waitlist.save();
+    await emitWaitlistNotification({
+        userId: waitlist.customer_id,
+        type: NOTIFICATION_TYPES.WAITLIST_OFFER_EXPIRED,
+        title: 'Waitlist offer expired',
+        message: 'Your waitlist offer has expired.',
+        waitlist,
+        metadata: {
+            expired_by_id: toObjectIdString(user._id),
+        },
+    });
+
+    const populatedWaitlist = await getWaitlistDocumentById(waitlist._id);
+
+    return BookingWaitlistMapper.toBookingWaitlistDto(populatedWaitlist);
+};
+
 const offerNextForReleasedBooking = async (booking) => {
     if (!booking || !booking.start_time) {
         return null;
@@ -678,6 +819,9 @@ module.exports = {
     getAllWaitlists,
     cancelMyWaitlist,
     cancelWaitlist,
+    offerWaitlist,
+    expireWaitlistOffer,
+    expireExpiredOffers,
     offerNextForReleasedBooking,
     acceptMyWaitlist,
 };
