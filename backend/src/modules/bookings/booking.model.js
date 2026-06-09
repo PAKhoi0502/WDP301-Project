@@ -406,6 +406,24 @@ const bookingSchema = new mongoose.Schema(
             default: null,
         },
 
+        no_show_at: {
+            type: Date,
+            default: null,
+        },
+
+        no_show_by_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        no_show_reason: {
+            type: String,
+            trim: true,
+            maxlength: [500, 'No-show reason must not exceed 500 characters'],
+            default: null,
+        },
+
         canceled_by_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',

@@ -434,6 +434,98 @@ describe('booking care staff capacity', () => {
         });
     });
 
+    it('marks a confirmed booking as no-show as staff or admin', async () => {
+        const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
+        const booking = {
+            _id: '507f1f77bcf86cd799439046',
+            garage_id: garageId,
+            status: 'CONFIRMED',
+            payment_status: 'UNPAID',
+            is_walk_in: false,
+            wash_bay_id: null,
+            booking_items: [],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+
+        const result = await bookingService.markNoShow(adminUser, booking._id, {
+            reason: 'Customer did not arrive',
+        });
+
+        expect(booking.status).toBe('NO_SHOW');
+        expect(booking.no_show_at).toBeInstanceOf(Date);
+        expect(booking.no_show_by_id).toBe(adminUser._id);
+        expect(booking.no_show_reason).toBe('Customer did not arrive');
+        expect(booking.save).toHaveBeenCalledTimes(1);
+        expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(bookingServiceStepService.markResourceReleasedForBookingItem).not.toHaveBeenCalled();
+        expect(result.status).toBe('NO_SHOW');
+    });
+
+    it('rejects no-show when booking was already checked in or paid', async () => {
+        const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
+
+        Booking.findById.mockReturnValueOnce({
+            _id: '507f1f77bcf86cd799439046',
+            garage_id: garageId,
+            status: 'CHECKED_IN',
+            payment_status: 'UNPAID',
+            is_walk_in: false,
+        });
+
+        await expect(bookingService.markNoShow(adminUser, '507f1f77bcf86cd799439046')).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'BOOKING_NO_SHOW_NOT_ALLOWED',
+        });
+
+        Booking.findById.mockReturnValueOnce({
+            _id: '507f1f77bcf86cd799439047',
+            garage_id: garageId,
+            status: 'CONFIRMED',
+            payment_status: 'PAID',
+            is_walk_in: false,
+        });
+
+        await expect(bookingService.markNoShow(adminUser, '507f1f77bcf86cd799439047')).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'BOOKING_PAID_CANNOT_NO_SHOW',
+        });
+
+        Booking.findById.mockReturnValueOnce({
+            _id: '507f1f77bcf86cd799439049',
+            garage_id: garageId,
+            status: 'CONFIRMED',
+            payment_status: 'PENDING',
+            is_walk_in: false,
+        });
+
+        await expect(bookingService.markNoShow(adminUser, '507f1f77bcf86cd799439049')).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'BOOKING_PENDING_PAYMENT_CANNOT_NO_SHOW',
+        });
+    });
+
+    it('rejects no-show for walk-in booking', async () => {
+        const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
+
+        Booking.findById.mockReturnValueOnce({
+            _id: '507f1f77bcf86cd799439048',
+            garage_id: garageId,
+            status: 'CONFIRMED',
+            payment_status: 'UNPAID',
+            is_walk_in: true,
+        });
+
+        await expect(bookingService.markNoShow(adminUser, '507f1f77bcf86cd799439048')).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'WALK_IN_BOOKING_CANNOT_NO_SHOW',
+        });
+    });
+
     it('marks slot available when care staff capacity remains', async () => {
         const result = await bookingService.getAvailableSlots({
             garage_id: garageId,

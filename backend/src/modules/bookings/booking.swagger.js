@@ -116,6 +116,10 @@ const bookingSchema = {
         canceled_at: { type: 'string', format: 'date-time', nullable: true },
         canceled_by_id: { type: 'string', nullable: true },
         cancel_reason: { type: 'string', nullable: true },
+        no_show_at: { type: 'string', format: 'date-time', nullable: true },
+        no_show_by_id: { type: 'string', nullable: true },
+        no_show_by: { type: 'object', nullable: true },
+        no_show_reason: { type: 'string', nullable: true },
         reward_processed: { type: 'boolean' },
         reward_processed_at: { type: 'string', format: 'date-time', nullable: true },
         note: { type: 'string', nullable: true },
@@ -188,6 +192,13 @@ const cancelBookingRequest = {
     type: 'object',
     properties: {
         reason: { type: 'string', example: 'Customer changed schedule' },
+    },
+};
+
+const markNoShowRequest = {
+    type: 'object',
+    properties: {
+        reason: { type: 'string', example: 'Customer did not arrive for the scheduled appointment' },
     },
 };
 
@@ -546,6 +557,25 @@ const paths = {
             },
         },
     },
+    '/admin/bookings/{id}/mark-no-show': {
+        patch: {
+            tags: ['Admin Bookings'],
+            summary: 'Mark booking as no-show',
+            security: [{ bearerAuth: [] }],
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            requestBody: {
+                required: false,
+                content: { 'application/json': { schema: markNoShowRequest } },
+            },
+            responses: {
+                200: {
+                    description: 'Booking marked no-show',
+                    content: { 'application/json': { schema: successBookingResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/bookings/{id}/check-in': {
         patch: {
             tags: ['Admin Bookings'],
@@ -756,6 +786,7 @@ const schemas = {
     CreateCustomerBookingRequest: createCustomerBookingRequest,
     CreateWalkInBookingRequest: createWalkInBookingRequest,
     CancelBookingRequest: cancelBookingRequest,
+    MarkNoShowRequest: markNoShowRequest,
     BookingOperationRequest: bookingOperationRequest,
     AssignWashBayRequest: assignWashBayRequest,
     ServiceStepDoneRequest: serviceStepDoneRequest,

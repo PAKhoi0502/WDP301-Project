@@ -71,6 +71,18 @@ const cancelBooking = asyncHandler(async (req, res) => {
     });
 });
 
+const markNoShow = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const { body } = req.validated;
+
+    const result = await bookingService.markNoShow(req.user, id, body || {});
+
+    return sendSuccess(res, {
+        message: 'Mark booking no-show successfully',
+        data: result,
+    });
+});
+
 const getAllBookings = asyncHandler(async (req, res) => {
     const { query } = req.validated;
 
@@ -162,6 +174,7 @@ module.exports = {
     createCustomerBooking,
     cancelMyBooking,
     cancelBooking,
+    markNoShow,
     getAllBookings,
     createWalkInBooking,
     checkInBooking,

@@ -24,6 +24,7 @@ const {
     BOOKING_HOLD_SLOT_STATUSES,
     BOOKING_CUSTOMER_CANCELABLE_STATUSES,
     BOOKING_STAFF_CANCELABLE_STATUSES,
+    BOOKING_STAFF_NO_SHOW_STATUSES,
     BOOKING_PAYMENT_METHOD,
     BOOKING_PAYMENT_STATUS,
     DEFAULT_BOOKING_RULE,
@@ -177,6 +178,7 @@ const populateBookingQuery = (query) => {
         .populate('promotion_id', 'code name discount_type discount_value max_discount_amount min_order_amount start_at end_at is_active')
         .populate('created_by_staff_id', 'full_name email phone role is_active')
         .populate('canceled_by_id', 'full_name email phone role is_active')
+        .populate('no_show_by_id', 'full_name email phone role is_active')
         .populate({
             path: 'assigned_care_staff_ids',
             select: 'user_id staff_code staff_type garage_id is_active created_at updated_at',
@@ -1771,6 +1773,52 @@ const cancelBooking = async (user, bookingId, { reason } = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
+const markNoShow = async (user, bookingId, { reason } = {}) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+
+    if (booking.is_walk_in) {
+        throw new AppError('Walk-in booking cannot be marked no-show', 400, 'WALK_IN_BOOKING_CANNOT_NO_SHOW');
+    }
+
+    if (booking.payment_status === BOOKING_PAYMENT_STATUS.PAID) {
+        throw new AppError('Paid booking cannot be marked no-show', 409, 'BOOKING_PAID_CANNOT_NO_SHOW');
+    }
+
+    if (booking.payment_status === BOOKING_PAYMENT_STATUS.PENDING) {
+        throw new AppError('Pending payment booking cannot be marked no-show', 409, 'BOOKING_PENDING_PAYMENT_CANNOT_NO_SHOW');
+    }
+
+    if (!BOOKING_STAFF_NO_SHOW_STATUSES.includes(booking.status)) {
+        throw new AppError('Booking cannot be marked no-show in current status', 400, 'BOOKING_NO_SHOW_NOT_ALLOWED');
+    }
+
+    await releaseWashBayForBooking(booking);
+
+    const noShowAt = new Date();
+    const releasedBookingItemKeys = releaseActiveCareStaffAssignmentsForBooking(booking, noShowAt);
+
+    booking.status = BOOKING_STATUS.NO_SHOW;
+    booking.no_show_at = noShowAt;
+    booking.no_show_by_id = user._id;
+    booking.no_show_reason = normalizeText(reason);
+
+    await booking.save();
+
+    for (const bookingItemKey of releasedBookingItemKeys) {
+        await bookingServiceStepService.markResourceReleasedForBookingItem(
+            booking._id,
+            bookingItemKey,
+            noShowAt
+        );
+    }
+
+    const populatedBooking = await getBookingDocumentById(booking._id);
+
+    return BookingMapper.toBookingDto(populatedBooking);
+};
+
 
 const checkInBooking = async (user, bookingId, { note } = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
@@ -1959,6 +2007,7 @@ module.exports = {
     createWalkInBooking,
     cancelMyBooking,
     cancelBooking,
+    markNoShow,
     checkInBooking,
     assignWashBay,
     startService,

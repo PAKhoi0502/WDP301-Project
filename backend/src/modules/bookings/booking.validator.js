@@ -186,6 +186,20 @@ const cancelBookingSchema = z.object({
         .default({}),
 });
 
+const markNoShowSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object({
+            reason: optionalTextField(500),
+        })
+        .strict()
+        .default({}),
+});
+
 const bookingOperationSchema = z.object({
     params: z
         .object({
@@ -237,6 +251,7 @@ module.exports = {
     createCustomerBookingSchema,
     createWalkInBookingSchema,
     cancelBookingSchema,
+    markNoShowSchema,
     bookingOperationSchema,
     assignWashBaySchema,
     serviceStepParamSchema,

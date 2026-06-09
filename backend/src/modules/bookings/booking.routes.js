@@ -11,6 +11,7 @@ const {
     createCustomerBookingSchema,
     createWalkInBookingSchema,
     cancelBookingSchema,
+    markNoShowSchema,
     bookingOperationSchema,
     assignWashBaySchema,
     serviceStepParamSchema,
@@ -82,6 +83,12 @@ adminRouter.patch(
     '/:id/cancel',
     validate(cancelBookingSchema),
     bookingController.cancelBooking
+);
+
+adminRouter.patch(
+    '/:id/mark-no-show',
+    validate(markNoShowSchema),
+    bookingController.markNoShow
 );
 
 adminRouter.patch(
