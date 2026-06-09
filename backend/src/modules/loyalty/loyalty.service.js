@@ -45,8 +45,14 @@ const isSameObjectId = (left, right) => {
     return left.toString() === right.toString();
 };
 
-const getActiveRedeemRule = async () => {
-    const redeemRule = await LoyaltyRedeemRule.findOne({ is_active: true }).sort({ created_at: -1 });
+const getActiveRedeemRule = async (session = null) => {
+    const query = LoyaltyRedeemRule.findOne({ is_active: true }).sort({ created_at: -1 });
+
+    if (session) {
+        query.session(session);
+    }
+
+    const redeemRule = await query;
 
     if (!redeemRule) {
         throw new AppError('Active loyalty redeem rule not found', 404, 'LOYALTY_REDEEM_RULE_NOT_FOUND');
@@ -201,6 +207,265 @@ const calculatePointsDiscountAmount = ({ usedPoints, availablePoints, priceAfter
     }
 
     return pointsDiscountAmount;
+};
+
+const calculateBookingRedeemDiscount = async ({
+    customerId,
+    usedPoints = 0,
+    priceAfterPromotion,
+    session = null,
+}) => {
+    const normalizedUsedPoints = Number(usedPoints) || 0;
+
+    if (normalizedUsedPoints <= 0) {
+        return {
+            loyalty: null,
+            redeem_rule: null,
+            used_points: 0,
+            points_discount_amount: 0,
+        };
+    }
+
+    const loyalty = await getOrCreateCustomerLoyalty(customerId, session);
+    const redeemRule = await getActiveRedeemRule(session);
+    const pointsDiscountAmount = calculatePointsDiscountAmount({
+        usedPoints: normalizedUsedPoints,
+        availablePoints: loyalty.available_points,
+        priceAfterPromotion,
+        redeemRule,
+    });
+
+    return {
+        loyalty,
+        redeem_rule: redeemRule,
+        used_points: normalizedUsedPoints,
+        points_discount_amount: pointsDiscountAmount,
+    };
+};
+
+const getRedeemSourceTransactions = async ({ customerId, usedPoints, session = null }) => {
+    const query = PointTransaction.find({
+        customer_id: customerId,
+        type: {
+            $in: [POINT_TRANSACTION_TYPES.EARN, POINT_TRANSACTION_TYPES.REFUND],
+        },
+        remaining_points: { $gt: 0 },
+    }).sort({ expires_at: 1, created_at: 1 });
+
+    if (session) {
+        query.session(session);
+    }
+
+    const sourceTransactions = await query;
+    const availableSourcePoints = sourceTransactions.reduce(
+        (sum, transaction) => sum + transaction.remaining_points,
+        0
+    );
+
+    if (availableSourcePoints < usedPoints) {
+        throw new AppError('Redeem source points are not enough', 409, 'LOYALTY_REDEEM_SOURCE_POINTS_NOT_ENOUGH');
+    }
+
+    return sourceTransactions;
+};
+
+const consumeRedeemSourceTransactions = async ({ sourceTransactions, usedPoints, session = null }) => {
+    let remainingToConsume = usedPoints;
+    const consumedSourceIds = [];
+
+    for (const transaction of sourceTransactions) {
+        if (remainingToConsume <= 0) {
+            break;
+        }
+
+        const consumedPoints = Math.min(transaction.remaining_points, remainingToConsume);
+
+        transaction.remaining_points -= consumedPoints;
+        remainingToConsume -= consumedPoints;
+        consumedSourceIds.push(transaction._id);
+
+        await transaction.save(session ? { session } : undefined);
+    }
+
+    return consumedSourceIds;
+};
+
+const findPointTransactionByBookingAndType = async ({ bookingId, type, session = null }) => {
+    const query = PointTransaction.findOne({
+        booking_id: bookingId,
+        type,
+    });
+
+    if (session) {
+        query.session(session);
+    }
+
+    return query;
+};
+
+const redeemPointsForBooking = async ({
+    booking,
+    customerId,
+    usedPoints = 0,
+    priceAfterPromotion,
+    actorId = null,
+    expectedPointsDiscountAmount,
+    session = null,
+}) => {
+    const normalizedUsedPoints = Number(usedPoints) || 0;
+
+    if (!booking || !customerId || normalizedUsedPoints <= 0) {
+        return null;
+    }
+
+    const existingRedeemTransaction = await findPointTransactionByBookingAndType({
+        bookingId: booking._id,
+        type: POINT_TRANSACTION_TYPES.REDEEM,
+        session,
+    });
+
+    if (existingRedeemTransaction) {
+        return {
+            loyalty: null,
+            point_transaction: LoyaltyMapper.toPointTransactionDto(existingRedeemTransaction),
+            used_points: normalizedUsedPoints,
+            points_discount_amount: booking.points_discount_amount || expectedPointsDiscountAmount || 0,
+            already_processed: true,
+        };
+    }
+
+    const redeemContext = await calculateBookingRedeemDiscount({
+        customerId,
+        usedPoints: normalizedUsedPoints,
+        priceAfterPromotion,
+        session,
+    });
+
+    if (
+        expectedPointsDiscountAmount !== undefined
+        && redeemContext.points_discount_amount !== expectedPointsDiscountAmount
+    ) {
+        throw new AppError('Redeem discount changed before booking creation', 409, 'LOYALTY_REDEEM_DISCOUNT_CHANGED');
+    }
+
+    const sourceTransactions = await getRedeemSourceTransactions({
+        customerId,
+        usedPoints: normalizedUsedPoints,
+        session,
+    });
+    const sourceTransactionIds = await consumeRedeemSourceTransactions({
+        sourceTransactions,
+        usedPoints: normalizedUsedPoints,
+        session,
+    });
+    const loyalty = redeemContext.loyalty;
+    const balanceBefore = loyalty.available_points;
+    const balanceAfter = balanceBefore - normalizedUsedPoints;
+
+    loyalty.available_points = balanceAfter;
+    loyalty.redeemed_points += normalizedUsedPoints;
+
+    await loyalty.save(session ? { session } : undefined);
+
+    const transactions = await PointTransaction.create(
+        [
+            {
+                customer_id: customerId,
+                booking_id: booking._id,
+                type: POINT_TRANSACTION_TYPES.REDEEM,
+                points: -normalizedUsedPoints,
+                remaining_points: 0,
+                balance_before: balanceBefore,
+                balance_after: balanceAfter,
+                description: 'Redeem points for booking discount',
+                earned_at: null,
+                expires_at: null,
+                expired_at: null,
+                source_transaction_ids: sourceTransactionIds,
+                created_by: actorId || null,
+            },
+        ],
+        session ? { session } : undefined
+    );
+
+    return {
+        loyalty: LoyaltyMapper.toCustomerLoyaltyDto(loyalty),
+        point_transaction: LoyaltyMapper.toPointTransactionDto(transactions[0]),
+        used_points: normalizedUsedPoints,
+        points_discount_amount: redeemContext.points_discount_amount,
+        already_processed: false,
+    };
+};
+
+const refundRedeemedPointsForBooking = async ({ booking, actorId = null, session = null }) => {
+    const usedPoints = Number(booking?.used_points) || 0;
+
+    if (!booking?.customer_id || !booking?._id || usedPoints <= 0) {
+        return null;
+    }
+
+    const existingRefundTransaction = await findPointTransactionByBookingAndType({
+        bookingId: booking._id,
+        type: POINT_TRANSACTION_TYPES.REFUND,
+        session,
+    });
+
+    if (existingRefundTransaction) {
+        return {
+            loyalty: null,
+            point_transaction: LoyaltyMapper.toPointTransactionDto(existingRefundTransaction),
+            refunded_points: usedPoints,
+            already_processed: true,
+        };
+    }
+
+    const redeemTransaction = await findPointTransactionByBookingAndType({
+        bookingId: booking._id,
+        type: POINT_TRANSACTION_TYPES.REDEEM,
+        session,
+    });
+
+    if (!redeemTransaction) {
+        throw new AppError('Redeem point transaction not found for booking', 409, 'LOYALTY_REDEEM_TRANSACTION_NOT_FOUND');
+    }
+
+    const now = new Date();
+    const loyalty = await getOrCreateCustomerLoyalty(booking.customer_id, session);
+    const balanceBefore = loyalty.available_points;
+    const balanceAfter = balanceBefore + usedPoints;
+
+    loyalty.available_points = balanceAfter;
+    loyalty.redeemed_points = Math.max(0, loyalty.redeemed_points - usedPoints);
+
+    await loyalty.save(session ? { session } : undefined);
+
+    const transactions = await PointTransaction.create(
+        [
+            {
+                customer_id: booking.customer_id,
+                booking_id: booking._id,
+                type: POINT_TRANSACTION_TYPES.REFUND,
+                points: usedPoints,
+                remaining_points: usedPoints,
+                balance_before: balanceBefore,
+                balance_after: balanceAfter,
+                description: 'Refund redeemed points for canceled booking',
+                earned_at: now,
+                expires_at: addMonths(now, POINT_EXPIRY_MONTHS),
+                expired_at: null,
+                source_transaction_ids: redeemTransaction?._id ? [redeemTransaction._id] : [],
+                created_by: actorId || null,
+            },
+        ],
+        session ? { session } : undefined
+    );
+
+    return {
+        loyalty: LoyaltyMapper.toCustomerLoyaltyDto(loyalty),
+        point_transaction: LoyaltyMapper.toPointTransactionDto(transactions[0]),
+        refunded_points: usedPoints,
+        already_processed: false,
+    };
 };
 
 
@@ -877,6 +1142,9 @@ module.exports = {
     getOrCreateCustomerLoyalty,
     calculateEarnedPoints,
     processBookingLoyalty,
+    calculateBookingRedeemDiscount,
+    redeemPointsForBooking,
+    refundRedeemedPointsForBooking,
     calculateRedeemPreview,
     reviewCustomerTier,
     getCustomerLoyaltyOverview,

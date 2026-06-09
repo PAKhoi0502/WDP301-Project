@@ -265,6 +265,7 @@ const customerCreateFields = [
     'add_on_service_ids',
     'start_time',
     'promotion_code',
+    'used_points',
     'note',
 ];
 

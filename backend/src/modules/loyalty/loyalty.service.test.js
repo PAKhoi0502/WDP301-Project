@@ -32,6 +32,7 @@ jest.mock('./customerLoyalty.model', () => ({
 jest.mock('./pointTransaction.model', () => ({
     create: jest.fn(),
     find: jest.fn(),
+    findOne: jest.fn(),
     countDocuments: jest.fn(),
     aggregate: jest.fn(),
     updateMany: jest.fn(),
@@ -252,6 +253,154 @@ describe('loyalty service business rules', () => {
             points_discount_amount: 50000,
             discount_amount: 70000,
             final_price: 130000,
+        });
+    });
+
+    it('redeems points for booking and consumes source transaction balances', async () => {
+        const sourceAId = new mongoose.Types.ObjectId();
+        const sourceBId = new mongoose.Types.ObjectId();
+        const redeemTransactionId = new mongoose.Types.ObjectId();
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            available_points: 100,
+            redeemed_points: 10,
+        });
+        const sourceA = {
+            _id: sourceAId,
+            remaining_points: 40,
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        const sourceB = {
+            _id: sourceBId,
+            remaining_points: 50,
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(loyalty));
+        LoyaltyRedeemRule.findOne.mockReturnValue(createQueryMock({
+            _id: new mongoose.Types.ObjectId(),
+            point_value_amount: 1000,
+            min_redeem_points: 10,
+            redeem_step: 10,
+            max_redeem_percent: 100,
+            is_active: true,
+        }));
+        PointTransaction.findOne.mockReturnValue(createQueryMock(null));
+        PointTransaction.find.mockReturnValue(createQueryMock([sourceA, sourceB]));
+        PointTransaction.create.mockResolvedValue([
+            {
+                _id: redeemTransactionId,
+                customer_id: customerId,
+                booking_id: bookingId,
+                type: 'REDEEM',
+                points: -70,
+                remaining_points: 0,
+                balance_before: 100,
+                balance_after: 30,
+            },
+        ]);
+
+        const result = await loyaltyService.redeemPointsForBooking({
+            booking: {
+                _id: bookingId,
+                points_discount_amount: 70000,
+            },
+            customerId,
+            usedPoints: 70,
+            priceAfterPromotion: 200000,
+            actorId: customerId,
+            expectedPointsDiscountAmount: 70000,
+        });
+
+        expect(sourceA.remaining_points).toBe(0);
+        expect(sourceB.remaining_points).toBe(20);
+        expect(sourceA.save).toHaveBeenCalledTimes(1);
+        expect(sourceB.save).toHaveBeenCalledTimes(1);
+        expect(loyalty.available_points).toBe(30);
+        expect(loyalty.redeemed_points).toBe(80);
+        expect(PointTransaction.create).toHaveBeenCalledWith(
+            [
+                expect.objectContaining({
+                    customer_id: customerId,
+                    booking_id: bookingId,
+                    type: 'REDEEM',
+                    points: -70,
+                    remaining_points: 0,
+                    balance_before: 100,
+                    balance_after: 30,
+                    source_transaction_ids: [sourceAId, sourceBId],
+                    created_by: customerId,
+                }),
+            ],
+            undefined
+        );
+        expect(result).toMatchObject({
+            used_points: 70,
+            points_discount_amount: 70000,
+            already_processed: false,
+        });
+    });
+
+    it('refunds redeemed points for canceled booking', async () => {
+        const redeemTransactionId = new mongoose.Types.ObjectId();
+        const refundTransactionId = new mongoose.Types.ObjectId();
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            available_points: 30,
+            redeemed_points: 70,
+        });
+
+        PointTransaction.findOne
+            .mockReturnValueOnce(createQueryMock(null))
+            .mockReturnValueOnce(createQueryMock({
+                _id: redeemTransactionId,
+                type: 'REDEEM',
+            }));
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(loyalty));
+        PointTransaction.create.mockResolvedValue([
+            {
+                _id: refundTransactionId,
+                customer_id: customerId,
+                booking_id: bookingId,
+                type: 'REFUND',
+                points: 70,
+                remaining_points: 70,
+                balance_before: 30,
+                balance_after: 100,
+            },
+        ]);
+
+        const result = await loyaltyService.refundRedeemedPointsForBooking({
+            booking: {
+                _id: bookingId,
+                customer_id: customerId,
+                used_points: 70,
+            },
+            actorId: customerId,
+        });
+
+        expect(loyalty.available_points).toBe(100);
+        expect(loyalty.redeemed_points).toBe(0);
+        expect(loyalty.save).toHaveBeenCalledTimes(1);
+        expect(PointTransaction.create).toHaveBeenCalledWith(
+            [
+                expect.objectContaining({
+                    customer_id: customerId,
+                    booking_id: bookingId,
+                    type: 'REFUND',
+                    points: 70,
+                    remaining_points: 70,
+                    balance_before: 30,
+                    balance_after: 100,
+                    source_transaction_ids: [redeemTransactionId],
+                    created_by: customerId,
+                }),
+            ],
+            undefined
+        );
+        expect(result).toMatchObject({
+            refunded_points: 70,
+            already_processed: false,
         });
     });
 

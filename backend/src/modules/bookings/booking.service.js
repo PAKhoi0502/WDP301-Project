@@ -11,6 +11,7 @@ const ServicePackage = require('../service-packages/servicePackage.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const bookingPaymentService = require('./bookingPayment.service');
 const promotionService = require('../promotions/promotion.service');
+const loyaltyService = require('../loyalty/loyalty.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
 const { LOYALTY_TIERS } = require('../../shared/constants/loyalty.constant');
@@ -504,11 +505,20 @@ const buildBookingPlan = ({ startTime, servicePackage, serviceItems, addOnServic
     };
 };
 
-const buildBookingBasePayload = ({ garage, servicePackage, bookingPlan, startTime, vehicleType, note, promotionResult = null }) => {
+const buildBookingBasePayload = ({
+    garage,
+    servicePackage,
+    bookingPlan,
+    startTime,
+    vehicleType,
+    note,
+    promotionResult = null,
+    redeemResult = null,
+}) => {
     const endTime = addMinutes(startTime, bookingPlan.totalDurationMinutes);
     const originalPrice = bookingPlan.originalPrice;
     const promotionDiscountAmount = promotionResult?.discount_amount || 0;
-    const pointsDiscountAmount = 0;
+    const pointsDiscountAmount = redeemResult?.points_discount_amount || 0;
     const discountAmount = promotionDiscountAmount + pointsDiscountAmount;
     const finalPrice = Math.max(originalPrice - discountAmount, 0);
 
@@ -536,7 +546,7 @@ const buildBookingBasePayload = ({ garage, servicePackage, bookingPlan, startTim
         final_price: finalPrice,
         payment_method: BOOKING_PAYMENT_METHOD.CASH,
         payment_status: BOOKING_PAYMENT_STATUS.UNPAID,
-        used_points: 0,
+        used_points: redeemResult?.used_points || 0,
         earned_points: 0,
         promotion_id: promotionResult?.promotion?._id || null,
         requires_wash_bay: bookingPlan.requires_wash_bay,
@@ -1481,6 +1491,35 @@ const getAvailableSlots = async ({ garage_id, service_package_id, add_on_service
     };
 };
 
+const getPriceAfterPromotion = ({ originalPrice, promotionResult = null }) => {
+    return Math.max(originalPrice - (promotionResult?.discount_amount || 0), 0);
+};
+
+const buildCustomerBookingCreatePayload = ({ basePayload, customerId, vehicle }) => {
+    return {
+        ...basePayload,
+        customer_id: customerId,
+        vehicle_id: vehicle._id,
+        is_walk_in: false,
+        guest_name: null,
+        guest_phone: null,
+        guest_email: null,
+        license_plate: vehicle.raw_license_plate,
+        normalized_license_plate: vehicle.normalized_license_plate,
+        created_by_staff_id: null,
+    };
+};
+
+const createBookingDocument = async (payload, session = null) => {
+    if (!session) {
+        return Booking.create(payload);
+    }
+
+    const documents = await Booking.create([payload], { session });
+
+    return documents[0];
+};
+
 const getMyBookings = async (customerId, query = {}) => {
     await assertUserActive(customerId);
 
@@ -1577,6 +1616,16 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         orderAmount: bookingPlan.originalPrice,
         bookingStartTime: startTime,
     });
+    const usedPoints = createPayload.used_points || 0;
+    const priceAfterPromotion = getPriceAfterPromotion({
+        originalPrice: bookingPlan.originalPrice,
+        promotionResult,
+    });
+    const redeemResult = await loyaltyService.calculateBookingRedeemDiscount({
+        customerId,
+        usedPoints,
+        priceAfterPromotion,
+    });
     const basePayload = buildBookingBasePayload({
         garage,
         servicePackage,
@@ -1585,6 +1634,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         vehicleType: vehicle.vehicle_type,
         note: createPayload.note,
         promotionResult,
+        redeemResult,
     });
 
     assertBookingStartTimeInFuture(startTime);
@@ -1602,18 +1652,59 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         bookingItems: basePayload.booking_items,
     });
 
-    const booking = await Booking.create({
-        ...basePayload,
-        customer_id: customerId,
-        vehicle_id: vehicle._id,
-        is_walk_in: false,
-        guest_name: null,
-        guest_phone: null,
-        guest_email: null,
-        license_plate: vehicle.raw_license_plate,
-        normalized_license_plate: vehicle.normalized_license_plate,
-        created_by_staff_id: null,
-    });
+    let booking;
+
+    if (basePayload.used_points > 0) {
+        const session = await mongoose.startSession();
+
+        try {
+            await session.withTransaction(async () => {
+                const transactionalRedeemResult = await loyaltyService.calculateBookingRedeemDiscount({
+                    customerId,
+                    usedPoints: basePayload.used_points,
+                    priceAfterPromotion,
+                    session,
+                });
+                const transactionalBasePayload = buildBookingBasePayload({
+                    garage,
+                    servicePackage,
+                    bookingPlan,
+                    startTime,
+                    vehicleType: vehicle.vehicle_type,
+                    note: createPayload.note,
+                    promotionResult,
+                    redeemResult: transactionalRedeemResult,
+                });
+
+                booking = await createBookingDocument(
+                    buildCustomerBookingCreatePayload({
+                        basePayload: transactionalBasePayload,
+                        customerId,
+                        vehicle,
+                    }),
+                    session
+                );
+
+                await loyaltyService.redeemPointsForBooking({
+                    booking,
+                    customerId,
+                    usedPoints: transactionalBasePayload.used_points,
+                    priceAfterPromotion,
+                    actorId: customerId,
+                    expectedPointsDiscountAmount: transactionalBasePayload.points_discount_amount,
+                    session,
+                });
+            });
+        } finally {
+            await session.endSession();
+        }
+    } else {
+        booking = await createBookingDocument(buildCustomerBookingCreatePayload({
+            basePayload,
+            customerId,
+            vehicle,
+        }));
+    }
 
     const populatedBooking = await getBookingDocumentById(booking._id);
 
@@ -1725,6 +1816,10 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
     booking.cancel_reason = normalizeText(reason);
 
     await booking.save();
+    await loyaltyService.refundRedeemedPointsForBooking({
+        booking,
+        actorId: customerId,
+    });
 
     const populatedBooking = await getBookingDocumentById(booking._id);
 
@@ -1759,6 +1854,10 @@ const cancelBooking = async (user, bookingId, { reason } = {}) => {
     booking.cancel_reason = normalizeText(reason);
 
     await booking.save();
+    await loyaltyService.refundRedeemedPointsForBooking({
+        booking,
+        actorId: user._id,
+    });
 
     for (const bookingItemKey of releasedBookingItemKeys) {
         await bookingServiceStepService.markResourceReleasedForBookingItem(
@@ -1805,6 +1904,10 @@ const markNoShow = async (user, bookingId, { reason } = {}) => {
     booking.no_show_reason = normalizeText(reason);
 
     await booking.save();
+    await loyaltyService.refundRedeemedPointsForBooking({
+        booking,
+        actorId: user._id,
+    });
 
     for (const bookingItemKey of releasedBookingItemKeys) {
         await bookingServiceStepService.markResourceReleasedForBookingItem(

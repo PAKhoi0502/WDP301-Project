@@ -146,6 +146,7 @@ const createCustomerBookingSchema = z.object({
             add_on_service_ids: z.array(objectIdField).default([]),
             start_time: isoDateTimeField,
             promotion_code: optionalPromotionCodeField,
+            used_points: z.coerce.number().int().min(0).default(0),
             note: optionalTextField(1000),
         })
         .strict(),

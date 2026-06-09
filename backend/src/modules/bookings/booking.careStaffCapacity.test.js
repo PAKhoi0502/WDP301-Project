@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 jest.mock('./booking.model', () => ({
     countDocuments: jest.fn(),
     aggregate: jest.fn(),
@@ -41,6 +43,11 @@ jest.mock('../loyalty/customerLoyalty.model', () => ({
 jest.mock('../loyalty/tierRule.model', () => ({
     findOne: jest.fn(),
 }));
+jest.mock('../loyalty/loyalty.service', () => ({
+    calculateBookingRedeemDiscount: jest.fn(),
+    redeemPointsForBooking: jest.fn(),
+    refundRedeemedPointsForBooking: jest.fn(),
+}));
 
 const Booking = require('./booking.model');
 const Vehicle = require('../vehicles/vehicle.model');
@@ -53,6 +60,7 @@ const washBayService = require('../wash-bays/washBay.service');
 const promotionService = require('../promotions/promotion.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
+const loyaltyService = require('../loyalty/loyalty.service');
 const bookingService = require('./booking.service');
 
 const createFindSortLeanQuery = (result = []) => ({
@@ -206,6 +214,14 @@ describe('booking care staff capacity', () => {
             is_active: true,
         });
         promotionService.validatePromotionForBooking.mockResolvedValue(null);
+        loyaltyService.calculateBookingRedeemDiscount.mockResolvedValue({
+            loyalty: null,
+            redeem_rule: null,
+            used_points: 0,
+            points_discount_amount: 0,
+        });
+        loyaltyService.redeemPointsForBooking.mockResolvedValue(null);
+        loyaltyService.refundRedeemedPointsForBooking.mockResolvedValue(null);
         CustomerLoyalty.findOne.mockReturnValue({
             select: jest.fn().mockReturnValue({
                 lean: jest.fn().mockResolvedValue(null),
@@ -556,6 +572,91 @@ describe('booking care staff capacity', () => {
         });
 
         expect(Booking.create).not.toHaveBeenCalled();
+    });
+
+    it('creates customer booking with redeemed points and records redeem transaction', async () => {
+        const bookingId = '507f1f77bcf86cd799439060';
+        const session = {
+            withTransaction: jest.fn(async (callback) => callback()),
+            endSession: jest.fn().mockResolvedValue(undefined),
+        };
+        const startSessionSpy = jest.spyOn(mongoose, 'startSession').mockResolvedValue(session);
+
+        try {
+            loyaltyService.calculateBookingRedeemDiscount.mockResolvedValue({
+                loyalty: { id: 'loyalty-id' },
+                redeem_rule: { id: 'redeem-rule-id' },
+                used_points: 50,
+                points_discount_amount: 50000,
+            });
+            Booking.create.mockImplementation(async (payload) => {
+                const document = Array.isArray(payload) ? payload[0] : payload;
+
+                return Array.isArray(payload)
+                    ? [{ _id: bookingId, ...document }]
+                    : { _id: bookingId, ...document };
+            });
+            Booking.findById.mockReturnValue(createPopulateQuery({
+                _id: bookingId,
+                customer_id: customerId,
+                vehicle_id: vehicleId,
+                garage_id: garageId,
+                service_package_id: servicePackageId,
+                vehicle_type: 'CAR',
+                start_time: new Date('2999-01-01T06:00:00.000Z'),
+                end_time: new Date('2999-01-01T07:30:00.000Z'),
+                original_price: 250000,
+                promotion_discount_amount: 0,
+                points_discount_amount: 50000,
+                discount_amount: 50000,
+                final_price: 200000,
+                used_points: 50,
+                add_on_service_ids: [],
+                booking_items: [],
+            }));
+
+            const result = await bookingService.createCustomerBooking(customerId, {
+                garage_id: garageId,
+                vehicle_id: vehicleId,
+                service_package_id: servicePackageId,
+                start_time: '2999-01-01T13:00:00+07:00',
+                used_points: 50,
+            });
+
+            expect(startSessionSpy).toHaveBeenCalledTimes(1);
+            expect(session.withTransaction).toHaveBeenCalledTimes(1);
+            expect(session.endSession).toHaveBeenCalledTimes(1);
+            expect(Booking.create).toHaveBeenCalledWith(
+                [
+                    expect.objectContaining({
+                        customer_id: customerId,
+                        vehicle_id: vehicleId,
+                        used_points: 50,
+                        points_discount_amount: 50000,
+                        discount_amount: 50000,
+                        final_price: 200000,
+                    }),
+                ],
+                { session }
+            );
+            expect(loyaltyService.redeemPointsForBooking).toHaveBeenCalledWith(expect.objectContaining({
+                booking: expect.objectContaining({ _id: bookingId }),
+                customerId,
+                usedPoints: 50,
+                priceAfterPromotion: 250000,
+                actorId: customerId,
+                expectedPointsDiscountAmount: 50000,
+                session,
+            }));
+            expect(result).toMatchObject({
+                id: bookingId,
+                used_points: 50,
+                points_discount_amount: 50000,
+                final_price: 200000,
+            });
+        } finally {
+            startSessionSpy.mockRestore();
+        }
     });
 
     it('rejects combo booking when all matching wash bays are under maintenance', async () => {

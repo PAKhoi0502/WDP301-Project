@@ -162,6 +162,7 @@ const createCustomerBookingRequest = {
         },
         start_time: { type: 'string', format: 'date-time', example: '2026-06-10T09:00:00+07:00' },
         promotion_code: { type: 'string', example: 'WELCOME10' },
+        used_points: { type: 'number', example: 50 },
         note: { type: 'string', example: 'Please prepare before arrival' },
     },
 };
