@@ -1,6 +1,15 @@
 const bookingService = require('./booking.service');
+const bookingWaitlistService = require('../booking-waitlists/bookingWaitlist.service');
 const { asyncHandler } = require('../../shared/utils/asyncHandler');
 const { sendSuccess, sendCreated } = require('../../shared/utils/apiResponse');
+
+const offerNextWaitlistForReleasedBooking = async (booking) => {
+    try {
+        return await bookingWaitlistService.offerNextForReleasedBooking(booking);
+    } catch (error) {
+        return null;
+    }
+};
 
 const getAvailableSlots = asyncHandler(async (req, res) => {
     const { query } = req.validated;
@@ -53,6 +62,8 @@ const cancelMyBooking = asyncHandler(async (req, res) => {
 
     const result = await bookingService.cancelMyBooking(req.user._id, id, body || {});
 
+    await offerNextWaitlistForReleasedBooking(result);
+
     return sendSuccess(res, {
         message: 'Cancel booking successfully',
         data: result,
@@ -65,6 +76,8 @@ const cancelBooking = asyncHandler(async (req, res) => {
 
     const result = await bookingService.cancelBooking(req.user, id, body || {});
 
+    await offerNextWaitlistForReleasedBooking(result);
+
     return sendSuccess(res, {
         message: 'Cancel booking successfully',
         data: result,
@@ -76,6 +89,8 @@ const markNoShow = asyncHandler(async (req, res) => {
     const { body } = req.validated;
 
     const result = await bookingService.markNoShow(req.user, id, body || {});
+
+    await offerNextWaitlistForReleasedBooking(result);
 
     return sendSuccess(res, {
         message: 'Mark booking no-show successfully',

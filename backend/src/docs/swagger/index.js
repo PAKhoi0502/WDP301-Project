@@ -8,6 +8,7 @@ const washBaySwagger = require('../../modules/wash-bays/washBay.swagger');
 const vehicleSwagger = require('../../modules/vehicles/vehicle.swagger');
 const servicePackageSwagger = require('../../modules/service-packages/servicePackage.swagger');
 const bookingSwagger = require('../../modules/bookings/booking.swagger');
+const bookingWaitlistSwagger = require('../../modules/booking-waitlists/bookingWaitlist.swagger');
 const bookingServiceStepSwagger = require('../../modules/booking-service-steps/bookingServiceStep.swagger');
 const vehicleInspectionSwagger = require('../../modules/vehicle-inspections/vehicleInspection.swagger');
 const promotionSwagger = require('../../modules/promotions/promotion.swagger');
@@ -38,6 +39,7 @@ const openApiSpec = {
         ...vehicleSwagger.tags,
         ...servicePackageSwagger.tags,
         ...bookingSwagger.tags,
+        ...bookingWaitlistSwagger.tags,
         ...bookingServiceStepSwagger.tags,
         ...vehicleInspectionSwagger.tags,
         ...promotionSwagger.tags,
@@ -59,6 +61,7 @@ const openApiSpec = {
             ...vehicleSwagger.schemas,
             ...servicePackageSwagger.schemas,
             ...bookingSwagger.schemas,
+            ...bookingWaitlistSwagger.schemas,
             ...bookingServiceStepSwagger.schemas,
             ...vehicleInspectionSwagger.schemas,
             ...promotionSwagger.schemas,
