@@ -34,12 +34,14 @@ backend/
       vehicles/
       service-packages/
       bookings/
+      booking-waitlists/
       booking-service-steps/
       vehicle-inspections/
       loyalty/
       promotions/
       promotion-usages/
       notifications/
+      emails/
       wash-histories/
       payments/
     scripts/
@@ -115,6 +117,17 @@ PAYOS_RETURN_URL
 PAYOS_CANCEL_URL
 PAYOS_WEBHOOK_URL
 PAYOS_PAYMENT_EXPIRE_MINUTES
+
+WAITLIST_OFFER_EXPIRE_MINUTES
+
+SMTP_HOST
+SMTP_PORT
+SMTP_SECURE
+SMTP_USER
+SMTP_PASS
+SMTP_FROM_EMAIL
+SMTP_FROM_NAME
+PASSWORD_RESET_URL
 ```
 
 Seed scripts also support:
@@ -140,6 +153,7 @@ Public/customer routes:
 /vehicles
 /service-packages
 /bookings
+/waitlists
 /promotions
 /loyalty
 /notifications
@@ -153,6 +167,7 @@ Admin/staff routes:
 /admin/vehicles
 /admin/service-packages
 /admin/bookings
+/admin/waitlists
 /admin/payments
 /admin/promotions
 /admin/loyalty
@@ -196,6 +211,7 @@ Implemented modules:
 - Vehicles
 - Service packages
 - Bookings
+- Booking waitlists
 - Booking service steps
 - Vehicle inspections
 - Loyalty
@@ -310,6 +326,46 @@ Rules:
 - Not allowed when booking has pending PayOS payment.
 - Stores `no_show_at`, `no_show_by_id`, `no_show_reason`.
 
+## Waitlist
+
+Customer endpoints:
+
+```txt
+GET /api/v1/waitlists
+POST /api/v1/waitlists
+GET /api/v1/waitlists/:id
+PATCH /api/v1/waitlists/:id/cancel
+PATCH /api/v1/waitlists/:id/accept
+```
+
+Staff/Admin endpoints:
+
+```txt
+GET /api/v1/admin/waitlists
+PATCH /api/v1/admin/waitlists/:id/cancel
+```
+
+Waitlist statuses:
+
+```txt
+WAITING
+OFFERED
+ACCEPTED
+CANCELED
+EXPIRED
+```
+
+Rules:
+
+- Customer can join waitlist only for an existing future slot that is currently unavailable.
+- Customer cannot create duplicate active waitlist entries for the same vehicle, garage, service package, add-ons and start time.
+- When a customer/staff/admin cancel or staff/admin mark no-show releases a slot, the system offers the slot to the oldest matching `WAITING` waitlist entry.
+- Matching uses garage, service package, vehicle type, start time and add-on set.
+- If the released booking has a customer, that same customer is skipped for the offer.
+- Accepting an offer creates a real booking through the normal customer booking flow, so capacity is rechecked.
+- Waitlist notifications are in-app notifications.
+- Offer expiration is checked when the customer accepts or cancels the waitlist entry.
+
 ## Payment
 
 Implemented payment flows:
@@ -354,12 +410,14 @@ Implemented:
 - Read/unread management
 - Delete notifications
 - Notification constants for booking, loyalty, promotion and waitlist-related events
+- Email sender through SMTP/nodemailer
+- Email notification delivery with `PENDING`, `SENT` and `FAILED` statuses
+- Forgot password email with reset token when the user account has email
 
 Not implemented yet:
 
-- Real email sender service
-- Email delivery workflow
-- Waitlist business flow
+- Background worker for automatic email retry
+- Background job for automatic waitlist offer expiration
 
 ## Testing
 
@@ -373,8 +431,8 @@ npm test -- --runInBand
 Current verified state:
 
 ```txt
-23 test suites passed
-111 tests passed
+26 test suites passed
+125 tests passed
 ```
 
 ## Current Gaps
@@ -382,12 +440,10 @@ Current verified state:
 These items are future work. They are not implemented as modules in the current checkout:
 
 - Frontend app
-- Real waitlist module and offer flow
-- Real email sender service
 - Analytics/research module
 - Survey module
 - Upload module
 - Audit log module
 - Automated background jobs
 
-Some npm dependencies are already installed for future capabilities, such as `multer`, `cloudinary` and `nodemailer`, but the corresponding full modules are not currently implemented.
+Some npm dependencies are already installed for future capabilities, such as `multer` and `cloudinary`, but the corresponding full modules are not currently implemented.
