@@ -1,5 +1,6 @@
 const Notification = require('./notification.model');
 const NotificationMapper = require('./notification.mapper');
+const emailService = require('../emails/email.service');
 const { AppError } = require('../../shared/utils/appError');
 const {
     NOTIFICATION_CHANNELS,
@@ -8,6 +9,24 @@ const {
     IN_APP_STATUSES,
     EMAIL_STATUSES,
 } = require('../../shared/constants/notification.constant');
+
+const normalizeText = (value) => {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    const trimmedValue = value.trim();
+
+    return trimmedValue || null;
+};
+
+const toErrorMessage = (error) => {
+    return normalizeText(error?.message) || 'Email delivery failed';
+};
 
 const createInAppNotification = async ({ userId, type, title, message, relatedType, relatedId, metadata = {}, session = null }) => {
     if (!userId) {
@@ -33,6 +52,129 @@ const createInAppNotification = async ({ userId, type, title, message, relatedTy
     );
 
     return NotificationMapper.toNotificationDto(documents[0]);
+};
+
+const deliverEmailNotificationDocument = async (notification, { html = null, text = null, throwOnFailure = true } = {}) => {
+    if (!notification) {
+        return null;
+    }
+
+    if (!notification.channels?.includes(NOTIFICATION_CHANNELS.EMAIL)) {
+        throw new AppError('Notification does not require email delivery', 400, 'NOTIFICATION_EMAIL_NOT_REQUIRED');
+    }
+
+    if (notification.email_status === EMAIL_STATUSES.SENT) {
+        return NotificationMapper.toNotificationDto(notification);
+    }
+
+    try {
+        const result = await emailService.sendEmail({
+            to: notification.recipient_email,
+            subject: notification.title,
+            text: text || notification.message,
+            html,
+        });
+
+        notification.email_status = EMAIL_STATUSES.SENT;
+        notification.email_sent_at = new Date();
+        notification.email_failed_reason = null;
+        notification.metadata = {
+            ...(notification.metadata || {}),
+            email_message_id: result?.messageId || null,
+        };
+
+        await notification.save();
+
+        return NotificationMapper.toNotificationDto(notification);
+    } catch (error) {
+        notification.email_status = EMAIL_STATUSES.FAILED;
+        notification.email_failed_reason = toErrorMessage(error).slice(0, 500);
+
+        await notification.save();
+
+        if (throwOnFailure) {
+            throw error;
+        }
+
+        return NotificationMapper.toNotificationDto(notification);
+    }
+};
+
+const createEmailNotification = async ({
+    userId = null,
+    recipientEmail,
+    type,
+    title,
+    message,
+    relatedType,
+    relatedId,
+    metadata = {},
+    html = null,
+    text = null,
+    session = null,
+    sendImmediately = true,
+    throwOnFailure = false,
+}) => {
+    const normalizedRecipientEmail = normalizeText(recipientEmail)?.toLowerCase();
+
+    if (!normalizedRecipientEmail) {
+        return null;
+    }
+
+    const documents = await Notification.create(
+        [
+            {
+                user_id: userId,
+                recipient_email: normalizedRecipientEmail,
+                type,
+                title,
+                message,
+                channels: [NOTIFICATION_CHANNELS.EMAIL],
+                related_type: relatedType,
+                related_id: relatedId,
+                email_status: EMAIL_STATUSES.PENDING,
+                metadata,
+            },
+        ],
+        session ? { session } : undefined
+    );
+    const notification = documents[0];
+
+    if (sendImmediately && !session) {
+        return deliverEmailNotificationDocument(notification, {
+            html,
+            text,
+            throwOnFailure,
+        });
+    }
+
+    return NotificationMapper.toNotificationDto(notification);
+};
+
+const sendPendingEmailNotifications = async ({ limit = 50 } = {}) => {
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
+    const notifications = await Notification.find({
+        channels: NOTIFICATION_CHANNELS.EMAIL,
+        email_status: EMAIL_STATUSES.PENDING,
+    })
+        .sort({ created_at: 1 })
+        .limit(safeLimit);
+    const results = [];
+
+    for (const notification of notifications) {
+        const result = await deliverEmailNotificationDocument(notification, {
+            throwOnFailure: false,
+        });
+
+        results.push(result);
+    }
+
+    return {
+        attempted: results.length,
+        sent: results.filter((item) => item.email_status === EMAIL_STATUSES.SENT).length,
+        failed: results.filter((item) => item.email_status === EMAIL_STATUSES.FAILED).length,
+        data: results,
+    };
 };
 
 const buildCustomerFilter = (userId, { type, related_type, in_app_status } = {}) => {
@@ -196,6 +338,9 @@ const emitRewardEarned = async ({ booking, earnedPoints, session = null }) => {
 
 module.exports = {
     createInAppNotification,
+    createEmailNotification,
+    sendPendingEmailNotifications,
+    deliverEmailNotificationDocument,
     getMyNotifications,
     getUnreadCount,
     markAsRead,

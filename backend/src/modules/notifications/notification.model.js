@@ -124,6 +124,16 @@ notificationSchema.pre('validate', function (next) {
         this.recipient_email = null;
     }
 
+    if (this.channels.includes(NOTIFICATION_CHANNELS.EMAIL)) {
+        if (!this.recipient_email) {
+            this.invalidate('recipient_email', 'Email notification requires recipient email');
+        }
+
+        if (!this.email_status || this.email_status === EMAIL_STATUSES.NOT_REQUIRED) {
+            this.email_status = EMAIL_STATUSES.PENDING;
+        }
+    }
+
     next();
 });
 

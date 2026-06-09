@@ -22,7 +22,12 @@ jest.mock('./notification.model', () => ({
     deleteMany: jest.fn(),
 }));
 
+jest.mock('../emails/email.service', () => ({
+    sendEmail: jest.fn(),
+}));
+
 const Notification = require('./notification.model');
+const emailService = require('../emails/email.service');
 const notificationService = require('./notification.service');
 const {
     NOTIFICATION_CHANNELS,
@@ -39,6 +44,7 @@ describe('notification service customer operations', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        emailService.sendEmail.mockResolvedValue({ messageId: 'message-1' });
     });
 
     it('lists customer notifications with unread count metadata', async () => {
@@ -155,6 +161,132 @@ describe('notification service customer operations', () => {
         ).rejects.toMatchObject({
             statusCode: 404,
             errorCode: 'NOTIFICATION_NOT_FOUND',
+        });
+    });
+
+    it('creates and sends email notification', async () => {
+        const save = jest.fn();
+        const notification = {
+            _id: notificationId,
+            user_id: userId,
+            recipient_email: 'customer@example.com',
+            type: NOTIFICATION_TYPES.AUTH_PASSWORD_RESET_REQUESTED,
+            title: 'Reset your AutoWash Pro password',
+            message: 'Use this reset token.',
+            channels: [NOTIFICATION_CHANNELS.EMAIL],
+            related_type: NOTIFICATION_RELATED_TYPES.AUTH,
+            related_id: userId,
+            in_app_status: IN_APP_STATUSES.UNREAD,
+            email_status: EMAIL_STATUSES.PENDING,
+            metadata: {},
+            save,
+        };
+
+        Notification.create.mockResolvedValue([notification]);
+
+        const result = await notificationService.createEmailNotification({
+            userId,
+            recipientEmail: ' Customer@Example.com ',
+            type: NOTIFICATION_TYPES.AUTH_PASSWORD_RESET_REQUESTED,
+            title: 'Reset your AutoWash Pro password',
+            message: 'Use this reset token.',
+            relatedType: NOTIFICATION_RELATED_TYPES.AUTH,
+            relatedId: userId,
+            html: '<p>Use this reset token.</p>',
+        });
+
+        expect(Notification.create).toHaveBeenCalledWith(
+            [
+                expect.objectContaining({
+                    user_id: userId,
+                    recipient_email: 'customer@example.com',
+                    channels: [NOTIFICATION_CHANNELS.EMAIL],
+                    email_status: EMAIL_STATUSES.PENDING,
+                }),
+            ],
+            undefined
+        );
+        expect(emailService.sendEmail).toHaveBeenCalledWith({
+            to: 'customer@example.com',
+            subject: 'Reset your AutoWash Pro password',
+            text: 'Use this reset token.',
+            html: '<p>Use this reset token.</p>',
+        });
+        expect(save).toHaveBeenCalledTimes(1);
+        expect(result).toMatchObject({
+            id: notificationId.toString(),
+            email_status: EMAIL_STATUSES.SENT,
+            metadata: { email_message_id: 'message-1' },
+        });
+    });
+
+    it('marks email notification failed when delivery fails without throwing', async () => {
+        const save = jest.fn();
+        const notification = {
+            _id: notificationId,
+            user_id: userId,
+            recipient_email: 'customer@example.com',
+            type: NOTIFICATION_TYPES.AUTH_PASSWORD_RESET_REQUESTED,
+            title: 'Reset your AutoWash Pro password',
+            message: 'Use this reset token.',
+            channels: [NOTIFICATION_CHANNELS.EMAIL],
+            related_type: NOTIFICATION_RELATED_TYPES.AUTH,
+            related_id: userId,
+            in_app_status: IN_APP_STATUSES.UNREAD,
+            email_status: EMAIL_STATUSES.PENDING,
+            metadata: {},
+            save,
+        };
+
+        Notification.create.mockResolvedValue([notification]);
+        emailService.sendEmail.mockRejectedValue(new Error('SMTP unavailable'));
+
+        const result = await notificationService.createEmailNotification({
+            userId,
+            recipientEmail: 'customer@example.com',
+            type: NOTIFICATION_TYPES.AUTH_PASSWORD_RESET_REQUESTED,
+            title: 'Reset your AutoWash Pro password',
+            message: 'Use this reset token.',
+            relatedType: NOTIFICATION_RELATED_TYPES.AUTH,
+            relatedId: userId,
+        });
+
+        expect(save).toHaveBeenCalledTimes(1);
+        expect(result).toMatchObject({
+            email_status: EMAIL_STATUSES.FAILED,
+            email_failed_reason: 'SMTP unavailable',
+        });
+    });
+
+    it('sends pending email notifications in batches', async () => {
+        const sentNotification = {
+            _id: notificationId,
+            user_id: userId,
+            recipient_email: 'customer@example.com',
+            type: NOTIFICATION_TYPES.AUTH_PASSWORD_RESET_REQUESTED,
+            title: 'Reset your AutoWash Pro password',
+            message: 'Use this reset token.',
+            channels: [NOTIFICATION_CHANNELS.EMAIL],
+            related_type: NOTIFICATION_RELATED_TYPES.AUTH,
+            related_id: userId,
+            in_app_status: IN_APP_STATUSES.UNREAD,
+            email_status: EMAIL_STATUSES.PENDING,
+            metadata: {},
+            save: jest.fn(),
+        };
+
+        Notification.find.mockReturnValue(createQueryMock([sentNotification]));
+
+        const result = await notificationService.sendPendingEmailNotifications({ limit: 10 });
+
+        expect(Notification.find).toHaveBeenCalledWith({
+            channels: NOTIFICATION_CHANNELS.EMAIL,
+            email_status: EMAIL_STATUSES.PENDING,
+        });
+        expect(result).toMatchObject({
+            attempted: 1,
+            sent: 1,
+            failed: 0,
         });
     });
 });

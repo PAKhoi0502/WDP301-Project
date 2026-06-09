@@ -4,11 +4,17 @@ const bcrypt = require('bcryptjs');
 const User = require('../../users/user.model');
 const AuthMapper = require('../auth.mapper');
 const TokenService = require('../services/token.service');
+const emailService = require('../../emails/email.service');
+const notificationService = require('../../notifications/notification.service');
 const { hashToken } = require('../security/token.hash');
 const PasswordReset = require('../models/passwordResetToken.model');
 const PasswordResetRateLimit = require('../models/passwordResetRateLimit.model');
 const { AppError } = require('../../../shared/utils/appError');
 const { USER_ROLES } = require('../../../shared/constants/roles.constant');
+const {
+    NOTIFICATION_TYPES,
+    NOTIFICATION_RELATED_TYPES,
+} = require('../../../shared/constants/notification.constant');
 const { signAccessToken, signRefreshToken } = require('../../../shared/utils/jwt');
 
 const DEFAULT_SALT_ROUNDS = 10;
@@ -49,8 +55,43 @@ const getPasswordResetExpiresAt = () => {
     return new Date(Date.now() + minutes * 60 * 1000);
 };
 
+const getPasswordResetExpiresInMinutes = () => {
+    return Number(process.env.PASSWORD_RESET_EXPIRES_IN_MINUTES)
+        || DEFAULT_PASSWORD_RESET_MINUTES;
+};
+
 const generateRandomToken = () => {
     return crypto.randomBytes(64).toString('hex');
+};
+
+const sendPasswordResetEmail = async ({ user, resetToken, phone }) => {
+    if (!user.email) {
+        return null;
+    }
+
+    const expiresInMinutes = getPasswordResetExpiresInMinutes();
+    const emailPayload = emailService.buildPasswordResetEmail({
+        resetToken,
+        expiresInMinutes,
+        fullName: user.full_name,
+    });
+
+    return notificationService.createEmailNotification({
+        userId: user._id,
+        recipientEmail: user.email,
+        type: NOTIFICATION_TYPES.AUTH_PASSWORD_RESET_REQUESTED,
+        title: emailPayload.subject,
+        message: emailPayload.text,
+        relatedType: NOTIFICATION_RELATED_TYPES.AUTH,
+        relatedId: user._id,
+        metadata: {
+            phone,
+            expires_in_minutes: expiresInMinutes,
+        },
+        html: emailPayload.html,
+        text: emailPayload.text,
+        throwOnFailure: false,
+    });
 };
 
 const createRefreshTokenForUser = async (user, meta = {}) => {
@@ -346,6 +387,12 @@ const forgotPassword = async (payload) => {
         phone,
         reset_token_hash: hashToken(resetToken),
         expires_at: getPasswordResetExpiresAt(),
+    });
+
+    await sendPasswordResetEmail({
+        user,
+        resetToken,
+        phone,
     });
 
     if (process.env.NODE_ENV !== 'production') {
