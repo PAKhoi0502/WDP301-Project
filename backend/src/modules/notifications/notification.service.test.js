@@ -289,4 +289,39 @@ describe('notification service customer operations', () => {
             failed: 0,
         });
     });
+
+    it('retries failed email notifications in batches', async () => {
+        const failedNotification = {
+            _id: notificationId,
+            user_id: userId,
+            recipient_email: 'customer@example.com',
+            type: NOTIFICATION_TYPES.AUTH_PASSWORD_RESET_REQUESTED,
+            title: 'Reset your AutoWash Pro password',
+            message: 'Use this reset token.',
+            channels: [NOTIFICATION_CHANNELS.EMAIL],
+            related_type: NOTIFICATION_RELATED_TYPES.AUTH,
+            related_id: userId,
+            in_app_status: IN_APP_STATUSES.UNREAD,
+            email_status: EMAIL_STATUSES.FAILED,
+            email_failed_reason: 'SMTP unavailable',
+            metadata: {},
+            save: jest.fn(),
+        };
+
+        Notification.find.mockReturnValue(createQueryMock([failedNotification]));
+
+        const result = await notificationService.retryEmailNotifications({ limit: 10 });
+
+        expect(Notification.find).toHaveBeenCalledWith({
+            channels: NOTIFICATION_CHANNELS.EMAIL,
+            email_status: {
+                $in: [EMAIL_STATUSES.PENDING, EMAIL_STATUSES.FAILED],
+            },
+        });
+        expect(result).toMatchObject({
+            attempted: 1,
+            sent: 1,
+            failed: 0,
+        });
+    });
 });

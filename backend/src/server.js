@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const app = require('./app');
 const { connectDB, disconnectDB } = require('./config/db');
+const schedulerService = require('./jobs/scheduler.service');
 
 const PORT = process.env.PORT || 5000;
 
@@ -11,6 +12,8 @@ const shutdown = async (signal) => {
     console.log(`\n${signal} received. Shutting down gracefully...`);
 
     try {
+        schedulerService.stopSchedulers();
+
         if (server) {
             await new Promise((resolve, reject) => {
                 server.close((err) => {
@@ -51,6 +54,12 @@ process.on('uncaughtException', (error) => {
 
 const startServer = async () => {
     await connectDB();
+
+    const schedulerStatus = schedulerService.startSchedulers();
+
+    if (schedulerStatus.started) {
+        console.log('Schedulers started:', schedulerStatus.jobs);
+    }
 
     server = app.listen(PORT, () => {
         console.log(`Server running at http://localhost:${PORT}`);

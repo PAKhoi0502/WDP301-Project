@@ -151,11 +151,14 @@ const createEmailNotification = async ({
     return NotificationMapper.toNotificationDto(notification);
 };
 
-const sendPendingEmailNotifications = async ({ limit = 50 } = {}) => {
+const sendPendingEmailNotifications = async ({ limit = 50, includeFailed = false } = {}) => {
     const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 100));
+    const emailStatusFilter = includeFailed
+        ? { $in: [EMAIL_STATUSES.PENDING, EMAIL_STATUSES.FAILED] }
+        : EMAIL_STATUSES.PENDING;
     const notifications = await Notification.find({
         channels: NOTIFICATION_CHANNELS.EMAIL,
-        email_status: EMAIL_STATUSES.PENDING,
+        email_status: emailStatusFilter,
     })
         .sort({ created_at: 1 })
         .limit(safeLimit);
@@ -175,6 +178,13 @@ const sendPendingEmailNotifications = async ({ limit = 50 } = {}) => {
         failed: results.filter((item) => item.email_status === EMAIL_STATUSES.FAILED).length,
         data: results,
     };
+};
+
+const retryEmailNotifications = async ({ limit = 50 } = {}) => {
+    return sendPendingEmailNotifications({
+        limit,
+        includeFailed: true,
+    });
 };
 
 const buildCustomerFilter = (userId, { type, related_type, in_app_status } = {}) => {
@@ -340,6 +350,7 @@ module.exports = {
     createInAppNotification,
     createEmailNotification,
     sendPendingEmailNotifications,
+    retryEmailNotifications,
     deliverEmailNotificationDocument,
     getMyNotifications,
     getUnreadCount,
