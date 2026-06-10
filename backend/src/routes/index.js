@@ -16,6 +16,7 @@ const washHistoryRoutes = require('../modules/wash-histories/washHistory.routes'
 const paymentRoutes = require('../modules/payments/payment.routes');
 const uploadRoutes = require('../modules/uploads/upload.routes');
 const auditLogRoutes = require('../modules/audit-logs/auditLog.routes');
+const surveyRoutes = require('../modules/surveys/survey.routes');
 
 const router = express.Router();
 
@@ -41,6 +42,7 @@ router.use('/notifications', notificationRoutes);
 router.use('/wash-histories', washHistoryRoutes.customerRouter);
 router.use('/payments', paymentRoutes.publicRouter);
 router.use('/uploads', uploadRoutes.publicRouter);
+router.use('/surveys', surveyRoutes.customerRouter);
 router.use('/admin/vehicles', vehicleRoutes.adminRouter);
 router.use('/admin/service-packages', servicePackageRoutes.adminRouter);
 router.use('/admin/bookings', bookingRoutes.adminRouter);
@@ -48,6 +50,7 @@ router.use('/admin/waitlists', bookingWaitlistRoutes.adminRouter);
 router.use('/admin/payments', paymentRoutes.adminRouter);
 router.use('/admin/uploads', uploadRoutes.adminRouter);
 router.use('/admin/audit-logs', auditLogRoutes.adminRouter);
+router.use('/admin/surveys', surveyRoutes.adminRouter);
 router.use('/admin/promotions', promotionRoutes.adminRouter);
 router.use('/admin/loyalty', loyaltyRoutes.adminRouter);
 router.use('/admin/wash-histories', washHistoryRoutes.adminRouter);

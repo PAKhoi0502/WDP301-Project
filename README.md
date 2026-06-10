@@ -46,6 +46,7 @@ backend/
       payments/
       uploads/
       audit-logs/
+      surveys/
     scripts/
       seed.js
       resetDatabase.js
@@ -168,6 +169,7 @@ Public/customer routes:
 /wash-histories
 /payments
 /uploads
+/surveys
 ```
 
 Admin/staff routes:
@@ -180,6 +182,7 @@ Admin/staff routes:
 /admin/payments
 /admin/uploads
 /admin/audit-logs
+/admin/surveys
 /admin/promotions
 /admin/loyalty
 /admin/wash-histories
@@ -458,6 +461,23 @@ Implemented:
 - Admin-only listing through `GET /api/v1/admin/audit-logs`
 - Filters for actor, action, resource, IP and created time range
 
+## Surveys
+
+Implemented:
+
+- Admin survey CRUD through `/api/v1/admin/surveys`
+- Draft, published and closed survey lifecycle
+- Question types: `RATING`, `NPS`, `SINGLE_CHOICE`, `MULTI_CHOICE` and `TEXT`
+- Customer available survey lookup through `GET /api/v1/surveys/available?booking_id=...`
+- Customer response submission through `POST /api/v1/surveys/:id/responses`
+- Survey response is optional and only allowed after customer-owned booking is `COMPLETED + PAID`
+- WashHistory is required before survey submission
+- One response per survey and booking
+- Configurable response window with a default of 7 days
+- Optional customer-owned image uploads with purpose `SURVEY_RESPONSE`
+- Admin response listing through `GET /api/v1/admin/surveys/:id/responses`
+- Audit events for survey lifecycle and customer response submission
+
 ## Testing
 
 Run all backend tests:
@@ -470,8 +490,8 @@ npm test -- --runInBand
 Current verified state:
 
 ```txt
-29 test suites passed
-146 tests passed
+30 test suites passed
+155 tests passed
 ```
 
 ## Current Gaps
@@ -480,7 +500,6 @@ These items are future work. They are not implemented as modules in the current 
 
 - Frontend app
 - Analytics/research module
-- Survey module
 - Advanced job dashboard, distributed locks and retry backoff controls
 
 Some npm dependencies are already installed for future capabilities, such as `@google/generative-ai`, but the corresponding full modules are not currently implemented.

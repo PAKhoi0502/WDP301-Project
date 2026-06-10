@@ -1,0 +1,24 @@
+const SURVEY_STATUSES = Object.freeze({
+    DRAFT: 'DRAFT',
+    PUBLISHED: 'PUBLISHED',
+    CLOSED: 'CLOSED',
+});
+
+const SURVEY_STATUS_VALUES = Object.freeze(Object.values(SURVEY_STATUSES));
+
+const SURVEY_QUESTION_TYPES = Object.freeze({
+    RATING: 'RATING',
+    NPS: 'NPS',
+    SINGLE_CHOICE: 'SINGLE_CHOICE',
+    MULTI_CHOICE: 'MULTI_CHOICE',
+    TEXT: 'TEXT',
+});
+
+const SURVEY_QUESTION_TYPE_VALUES = Object.freeze(Object.values(SURVEY_QUESTION_TYPES));
+
+module.exports = {
+    SURVEY_STATUSES,
+    SURVEY_STATUS_VALUES,
+    SURVEY_QUESTION_TYPES,
+    SURVEY_QUESTION_TYPE_VALUES,
+};
