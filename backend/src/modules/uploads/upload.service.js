@@ -4,6 +4,8 @@ const { configureCloudinary } = require('../../config/cloudinary');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const { UPLOAD_PURPOSES } = require('../../shared/constants/upload.constant');
+const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
+const auditLogService = require('../audit-logs/auditLog.service');
 
 const normalizeText = (value) => {
     if (value === null || value === undefined) {
@@ -115,7 +117,7 @@ const buildUploadPayload = ({ file, body, user, cloudinaryResult }) => {
     };
 };
 
-const createUpload = async (user, file, body = {}) => {
+const createUpload = async (user, file, body = {}, auditContext = {}) => {
     if (!file) {
         throw new AppError('File is required', 400, 'UPLOAD_FILE_REQUIRED');
     }
@@ -156,8 +158,24 @@ const createUpload = async (user, file, body = {}) => {
     }
 
     const populatedUpload = await populateUploadQuery(Upload.findById(upload._id));
+    const result = UploadMapper.toUploadDto(populatedUpload);
 
-    return UploadMapper.toUploadDto(populatedUpload);
+    await auditLogService.recordAuditEvent({
+        actorId: user._id,
+        action: AUDIT_ACTIONS.UPLOAD_CREATED,
+        resourceType: AUDIT_RESOURCE_TYPES.UPLOAD,
+        resourceId: upload._id,
+        after: result,
+        ip: auditContext.ip,
+        userAgent: auditContext.userAgent,
+        metadata: {
+            purpose: result.purpose,
+            related_type: result.related_type,
+            related_id: result.related_id,
+        },
+    });
+
+    return result;
 };
 
 const buildAdminUploadFilter = ({ purpose, owner_id, related_type, related_id, mime_type, from, to } = {}) => {
@@ -246,10 +264,11 @@ const assertUserCanDeleteUpload = (user, upload) => {
     throw new AppError('You do not have permission to delete this upload', 403, 'UPLOAD_DELETE_FORBIDDEN');
 };
 
-const deleteUpload = async (user, uploadId) => {
+const deleteUpload = async (user, uploadId, auditContext = {}) => {
     const upload = await getUploadDocumentById(uploadId);
 
     assertUserCanDeleteUpload(user, upload);
+    const before = UploadMapper.toUploadDto(upload);
 
     try {
         await deleteCloudinaryAsset(upload);
@@ -268,7 +287,22 @@ const deleteUpload = async (user, uploadId) => {
 
     await Upload.deleteOne({ _id: upload._id });
 
-    return UploadMapper.toUploadDto(upload);
+    await auditLogService.recordAuditEvent({
+        actorId: user._id,
+        action: AUDIT_ACTIONS.UPLOAD_DELETED,
+        resourceType: AUDIT_RESOURCE_TYPES.UPLOAD,
+        resourceId: upload._id,
+        before,
+        ip: auditContext.ip,
+        userAgent: auditContext.userAgent,
+        metadata: {
+            purpose: before.purpose,
+            related_type: before.related_type,
+            related_id: before.related_id,
+        },
+    });
+
+    return before;
 };
 
 module.exports = {

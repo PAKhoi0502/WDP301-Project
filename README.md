@@ -45,6 +45,7 @@ backend/
       wash-histories/
       payments/
       uploads/
+      audit-logs/
     scripts/
       seed.js
       resetDatabase.js
@@ -178,6 +179,7 @@ Admin/staff routes:
 /admin/waitlists
 /admin/payments
 /admin/uploads
+/admin/audit-logs
 /admin/promotions
 /admin/loyalty
 /admin/wash-histories
@@ -445,6 +447,17 @@ Implemented:
 - Owner or Admin delete through `DELETE /api/v1/uploads/:id`
 - Admin upload listing through `GET /api/v1/admin/uploads`
 
+## Audit Logs
+
+Implemented:
+
+- Immutable audit event storage with actor, action, resource, snapshots and request context
+- Shared `recordAuditEvent()` service for feature modules
+- Sensitive values are redacted before audit persistence
+- Upload create and delete audit events
+- Admin-only listing through `GET /api/v1/admin/audit-logs`
+- Filters for actor, action, resource, IP and created time range
+
 ## Testing
 
 Run all backend tests:
@@ -457,8 +470,8 @@ npm test -- --runInBand
 Current verified state:
 
 ```txt
-28 test suites passed
-142 tests passed
+29 test suites passed
+146 tests passed
 ```
 
 ## Current Gaps
@@ -468,7 +481,6 @@ These items are future work. They are not implemented as modules in the current 
 - Frontend app
 - Analytics/research module
 - Survey module
-- Audit log module
 - Advanced job dashboard, distributed locks and retry backoff controls
 
 Some npm dependencies are already installed for future capabilities, such as `@google/generative-ai`, but the corresponding full modules are not currently implemented.

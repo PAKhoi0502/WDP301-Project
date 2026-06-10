@@ -1,11 +1,17 @@
 const uploadService = require('./upload.service');
+const { getAuditRequestContext } = require('../audit-logs/auditLog.service');
 const { asyncHandler } = require('../../shared/utils/asyncHandler');
 const { sendSuccess, sendCreated } = require('../../shared/utils/apiResponse');
 
 const createUpload = asyncHandler(async (req, res) => {
     const { body } = req.validated;
 
-    const result = await uploadService.createUpload(req.user, req.file, body);
+    const result = await uploadService.createUpload(
+        req.user,
+        req.file,
+        body,
+        getAuditRequestContext(req)
+    );
 
     return sendCreated(res, {
         message: 'Upload file successfully',
@@ -28,7 +34,11 @@ const getAllUploads = asyncHandler(async (req, res) => {
 const deleteUpload = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
 
-    const result = await uploadService.deleteUpload(req.user, id);
+    const result = await uploadService.deleteUpload(
+        req.user,
+        id,
+        getAuditRequestContext(req)
+    );
 
     return sendSuccess(res, {
         message: 'Delete upload successfully',

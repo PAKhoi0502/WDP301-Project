@@ -10,8 +10,13 @@ jest.mock('../../config/cloudinary', () => ({
     configureCloudinary: jest.fn(),
 }));
 
+jest.mock('../audit-logs/auditLog.service', () => ({
+    recordAuditEvent: jest.fn(),
+}));
+
 const Upload = require('./upload.model');
 const { configureCloudinary } = require('../../config/cloudinary');
+const auditLogService = require('../audit-logs/auditLog.service');
 const uploadService = require('./upload.service');
 
 describe('upload service', () => {
@@ -70,6 +75,8 @@ describe('upload service', () => {
         Upload.countDocuments.mockReset();
         Upload.deleteOne.mockReset();
         configureCloudinary.mockReset();
+        auditLogService.recordAuditEvent.mockReset();
+        auditLogService.recordAuditEvent.mockResolvedValue(null);
         configureCloudinary.mockReturnValue({
             uploader: {
                 upload_stream: jest.fn((options, callback) => ({
@@ -105,6 +112,15 @@ describe('upload service', () => {
             related_type: 'BOOKING',
             related_id: '507f1f77bcf86cd799439014',
         }));
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+            actorId: user._id,
+            action: 'UPLOAD_CREATED',
+            resourceType: 'UPLOAD',
+            resourceId: upload._id,
+            after: expect.objectContaining({
+                id: upload._id,
+            }),
+        }));
         expect(result.id).toBe(upload._id);
     });
 
@@ -129,6 +145,33 @@ describe('upload service', () => {
         });
 
         expect(Upload.deleteOne).not.toHaveBeenCalled();
+        expect(auditLogService.recordAuditEvent).not.toHaveBeenCalled();
+    });
+
+    it('deletes an owned upload and records audit event', async () => {
+        const upload = createUploadDocument();
+
+        Upload.findById.mockResolvedValue(upload);
+        Upload.deleteOne.mockResolvedValue({ deletedCount: 1 });
+
+        const result = await uploadService.deleteUpload(user, upload._id, {
+            ip: '127.0.0.1',
+            userAgent: 'Jest',
+        });
+
+        expect(Upload.deleteOne).toHaveBeenCalledWith({ _id: upload._id });
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+            actorId: user._id,
+            action: 'UPLOAD_DELETED',
+            resourceType: 'UPLOAD',
+            resourceId: upload._id,
+            before: expect.objectContaining({
+                id: upload._id,
+            }),
+            ip: '127.0.0.1',
+            userAgent: 'Jest',
+        }));
+        expect(result.id).toBe(upload._id);
     });
 
     it('allows admin to list uploads with pagination', async () => {
