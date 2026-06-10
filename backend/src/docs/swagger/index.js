@@ -16,6 +16,7 @@ const loyaltySwagger = require('../../modules/loyalty/loyalty.swagger');
 const notificationSwagger = require('../../modules/notifications/notification.swagger');
 const washHistorySwagger = require('../../modules/wash-histories/washHistory.swagger');
 const paymentSwagger = require('../../modules/payments/payment.swagger');
+const uploadSwagger = require('../../modules/uploads/upload.swagger');
 
 const openApiSpec = {
     openapi: '3.0.0',
@@ -47,6 +48,7 @@ const openApiSpec = {
         ...notificationSwagger.tags,
         ...washHistorySwagger.tags,
         ...paymentSwagger.tags,
+        ...uploadSwagger.tags,
     ],
     paths,
     components: {
@@ -69,6 +71,7 @@ const openApiSpec = {
             ...notificationSwagger.schemas,
             ...washHistorySwagger.schemas,
             ...paymentSwagger.schemas,
+            ...uploadSwagger.schemas,
         },
     },
 };

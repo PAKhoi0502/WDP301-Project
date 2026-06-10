@@ -44,6 +44,7 @@ backend/
       emails/
       wash-histories/
       payments/
+      uploads/
     scripts/
       seed.js
       resetDatabase.js
@@ -165,6 +166,7 @@ Public/customer routes:
 /notifications
 /wash-histories
 /payments
+/uploads
 ```
 
 Admin/staff routes:
@@ -175,6 +177,7 @@ Admin/staff routes:
 /admin/bookings
 /admin/waitlists
 /admin/payments
+/admin/uploads
 /admin/promotions
 /admin/loyalty
 /admin/wash-histories
@@ -432,6 +435,16 @@ Background jobs:
 - Automatic email retry for `PENDING` and `FAILED` email notifications
 - Automatic loyalty point expiration
 
+## Uploads
+
+Implemented:
+
+- Authenticated multipart upload through `POST /api/v1/uploads`
+- Cloudinary-backed storage through `multer` memory upload
+- Upload metadata stored with `url`, `public_id`, `mime_type`, `size`, `purpose`, `owner_id`, `related_type` and `related_id`
+- Owner or Admin delete through `DELETE /api/v1/uploads/:id`
+- Admin upload listing through `GET /api/v1/admin/uploads`
+
 ## Testing
 
 Run all backend tests:
@@ -444,8 +457,8 @@ npm test -- --runInBand
 Current verified state:
 
 ```txt
-27 test suites passed
-138 tests passed
+28 test suites passed
+142 tests passed
 ```
 
 ## Current Gaps
@@ -455,8 +468,7 @@ These items are future work. They are not implemented as modules in the current 
 - Frontend app
 - Analytics/research module
 - Survey module
-- Upload module
 - Audit log module
 - Advanced job dashboard, distributed locks and retry backoff controls
 
-Some npm dependencies are already installed for future capabilities, such as `multer` and `cloudinary`, but the corresponding full modules are not currently implemented.
+Some npm dependencies are already installed for future capabilities, such as `@google/generative-ai`, but the corresponding full modules are not currently implemented.
