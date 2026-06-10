@@ -13,6 +13,13 @@ const seedStaffProfiles = [
         is_active: true,
     },
     {
+        phone: '0900000011',
+        staff_code: 'WASH001',
+        staff_type: STAFF_TYPES.WASH_OPERATOR,
+        garage_code: 'GAR001',
+        is_active: true,
+    },
+    {
         phone: '0900000003',
         staff_code: 'CARE001',
         staff_type: STAFF_TYPES.VEHICLE_CARE_STAFF,
