@@ -206,7 +206,7 @@ const createServicePackageSchema = z.object({
             service_type: serviceTypeField,
             description: descriptionField,
             base_price: z.coerce.number().min(0),
-            duration_minutes: z.coerce.number().int().min(1).max(1440),
+            duration_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(1440).optional()),
             wash_bay_duration_minutes: z.coerce.number().int().min(0).max(1440).default(0),
             wash_bay_start_offset_minutes: z.coerce.number().int().min(0).max(1440).default(0),
             points_earned: z.coerce.number().int().min(0).default(0),
@@ -222,6 +222,9 @@ const createServicePackageSchema = z.object({
             is_active: z.boolean().optional(),
         })
         .strict()
+        .refine((data) => data.service_type === SERVICE_PACKAGE_TYPES.COMBO || data.duration_minutes !== undefined, {
+            message: 'Duration is required for non-combo service packages',
+        })
         .refine(servicePackageBusinessRule, {
             message: 'Service package business rule is invalid',
         }),

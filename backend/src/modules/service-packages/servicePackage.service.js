@@ -369,7 +369,7 @@ const assertIncludedServicesValid = async (includedServiceIds = [], servicePacka
             );
         }
 
-        return;
+        return [];
     }
 
     if (serviceType !== SERVICE_PACKAGE_TYPES.COMBO) {
@@ -421,6 +421,85 @@ const assertIncludedServicesValid = async (includedServiceIds = [], servicePacka
             'Included services cannot contain another combo',
             400,
             'NESTED_COMBO_NOT_SUPPORTED'
+        );
+    }
+
+    const childServiceById = new Map(childServices.map((item) => [item._id.toString(), item]));
+
+    return normalizedIncludedServiceIds.map((id) => childServiceById.get(id.toString()));
+};
+
+const buildResourceWindow = (childServices, resourcePrefix) => {
+    let elapsedMinutes = 0;
+    let startOffsetMinutes = null;
+    let endOffsetMinutes = null;
+
+    for (const service of childServices) {
+        if (service[`requires_${resourcePrefix}`]) {
+            const resourceStartOffset = elapsedMinutes + (service[`${resourcePrefix}_start_offset_minutes`] || 0);
+            const resourceEndOffset = resourceStartOffset
+                + (service[`${resourcePrefix}_duration_minutes`] || service.duration_minutes);
+
+            startOffsetMinutes = startOffsetMinutes === null
+                ? resourceStartOffset
+                : Math.min(startOffsetMinutes, resourceStartOffset);
+            endOffsetMinutes = endOffsetMinutes === null
+                ? resourceEndOffset
+                : Math.max(endOffsetMinutes, resourceEndOffset);
+        }
+
+        elapsedMinutes += service.duration_minutes;
+    }
+
+    return {
+        startOffsetMinutes: startOffsetMinutes || 0,
+        durationMinutes: startOffsetMinutes === null ? 0 : endOffsetMinutes - startOffsetMinutes,
+    };
+};
+
+const deriveComboOperationalPayload = (childServices = []) => {
+    const washBayWindow = buildResourceWindow(childServices, 'wash_bay');
+    const careStaffWindow = buildResourceWindow(childServices, 'care_staff');
+    const careStaffServices = childServices.filter((item) => item.requires_care_staff);
+
+    return {
+        duration_minutes: childServices.reduce((total, item) => total + item.duration_minutes, 0),
+        requires_wash_bay: washBayWindow.durationMinutes > 0,
+        wash_bay_start_offset_minutes: washBayWindow.startOffsetMinutes,
+        wash_bay_duration_minutes: washBayWindow.durationMinutes,
+        requires_care_staff: careStaffWindow.durationMinutes > 0,
+        care_staff_type: careStaffServices[0]?.care_staff_type || null,
+        care_staff_required_count: careStaffServices.length > 0
+            ? Math.max(...careStaffServices.map((item) => item.care_staff_required_count || 1))
+            : 0,
+        care_staff_start_offset_minutes: careStaffWindow.startOffsetMinutes,
+        care_staff_duration_minutes: careStaffWindow.durationMinutes,
+    };
+};
+
+const refreshParentComboSummaries = async (servicePackageId) => {
+    const parentCombos = await ServicePackage.find({
+        service_type: SERVICE_PACKAGE_TYPES.COMBO,
+        included_service_ids: servicePackageId,
+    });
+
+    for (const combo of parentCombos) {
+        const childServices = await ServicePackage.find({
+            _id: { $in: combo.included_service_ids || [] },
+        });
+        const childServiceById = new Map(childServices.map((item) => [item._id.toString(), item]));
+        const orderedChildServices = (combo.included_service_ids || [])
+            .map((id) => childServiceById.get(id.toString()))
+            .filter(Boolean);
+
+        if (orderedChildServices.length !== (combo.included_service_ids || []).length) {
+            continue;
+        }
+
+        await ServicePackage.updateOne(
+            { _id: combo._id },
+            { $set: deriveComboOperationalPayload(orderedChildServices) },
+            { runValidators: true }
         );
     }
 };
@@ -573,6 +652,15 @@ const createServicePackage = async (payload = {}) => {
     const createPayload = normalizeBasePayload(
         ServicePackageMapper.toCreatePayload(payload)
     );
+    const childServices = await assertIncludedServicesValid(
+        createPayload.included_service_ids || [],
+        createPayload
+    );
+
+    if (createPayload.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
+        Object.assign(createPayload, deriveComboOperationalPayload(childServices));
+        createPayload.steps_template = [];
+    }
 
     if (createPayload.requires_care_staff) {
         createPayload.care_staff_type = createPayload.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF;
@@ -582,7 +670,6 @@ const createServicePackage = async (payload = {}) => {
     assertDurationRuleValid(createPayload);
     assertComboStepsTemplateEmpty(createPayload.service_type, createPayload.steps_template || []);
     await assertNameAvailable(createPayload.name, createPayload.vehicle_type);
-    await assertIncludedServicesValid(createPayload.included_service_ids || [], createPayload);
 
     const servicePackage = await ServicePackage.create(createPayload);
     const populatedServicePackage = await getServicePackageDocumentById(servicePackage._id);
@@ -614,7 +701,6 @@ const updateServicePackage = async (servicePackageId, payload = {}) => {
         updatePayload.wash_bay_duration_minutes = 0;
         updatePayload.wash_bay_start_offset_minutes = 0;
     }
-    assertDurationRuleValid(updatePayload, servicePackage);
 
     const nextName = updatePayload.name || servicePackage.name;
     const nextVehicleType = updatePayload.vehicle_type || servicePackage.vehicle_type;
@@ -622,16 +708,34 @@ const updateServicePackage = async (servicePackageId, payload = {}) => {
     const nextStepsTemplate = updatePayload.steps_template !== undefined
         ? updatePayload.steps_template
         : nextServiceType === SERVICE_PACKAGE_TYPES.COMBO ? [] : servicePackage.steps_template || [];
+    const nextIncludedServiceIds = updatePayload.included_service_ids !== undefined
+        ? updatePayload.included_service_ids
+        : servicePackage.included_service_ids;
 
     assertComboStepsTemplateEmpty(nextServiceType, nextStepsTemplate);
     if (nextServiceType === SERVICE_PACKAGE_TYPES.COMBO) {
+        const childServices = await assertIncludedServicesValid(
+            nextIncludedServiceIds,
+            {
+                ...updatePayload,
+                service_type: nextServiceType,
+                vehicle_type: nextVehicleType,
+            },
+            servicePackage
+        );
+
+        Object.assign(updatePayload, deriveComboOperationalPayload(childServices));
         updatePayload.steps_template = [];
     }
+    assertDurationRuleValid(updatePayload, servicePackage);
     await assertNameAvailable(nextName, nextVehicleType, servicePackageId);
 
-    if (updatePayload.included_service_ids !== undefined || updatePayload.service_type !== undefined || updatePayload.vehicle_type !== undefined) {
+    if (
+        nextServiceType !== SERVICE_PACKAGE_TYPES.COMBO
+        && (updatePayload.included_service_ids !== undefined || updatePayload.service_type !== undefined || updatePayload.vehicle_type !== undefined)
+    ) {
         await assertIncludedServicesValid(
-            updatePayload.included_service_ids !== undefined ? updatePayload.included_service_ids : servicePackage.included_service_ids,
+            nextIncludedServiceIds,
             updatePayload,
             servicePackage
         );
@@ -642,6 +746,8 @@ const updateServicePackage = async (servicePackageId, payload = {}) => {
         { $set: updatePayload },
         { new: true, runValidators: true }
     ).populate('included_service_ids', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes wash_bay_start_offset_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes care_staff_start_offset_minutes allow_duplicate_in_booking is_active');
+
+    await refreshParentComboSummaries(updatedServicePackage._id);
 
     return ServicePackageMapper.toServicePackageDto(updatedServicePackage);
 };
@@ -683,13 +789,14 @@ const updateIncludedServices = async (servicePackageId, includedServiceIds = [])
     const servicePackage = await getServicePackageDocumentById(servicePackageId);
     const normalizedIncludedServiceIds = normalizeObjectIdList(includedServiceIds);
 
-    await assertIncludedServicesValid(normalizedIncludedServiceIds, {}, servicePackage);
+    const childServices = await assertIncludedServicesValid(normalizedIncludedServiceIds, {}, servicePackage);
 
     const updatePayload = {
         included_service_ids: normalizedIncludedServiceIds,
     };
 
     if (servicePackage.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
+        Object.assign(updatePayload, deriveComboOperationalPayload(childServices));
         updatePayload.steps_template = [];
     }
 

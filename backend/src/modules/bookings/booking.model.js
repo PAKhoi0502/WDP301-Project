@@ -85,6 +85,16 @@ const bookingItemSchema = new mongoose.Schema(
             min: [1, 'Booking item duration must be at least 1 minute'],
         },
 
+        item_start_time: {
+            type: Date,
+            default: null,
+        },
+
+        item_end_time: {
+            type: Date,
+            default: null,
+        },
+
         sequence: {
             type: Number,
             required: [true, 'Booking item sequence is required'],
@@ -102,6 +112,16 @@ const bookingItemSchema = new mongoose.Schema(
         },
 
         wash_bay_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        wash_bay_work_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        wash_bay_reserved_until: {
             type: Date,
             default: null,
         },
@@ -130,6 +150,16 @@ const bookingItemSchema = new mongoose.Schema(
         },
 
         care_staff_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        care_staff_work_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        care_staff_reserved_until: {
             type: Date,
             default: null,
         },
@@ -273,6 +303,16 @@ const bookingSchema = new mongoose.Schema(
             default: null,
         },
 
+        wash_bay_work_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        wash_bay_reserved_until: {
+            type: Date,
+            default: null,
+        },
+
         original_price: {
             type: Number,
             required: [true, 'Original price is required'],
@@ -364,6 +404,16 @@ const bookingSchema = new mongoose.Schema(
         },
 
         care_staff_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        care_staff_work_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        care_staff_reserved_until: {
             type: Date,
             default: null,
         },
@@ -465,10 +515,10 @@ const bookingSchema = new mongoose.Schema(
 
 bookingSchema.index({ customer_id: 1, start_time: -1 });
 bookingSchema.index({ vehicle_id: 1, start_time: 1, end_time: 1 });
-bookingSchema.index({ garage_id: 1, vehicle_type: 1, wash_bay_start_time: 1, wash_bay_end_time: 1, status: 1 });
-bookingSchema.index({ garage_id: 1, care_staff_type: 1, care_staff_start_time: 1, care_staff_end_time: 1, status: 1 });
-bookingSchema.index({ garage_id: 1, 'booking_items.wash_bay_start_time': 1, 'booking_items.wash_bay_end_time': 1, status: 1 });
-bookingSchema.index({ garage_id: 1, 'booking_items.care_staff_type': 1, 'booking_items.care_staff_start_time': 1, 'booking_items.care_staff_end_time': 1, status: 1 });
+bookingSchema.index({ garage_id: 1, vehicle_type: 1, wash_bay_start_time: 1, wash_bay_reserved_until: 1, status: 1 });
+bookingSchema.index({ garage_id: 1, care_staff_type: 1, care_staff_start_time: 1, care_staff_reserved_until: 1, status: 1 });
+bookingSchema.index({ garage_id: 1, 'booking_items.wash_bay_start_time': 1, 'booking_items.wash_bay_reserved_until': 1, status: 1 });
+bookingSchema.index({ garage_id: 1, 'booking_items.care_staff_type': 1, 'booking_items.care_staff_start_time': 1, 'booking_items.care_staff_reserved_until': 1, status: 1 });
 bookingSchema.index({ garage_id: 1, start_time: -1 });
 bookingSchema.index({ service_package_id: 1 });
 bookingSchema.index({ status: 1 });
@@ -484,22 +534,36 @@ bookingSchema.pre('validate', function (next) {
     }
 
     if (this.requires_wash_bay) {
-        if (!this.wash_bay_start_time || !this.wash_bay_end_time) {
+        this.wash_bay_work_end_time = this.wash_bay_work_end_time || this.wash_bay_end_time;
+        this.wash_bay_end_time = this.wash_bay_end_time || this.wash_bay_work_end_time;
+        this.wash_bay_reserved_until = this.wash_bay_reserved_until || this.wash_bay_work_end_time;
+
+        if (!this.wash_bay_start_time || !this.wash_bay_work_end_time || !this.wash_bay_reserved_until) {
             this.invalidate('wash_bay_start_time', 'Wash bay time is required');
         }
 
-        if (this.wash_bay_start_time && this.wash_bay_end_time && this.wash_bay_start_time >= this.wash_bay_end_time) {
+        if (this.wash_bay_start_time && this.wash_bay_work_end_time && this.wash_bay_start_time >= this.wash_bay_work_end_time) {
             this.invalidate('wash_bay_end_time', 'Wash bay end time must be after wash bay start time');
+        }
+
+        if (this.wash_bay_work_end_time && this.wash_bay_reserved_until && this.wash_bay_work_end_time > this.wash_bay_reserved_until) {
+            this.invalidate('wash_bay_reserved_until', 'Wash bay reservation must not end before work end time');
         }
     }
 
     if (!this.requires_wash_bay) {
         this.wash_bay_start_time = null;
         this.wash_bay_end_time = null;
+        this.wash_bay_work_end_time = null;
+        this.wash_bay_reserved_until = null;
         this.wash_bay_id = null;
     }
 
     if (this.requires_care_staff) {
+        this.care_staff_work_end_time = this.care_staff_work_end_time || this.care_staff_end_time;
+        this.care_staff_end_time = this.care_staff_end_time || this.care_staff_work_end_time;
+        this.care_staff_reserved_until = this.care_staff_reserved_until || this.care_staff_work_end_time;
+
         if (!this.care_staff_type) {
             this.invalidate('care_staff_type', 'Care staff type is required');
         }
@@ -508,12 +572,16 @@ bookingSchema.pre('validate', function (next) {
             this.invalidate('care_staff_required_count', 'Care staff required count must be greater than 0');
         }
 
-        if (!this.care_staff_start_time || !this.care_staff_end_time) {
+        if (!this.care_staff_start_time || !this.care_staff_work_end_time || !this.care_staff_reserved_until) {
             this.invalidate('care_staff_start_time', 'Care staff time is required');
         }
 
-        if (this.care_staff_start_time && this.care_staff_end_time && this.care_staff_start_time >= this.care_staff_end_time) {
+        if (this.care_staff_start_time && this.care_staff_work_end_time && this.care_staff_start_time >= this.care_staff_work_end_time) {
             this.invalidate('care_staff_end_time', 'Care staff end time must be after care staff start time');
+        }
+
+        if (this.care_staff_work_end_time && this.care_staff_reserved_until && this.care_staff_work_end_time > this.care_staff_reserved_until) {
+            this.invalidate('care_staff_reserved_until', 'Care staff reservation must not end before work end time');
         }
     }
 
@@ -522,6 +590,8 @@ bookingSchema.pre('validate', function (next) {
         this.care_staff_required_count = 0;
         this.care_staff_start_time = null;
         this.care_staff_end_time = null;
+        this.care_staff_work_end_time = null;
+        this.care_staff_reserved_until = null;
         this.assigned_care_staff_ids = [];
     }
 
@@ -535,14 +605,28 @@ bookingSchema.pre('validate', function (next) {
 
         itemKeys.add(item.item_key);
 
+        if (item.item_start_time && item.item_end_time && item.item_start_time >= item.item_end_time) {
+            this.invalidate('booking_items', 'Booking item end time must be after start time');
+            break;
+        }
+
         if (item.requires_wash_bay) {
-            if (!item.wash_bay_start_time || !item.wash_bay_end_time) {
+            item.wash_bay_work_end_time = item.wash_bay_work_end_time || item.wash_bay_end_time;
+            item.wash_bay_end_time = item.wash_bay_end_time || item.wash_bay_work_end_time;
+            item.wash_bay_reserved_until = item.wash_bay_reserved_until || item.wash_bay_work_end_time;
+
+            if (!item.wash_bay_start_time || !item.wash_bay_work_end_time || !item.wash_bay_reserved_until) {
                 this.invalidate('booking_items', 'Wash bay time is required for wash bay booking item');
                 break;
             }
 
-            if (item.wash_bay_start_time >= item.wash_bay_end_time) {
+            if (item.wash_bay_start_time >= item.wash_bay_work_end_time) {
                 this.invalidate('booking_items', 'Wash bay item end time must be after start time');
+                break;
+            }
+
+            if (item.wash_bay_work_end_time > item.wash_bay_reserved_until) {
+                this.invalidate('booking_items', 'Wash bay item reservation must not end before work end time');
                 break;
             }
         }
@@ -550,9 +634,15 @@ bookingSchema.pre('validate', function (next) {
         if (!item.requires_wash_bay) {
             item.wash_bay_start_time = null;
             item.wash_bay_end_time = null;
+            item.wash_bay_work_end_time = null;
+            item.wash_bay_reserved_until = null;
         }
 
         if (item.requires_care_staff) {
+            item.care_staff_work_end_time = item.care_staff_work_end_time || item.care_staff_end_time;
+            item.care_staff_end_time = item.care_staff_end_time || item.care_staff_work_end_time;
+            item.care_staff_reserved_until = item.care_staff_reserved_until || item.care_staff_work_end_time;
+
             if (!item.care_staff_type) {
                 this.invalidate('booking_items', 'Care staff type is required for care staff booking item');
                 break;
@@ -563,13 +653,18 @@ bookingSchema.pre('validate', function (next) {
                 break;
             }
 
-            if (!item.care_staff_start_time || !item.care_staff_end_time) {
+            if (!item.care_staff_start_time || !item.care_staff_work_end_time || !item.care_staff_reserved_until) {
                 this.invalidate('booking_items', 'Care staff time is required for care staff booking item');
                 break;
             }
 
-            if (item.care_staff_start_time >= item.care_staff_end_time) {
+            if (item.care_staff_start_time >= item.care_staff_work_end_time) {
                 this.invalidate('booking_items', 'Care staff item end time must be after start time');
+                break;
+            }
+
+            if (item.care_staff_work_end_time > item.care_staff_reserved_until) {
+                this.invalidate('booking_items', 'Care staff item reservation must not end before work end time');
                 break;
             }
         }
@@ -579,6 +674,8 @@ bookingSchema.pre('validate', function (next) {
             item.care_staff_required_count = 0;
             item.care_staff_start_time = null;
             item.care_staff_end_time = null;
+            item.care_staff_work_end_time = null;
+            item.care_staff_reserved_until = null;
             item.assigned_care_staff = [];
         }
     }

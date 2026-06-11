@@ -53,7 +53,7 @@ const schemas = {
     ServicePackageStepTemplate: stepTemplateSchema,
     ServicePackageCreateRequest: {
         type: 'object',
-        required: ['name', 'vehicle_type', 'service_type', 'base_price', 'duration_minutes'],
+        required: ['name', 'vehicle_type', 'service_type', 'base_price'],
         properties: {
             name: {
                 type: 'string',
@@ -80,6 +80,7 @@ const schemas = {
             },
             duration_minutes: {
                 type: 'integer',
+                description: 'Required for non-combo services. Combo duration is calculated from included services.',
                 example: 45,
             },
             wash_bay_duration_minutes: {

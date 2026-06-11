@@ -14,8 +14,8 @@ const packageDefinitions = [
         service_type: SERVICE_PACKAGE_TYPES.WASH,
         description: 'Standard wash service for motorbikes.',
         base_price: 30000,
-        duration_minutes: 20,
-        wash_bay_duration_minutes: 20,
+        duration_minutes: 15,
+        wash_bay_duration_minutes: 15,
         points_earned: 5,
         requires_wash_bay: true,
         steps_template: [
@@ -175,7 +175,7 @@ const packageDefinitions = [
         service_type: SERVICE_PACKAGE_TYPES.ADDON,
         description: 'Manual interior vacuuming and basic cabin cleaning service.',
         base_price: 100000,
-        duration_minutes: 25,
+        duration_minutes: 105,
         wash_bay_duration_minutes: 0,
         points_earned: 8,
         requires_wash_bay: false,
@@ -355,7 +355,7 @@ const packageDefinitions = [
         service_type: SERVICE_PACKAGE_TYPES.ADDON,
         description: 'Manual engine bay cleaning service.',
         base_price: 300000,
-        duration_minutes: 60,
+        duration_minutes: 120,
         wash_bay_duration_minutes: 0,
         points_earned: 25,
         requires_wash_bay: false,
@@ -475,10 +475,7 @@ const packageDefinitions = [
         service_type: SERVICE_PACKAGE_TYPES.COMBO,
         description: 'Motorbike wash combined with oil change.',
         base_price: 140000,
-        duration_minutes: 45,
-        wash_bay_duration_minutes: 20,
         points_earned: 14,
-        requires_wash_bay: true,
         included_service_keys: [
             'MOTORBIKE_STANDARD_WASH',
             'MOTORBIKE_OIL_CHANGE',
@@ -523,10 +520,7 @@ const packageDefinitions = [
         service_type: SERVICE_PACKAGE_TYPES.COMBO,
         description: 'Premium wash, glass stain removal, headlight polishing, and interior cleaning.',
         base_price: 500000,
-        duration_minutes: 120,
-        wash_bay_duration_minutes: 35,
         points_earned: 45,
-        requires_wash_bay: true,
         included_service_keys: [
             'CAR_PREMIUM_WASH',
             'CAR_GLASS_STAIN_REMOVAL',
@@ -600,10 +594,7 @@ const packageDefinitions = [
         service_type: SERVICE_PACKAGE_TYPES.COMBO,
         description: 'Basic Clean plus windshield polishing, tar removal, and iron fallout removal.',
         base_price: 950000,
-        duration_minutes: 220,
-        wash_bay_duration_minutes: 35,
         points_earned: 85,
-        requires_wash_bay: true,
         included_service_keys: [
             'CAR_PREMIUM_WASH',
             'CAR_GLASS_STAIN_REMOVAL',
@@ -666,10 +657,7 @@ const packageDefinitions = [
         service_type: SERVICE_PACKAGE_TYPES.COMBO,
         description: 'Detail Clean plus engine bay cleaning and AC system cleaning.',
         base_price: 1500000,
-        duration_minutes: 330,
-        wash_bay_duration_minutes: 35,
         points_earned: 140,
-        requires_wash_bay: true,
         included_service_keys: [
             'CAR_PREMIUM_WASH',
             'CAR_GLASS_STAIN_REMOVAL',
@@ -733,10 +721,7 @@ const packageDefinitions = [
         service_type: SERVICE_PACKAGE_TYPES.COMBO,
         description: 'Ultimate Clean plus UVC sanitizing and ozone odor treatment.',
         base_price: 1850000,
-        duration_minutes: 390,
-        wash_bay_duration_minutes: 35,
         points_earned: 180,
-        requires_wash_bay: true,
         included_service_keys: [
             'CAR_PREMIUM_WASH',
             'CAR_GLASS_STAIN_REMOVAL',
@@ -803,6 +788,79 @@ const hasVehicleCareStaffStep = (definition) => {
     return (definition.steps_template || []).some((step) => {
         return step.display_staff_type === STAFF_TYPES.VEHICLE_CARE_STAFF;
     });
+};
+
+const getDefinitionRequiresCareStaff = (definition) => {
+    return definition.requires_care_staff !== undefined
+        ? definition.requires_care_staff
+        : hasVehicleCareStaffStep(definition);
+};
+
+const buildDefinitionResourceWindow = (definitions, resourcePrefix) => {
+    let elapsedMinutes = 0;
+    let startOffsetMinutes = null;
+    let endOffsetMinutes = null;
+
+    for (const definition of definitions) {
+        const requiresResource = resourcePrefix === 'wash_bay'
+            ? Boolean(definition.requires_wash_bay)
+            : getDefinitionRequiresCareStaff(definition);
+
+        if (requiresResource) {
+            const resourceStartOffset = elapsedMinutes + (definition[`${resourcePrefix}_start_offset_minutes`] || 0);
+            const resourceEndOffset = resourceStartOffset
+                + (definition[`${resourcePrefix}_duration_minutes`] || definition.duration_minutes);
+
+            startOffsetMinutes = startOffsetMinutes === null
+                ? resourceStartOffset
+                : Math.min(startOffsetMinutes, resourceStartOffset);
+            endOffsetMinutes = endOffsetMinutes === null
+                ? resourceEndOffset
+                : Math.max(endOffsetMinutes, resourceEndOffset);
+        }
+
+        elapsedMinutes += definition.duration_minutes;
+    }
+
+    return {
+        startOffsetMinutes: startOffsetMinutes || 0,
+        durationMinutes: startOffsetMinutes === null ? 0 : endOffsetMinutes - startOffsetMinutes,
+    };
+};
+
+const synchronizeComboDefinitions = () => {
+    const definitionByKey = new Map(packageDefinitions.map((item) => [item.key, item]));
+
+    for (const definition of packageDefinitions) {
+        if (definition.service_type !== SERVICE_PACKAGE_TYPES.COMBO) {
+            continue;
+        }
+
+        const childDefinitions = (definition.included_service_keys || []).map((key) => {
+            const childDefinition = definitionByKey.get(key);
+
+            if (!childDefinition) {
+                throw new Error(`Missing included service definition for key: ${key}`);
+            }
+
+            return childDefinition;
+        });
+        const washBayWindow = buildDefinitionResourceWindow(childDefinitions, 'wash_bay');
+        const careStaffWindow = buildDefinitionResourceWindow(childDefinitions, 'care_staff');
+        const careStaffDefinitions = childDefinitions.filter((item) => getDefinitionRequiresCareStaff(item));
+
+        definition.duration_minutes = childDefinitions.reduce((total, item) => total + item.duration_minutes, 0);
+        definition.requires_wash_bay = washBayWindow.durationMinutes > 0;
+        definition.wash_bay_start_offset_minutes = washBayWindow.startOffsetMinutes;
+        definition.wash_bay_duration_minutes = washBayWindow.durationMinutes;
+        definition.requires_care_staff = careStaffWindow.durationMinutes > 0;
+        definition.care_staff_type = careStaffDefinitions[0]?.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF;
+        definition.care_staff_required_count = careStaffDefinitions.length > 0
+            ? Math.max(...careStaffDefinitions.map((item) => item.care_staff_required_count || 1))
+            : 0;
+        definition.care_staff_start_offset_minutes = careStaffWindow.startOffsetMinutes;
+        definition.care_staff_duration_minutes = careStaffWindow.durationMinutes;
+    }
 };
 
 const toSeedPayload = (definition, idByKey) => {
@@ -883,6 +941,8 @@ const upsertPackage = async (definition, idByKey) => {
 
 const seedServicePackage = async () => {
     console.log('== Seeding service packages ==');
+
+    synchronizeComboDefinitions();
 
     const idByKey = new Map();
     const basePackages = packageDefinitions.filter(
