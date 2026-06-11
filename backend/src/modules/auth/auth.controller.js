@@ -57,6 +57,31 @@ const register = asyncHandler(async (req, res) => {
     });
 });
 
+const requestPhoneVerification = asyncHandler(async (req, res) => {
+    const result = await authService.requestPhoneVerification({
+        ...req.validated.body,
+        user_id: req.user?._id || null,
+        ...getRequestMeta(req),
+    });
+
+    return sendSuccess(res, {
+        message: 'Phone verification OTP sent successfully',
+        data: result,
+    });
+});
+
+const verifyPhoneOtp = asyncHandler(async (req, res) => {
+    const result = await authService.verifyPhoneOtp({
+        ...req.validated.body,
+        user_id: req.user?._id || null,
+    });
+
+    return sendSuccess(res, {
+        message: 'Phone verified successfully',
+        data: result,
+    });
+});
+
 const login = asyncHandler(async (req, res) => {
     const result = await authService.login(
         req.validated.body,
@@ -170,6 +195,8 @@ const resetPassword = asyncHandler(async (req, res) => {
 
 module.exports = {
     register,
+    requestPhoneVerification,
+    verifyPhoneOtp,
     login,
     refresh,
     logout,

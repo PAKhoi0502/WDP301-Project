@@ -51,7 +51,7 @@ const revokeByJti = async (jti, reason = 'manual', replacedByJti = null) => {
     );
 };
 
-const revokeAllByUser = async (userId, reason = 'security') => {
+const revokeAllByUser = async (userId, reason = 'security', session = null) => {
     if (!userId) {
         throw new AppError(
             'User id is required',
@@ -71,7 +71,8 @@ const revokeAllByUser = async (userId, reason = 'security') => {
                 revoked_at: new Date(),
                 revoked_reason: reason,
             },
-        }
+        },
+        session ? { session } : undefined
     );
 };
 

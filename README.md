@@ -85,6 +85,7 @@ npm test
 npm run seed
 npm run seed:reset
 npm run db:reset
+npm run migrate:phone-e164
 ```
 
 `seed:reset` runs seed with reset mode. `db:reset` drops configured collections through `src/scripts/resetDatabase.js`.
@@ -107,6 +108,16 @@ JWT_REFRESH_SECRET
 JWT_REFRESH_EXPIRES_IN
 REFRESH_TOKEN_EXPIRES_IN_DAYS
 BCRYPT_SALT_ROUNDS
+
+SMS_PROVIDER
+OTP_SECRET
+OTP_EXPIRES_IN_MINUTES
+OTP_MAX_ATTEMPTS
+OTP_REQUEST_COOLDOWN_SECONDS
+OTP_RATE_LIMIT_WINDOW_MINUTES
+OTP_RATE_LIMIT_MAX_REQUESTS
+OTP_IP_RATE_LIMIT_MAX_REQUESTS
+PHONE_VERIFICATION_TOKEN_EXPIRES_IN_MINUTES
 
 PASSWORD_RESET_EXPIRES_IN_MINUTES
 PASSWORD_RESET_RATE_LIMIT_WINDOW_MINUTES
@@ -197,6 +208,8 @@ Admin/staff routes:
 Implemented:
 
 - Register
+- Request phone verification OTP
+- Verify phone OTP
 - Login
 - Refresh token
 - Logout
@@ -205,6 +218,22 @@ Implemented:
 - Change password
 - Forgot password
 - Reset password
+
+Registration requires phone verification:
+
+```txt
+POST /api/v1/auth/phone-verifications/request
+POST /api/v1/auth/phone-verifications/verify
+POST /api/v1/auth/register
+```
+
+Phone identity is stored in E.164 format. Inputs such as `0901234567`, `84901234567`, and `+84901234567` are normalized to `+84901234567`.
+
+Use `purpose=REGISTER` before registration. To change the current user's phone, use `purpose=CHANGE_PHONE` with a bearer token, verify the OTP with the same user, then send `phone`, `current_password`, and `phone_verification_token` to `PATCH /api/v1/users/me`.
+
+Development defaults to `SMS_PROVIDER=mock`. The request response includes `debug_otp` outside production. Production startup rejects the mock provider and requires `OTP_SECRET`.
+
+Run `npm run migrate:phone-e164` once before deploying this normalization change to a database that already contains local-format user phones. The migration stops on normalization collisions instead of merging accounts.
 
 Roles currently used:
 

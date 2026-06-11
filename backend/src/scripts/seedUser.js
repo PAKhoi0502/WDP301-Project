@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 
 const User = require('../modules/users/user.model');
 const { USER_ROLES } = require('../shared/constants/roles.constant');
+const { normalizePhone } = require('../shared/utils/phone');
 
 const BCRYPT_SALT_ROUNDS = Number(process.env.BCRYPT_SALT_ROUNDS || 10);
 
@@ -206,14 +207,19 @@ const seedUser = async () => {
         const payload = {
             full_name: user.full_name,
             email: user.email.trim().toLowerCase(),
-            phone: user.phone.trim(),
+            phone: normalizePhone(user.phone),
             password_hash,
             role: user.role,
             avatar_url: user.avatar_url,
             is_active: user.is_active,
+            phone_verified_at: new Date(),
         };
 
-        const existingUser = await User.findOne({ phone: payload.phone }).select('_id');
+        const existingUser = await User.findOne({
+            phone: {
+                $in: [user.phone.trim(), payload.phone],
+            },
+        }).select('_id');
 
         if (existingUser) {
             await User.updateOne(

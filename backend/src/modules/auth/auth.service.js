@@ -6,6 +6,10 @@ const { AppError } = require('../../shared/utils/appError');
 
 const register = (...args) => coreService.register(...args);
 
+const requestPhoneVerification = (...args) => coreService.requestPhoneVerification(...args);
+
+const verifyPhoneOtp = (...args) => coreService.verifyPhoneOtp(...args);
+
 const login = (...args) => coreService.login(...args);
 
 const refresh = (...args) => sessionService.refresh(...args);
@@ -44,6 +48,8 @@ const getCurrentUser = async (userId) => {
 
 module.exports = {
     register,
+    requestPhoneVerification,
+    verifyPhoneOtp,
     login,
     refresh,
     logout,

@@ -1,7 +1,16 @@
+const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
+
 const User = require('./user.model');
 const UserMapper = require('./user.mapper');
+const TokenService = require('../auth/services/token.service');
+const phoneVerificationService = require('../auth/services/phoneVerification.service');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES, USER_ROLE_VALUES } = require('../../shared/constants/roles.constant');
+const { normalizePhone } = require('../../shared/utils/phone');
+const {
+    PHONE_VERIFICATION_PURPOSES,
+} = require('../auth/phoneVerification.constant');
 
 const normalizeEmail = (email) => {
     if (!email) {
@@ -31,7 +40,7 @@ const normalizeUpdatePayload = (payload = {}) => {
     }
 
     if (payload.phone !== undefined) {
-        update.phone = normalizeText(payload.phone);
+        update.phone = normalizePhone(payload.phone);
     }
 
     if (payload.avatar_url !== undefined) {
@@ -232,15 +241,101 @@ const updateMe = async (userId, payload = {}) => {
 
     assertUpdatePayloadNotEmpty(update);
 
-    await getUserDocumentById(userId);
+    const user = await User.findById(userId).select('+password_hash');
+
+    if (!user) {
+        throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+
+    const phoneChanged = update.phone !== undefined
+        && normalizePhone(user.phone) !== update.phone;
+
+    if (phoneChanged) {
+        if (!payload.current_password) {
+            throw new AppError(
+                'Current password is required to change phone',
+                400,
+                'CURRENT_PASSWORD_REQUIRED'
+            );
+        }
+
+        if (!payload.phone_verification_token) {
+            throw new AppError(
+                'Phone verification token is required',
+                400,
+                'PHONE_VERIFICATION_TOKEN_REQUIRED'
+            );
+        }
+
+        const passwordValid = await bcrypt.compare(
+            payload.current_password,
+            user.password_hash
+        );
+
+        if (!passwordValid) {
+            throw new AppError(
+                'Current password is incorrect',
+                401,
+                'INVALID_CURRENT_PASSWORD'
+            );
+        }
+
+        update.phone_verified_at = new Date();
+    }
+
     await assertEmailAvailable(update.email, userId);
     await assertPhoneAvailable(update.phone, userId);
 
-    const updatedUser = await User.findByIdAndUpdate(
-        userId,
-        { $set: update },
-        { new: true, runValidators: true }
-    );
+    if (!phoneChanged) {
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { $set: update },
+            { new: true, runValidators: true }
+        );
+
+        return UserMapper.toUserDto(updatedUser);
+    }
+
+    const session = await mongoose.startSession();
+    let updatedUser;
+
+    try {
+        await session.withTransaction(async () => {
+            const phoneVerification = await phoneVerificationService.getVerifiedChallenge({
+                phone: update.phone,
+                purpose: PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
+                verificationToken: payload.phone_verification_token,
+                userId,
+                session,
+            });
+
+            updatedUser = await User.findByIdAndUpdate(
+                userId,
+                { $set: update },
+                {
+                    new: true,
+                    runValidators: true,
+                    session,
+                }
+            );
+
+            if (!updatedUser) {
+                throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+            }
+
+            await phoneVerificationService.consumeVerifiedChallenge(
+                phoneVerification._id,
+                session
+            );
+            await TokenService.revokeAllByUser(
+                userId,
+                'phone_changed',
+                session
+            );
+        });
+    } finally {
+        await session.endSession();
+    }
 
     return UserMapper.toUserDto(updatedUser);
 };
@@ -256,11 +351,26 @@ const updateUser = async (userId, payload = {}) => {
     await assertEmailAvailable(update.email, userId);
     await assertPhoneAvailable(update.phone, userId);
 
+    let phoneChanged = false;
+
+    if (update.phone !== undefined) {
+        const currentUser = await getUserDocumentById(userId);
+
+        if (normalizePhone(currentUser.phone) !== update.phone) {
+            phoneChanged = true;
+            update.phone_verified_at = null;
+        }
+    }
+
     const updatedUser = await User.findByIdAndUpdate(
         userId,
         { $set: update },
         { new: true, runValidators: true }
     );
+
+    if (phoneChanged) {
+        await TokenService.revokeAllByUser(userId, 'phone_changed_by_admin');
+    }
 
     return UserMapper.toUserDto(updatedUser);
 };

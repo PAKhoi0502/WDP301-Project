@@ -1,16 +1,22 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
 
 const User = require('../../users/user.model');
 const AuthMapper = require('../auth.mapper');
 const TokenService = require('../services/token.service');
 const emailService = require('../../emails/email.service');
 const notificationService = require('../../notifications/notification.service');
+const phoneVerificationService = require('./phoneVerification.service');
 const { hashToken } = require('../security/token.hash');
 const PasswordReset = require('../models/passwordResetToken.model');
 const PasswordResetRateLimit = require('../models/passwordResetRateLimit.model');
 const { AppError } = require('../../../shared/utils/appError');
 const { USER_ROLES } = require('../../../shared/constants/roles.constant');
+const { normalizePhone } = require('../../../shared/utils/phone');
+const {
+    PHONE_VERIFICATION_PURPOSES,
+} = require('../phoneVerification.constant');
 const {
     NOTIFICATION_TYPES,
     NOTIFICATION_RELATED_TYPES,
@@ -24,10 +30,6 @@ const DEFAULT_PASSWORD_RESET_WINDOW_MINUTES = 15;
 const DEFAULT_PASSWORD_RESET_MAX_REQUESTS = 5;
 const DEFAULT_PASSWORD_RESET_COOLDOWN_SECONDS = 60;
 const MAX_RESET_ATTEMPTS = 5;
-
-const normalizePhone = (phone) => {
-    return phone.trim();
-};
 
 const normalizeEmail = (email) => {
     if (!email) {
@@ -240,18 +242,63 @@ const register = async (payload) => {
     }
 
     const passwordHash = await bcrypt.hash(payload.password, getSaltRounds());
+    const phoneVerifiedAt = new Date();
+    const session = await mongoose.startSession();
+    let user;
 
-    const user = await User.create({
-        full_name: fullName,
-        email,
-        phone,
-        password_hash: passwordHash,
-        role: USER_ROLES.CUSTOMER,
-    });
+    try {
+        await session.withTransaction(async () => {
+            const verification = await phoneVerificationService.getVerifiedChallenge({
+                phone,
+                purpose: PHONE_VERIFICATION_PURPOSES.REGISTER,
+                verificationToken: payload.phone_verification_token,
+                session,
+            });
+
+            [user] = await User.create(
+                [
+                    {
+                        full_name: fullName,
+                        email,
+                        phone,
+                        password_hash: passwordHash,
+                        role: USER_ROLES.CUSTOMER,
+                        phone_verified_at: phoneVerifiedAt,
+                    },
+                ],
+                { session }
+            );
+
+            await phoneVerificationService.consumeVerifiedChallenge(
+                verification._id,
+                session
+            );
+        });
+    } finally {
+        await session.endSession();
+    }
 
     return {
         user: AuthMapper.toUserDto(user),
     };
+};
+
+const requestPhoneVerification = async (payload) => {
+    return phoneVerificationService.requestVerification({
+        phone: payload.phone,
+        purpose: payload.purpose,
+        userId: payload.user_id,
+        requestIp: payload.ip_address,
+        userAgent: payload.user_agent,
+    });
+};
+
+const verifyPhoneOtp = async (payload) => {
+    return phoneVerificationService.verifyOtp({
+        challengeId: payload.challenge_id,
+        otp: payload.otp,
+        userId: payload.user_id,
+    });
 };
 
 const login = async (payload, meta = {}) => {
@@ -484,6 +531,8 @@ const resetPassword = async (payload) => {
 
 module.exports = {
     register,
+    requestPhoneVerification,
+    verifyPhoneOtp,
     login,
     changePassword,
     forgotPassword,

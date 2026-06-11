@@ -3,6 +3,7 @@ const User = require('../modules/users/user.model');
 const Garage = require('../modules/garages/garage.model');
 const { USER_ROLES } = require('../shared/constants/roles.constant');
 const { STAFF_TYPES } = require('../shared/constants/staff.constant');
+const { normalizePhone } = require('../shared/utils/phone');
 
 const seedStaffProfiles = [
     {
@@ -82,7 +83,7 @@ const seedStaffProfile = async () => {
 
     for (const staffProfile of seedStaffProfiles) {
         const user = await User.findOne({
-            phone: staffProfile.phone,
+            phone: normalizePhone(staffProfile.phone),
             role: USER_ROLES.STAFF,
         }).select('_id');
 

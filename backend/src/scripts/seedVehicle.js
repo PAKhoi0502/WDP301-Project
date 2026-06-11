@@ -7,6 +7,7 @@ const {
     MOTORBIKE_CC_GROUPS,
     CAR_BODY_TYPES,
 } = require('../shared/constants/vehicle.constant');
+const { normalizePhone } = require('../shared/utils/phone');
 
 const seedVehicles = [
     {
@@ -73,7 +74,9 @@ const seedVehicle = async () => {
     console.log('== Seeding vehicles ==');
 
     for (const item of seedVehicles) {
-        const customer = await User.findOne({ phone: item.customer_phone }).select('_id phone');
+        const customer = await User.findOne({
+            phone: normalizePhone(item.customer_phone),
+        }).select('_id phone');
 
         if (!customer) {
             console.log(`Skipped vehicle because customer was not found: ${item.customer_phone}`);

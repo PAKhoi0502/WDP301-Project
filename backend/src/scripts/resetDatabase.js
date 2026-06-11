@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const { connectDB, disconnectDB } = require('../config/db');
 const PasswordResetRateLimit = require('../modules/auth/models/passwordResetRateLimit.model');
 const PasswordResetToken = require('../modules/auth/models/passwordResetToken.model');
+const PhoneVerification = require('../modules/auth/models/phoneVerification.model');
 const RefreshToken = require('../modules/auth/models/refreshToken.model');
 const AuditLog = require('../modules/audit-logs/auditLog.model');
 const BookingServiceStep = require('../modules/booking-service-steps/bookingServiceStep.model');
@@ -43,6 +44,7 @@ const resetTargets = Object.freeze([
     { group: 'Runtime booking', model: BookingWaitlist, seed: '-', note: 'Customer waitlist entries and offers' },
     { group: 'Runtime booking', model: Booking, seed: '-', note: 'Customer and walk-in bookings' },
     { group: 'Auth transient', model: RefreshToken, seed: '-', note: 'Login sessions' },
+    { group: 'Auth transient', model: PhoneVerification, seed: '-', note: 'Phone OTP challenges and rate limits' },
     { group: 'Auth transient', model: PasswordResetToken, seed: '-', note: 'Password reset tokens' },
     { group: 'Auth transient', model: PasswordResetRateLimit, seed: '-', note: 'Password reset rate limits' },
     { group: 'Seed data', model: CustomerLoyalty, seed: '-', note: 'Recreated by usage if needed' },

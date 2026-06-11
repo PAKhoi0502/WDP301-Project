@@ -1,6 +1,7 @@
 const { z } = require('zod');
 
 const { USER_ROLE_VALUES } = require('../../shared/constants/roles.constant');
+const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 
 const emptyToUndefined = (value) => {
     if (typeof value === 'string' && value.trim() === '') {
@@ -31,8 +32,9 @@ const phoneField = z
     .string()
     .trim()
     .min(9, 'Phone must have at least 9 characters')
-    .max(15, 'Phone must have at most 15 characters')
-    .regex(/^\+?[0-9]{9,15}$/, 'Phone is invalid');
+    .max(30, 'Phone must have at most 30 characters')
+    .transform(normalizePhone)
+    .refine(isValidPhone, 'Phone is invalid');
 
 const optionalFullNameField = z.preprocess(
     emptyToUndefined,
@@ -56,6 +58,16 @@ const optionalEmailField = z.preprocess(
 );
 
 const optionalPhoneField = z.preprocess(emptyToUndefined, phoneField.optional());
+
+const optionalVerificationTokenField = z.preprocess(
+    emptyToUndefined,
+    z
+        .string()
+        .trim()
+        .min(64, 'Phone verification token is invalid')
+        .max(200, 'Phone verification token is invalid')
+        .optional()
+);
 
 const optionalAvatarUrlField = z.preprocess(
     emptyToUndefined,
@@ -98,6 +110,11 @@ const updateMeSchema = z.object({
             full_name: optionalFullNameField,
             email: optionalEmailField,
             phone: optionalPhoneField,
+            phone_verification_token: optionalVerificationTokenField,
+            current_password: z.preprocess(
+                emptyToUndefined,
+                z.string().min(1, 'Current password is required').optional()
+            ),
             avatar_url: optionalAvatarUrlField,
         })
         .strict()

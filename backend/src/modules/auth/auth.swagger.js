@@ -25,7 +25,14 @@ const schemas = {
             },
             phone: {
                 type: 'string',
-                example: '0901234567',
+                description: 'Stored in E.164 format',
+                example: '+84901234567',
+            },
+            phone_verified_at: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+                example: '2026-06-11T12:00:00.000Z',
             },
             role: {
                 type: 'string',
@@ -61,7 +68,7 @@ const schemas = {
     },
     AuthRegisterRequest: {
         type: 'object',
-        required: ['phone', 'password'],
+        required: ['phone', 'password', 'phone_verification_token'],
         properties: {
             phone: {
                 type: 'string',
@@ -78,6 +85,138 @@ const schemas = {
             full_name: {
                 type: 'string',
                 example: 'Nguyen Van A',
+            },
+            phone_verification_token: {
+                type: 'string',
+                example: '96-character-verification-token',
+            },
+        },
+    },
+    PhoneVerificationRequest: {
+        type: 'object',
+        required: ['phone', 'purpose'],
+        properties: {
+            phone: {
+                type: 'string',
+                example: '0901234567',
+            },
+            purpose: {
+                type: 'string',
+                enum: ['REGISTER', 'CHANGE_PHONE'],
+                example: 'REGISTER',
+            },
+        },
+    },
+    PhoneVerificationVerifyRequest: {
+        type: 'object',
+        required: ['challenge_id', 'otp'],
+        properties: {
+            challenge_id: {
+                type: 'string',
+                example: '665f1b7b2a5f9d0012a12345',
+            },
+            otp: {
+                type: 'string',
+                example: '123456',
+            },
+        },
+    },
+    PhoneVerificationChallengeResponse: {
+        type: 'object',
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Phone verification OTP sent successfully',
+            },
+            data: {
+                type: 'object',
+                properties: {
+                    challenge_id: {
+                        type: 'string',
+                        example: '665f1b7b2a5f9d0012a12345',
+                    },
+                    phone: {
+                        type: 'string',
+                        example: '0901234567',
+                    },
+                    purpose: {
+                        type: 'string',
+                        enum: ['REGISTER', 'CHANGE_PHONE'],
+                    },
+                    expires_at: {
+                        type: 'string',
+                        format: 'date-time',
+                    },
+                    retry_after_seconds: {
+                        type: 'integer',
+                        example: 60,
+                    },
+                    debug_otp: {
+                        type: 'string',
+                        nullable: true,
+                        description: 'Only returned by the mock provider outside production',
+                        example: '123456',
+                    },
+                },
+            },
+        },
+    },
+    PhoneVerificationTokenResponse: {
+        type: 'object',
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Phone verified successfully',
+            },
+            data: {
+                type: 'object',
+                properties: {
+                    verification_token: {
+                        type: 'string',
+                        example: '96-character-verification-token',
+                    },
+                    phone: {
+                        type: 'string',
+                        example: '0901234567',
+                    },
+                    purpose: {
+                        type: 'string',
+                        enum: ['REGISTER', 'CHANGE_PHONE'],
+                    },
+                    expires_at: {
+                        type: 'string',
+                        format: 'date-time',
+                    },
+                },
+            },
+        },
+    },
+    AuthRegisterResponse: {
+        type: 'object',
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Register successfully',
+            },
+            data: {
+                type: 'object',
+                properties: {
+                    user: {
+                        $ref: '#/components/schemas/UserPublic',
+                    },
+                },
             },
         },
     },
@@ -198,6 +337,124 @@ const schemas = {
 };
 
 const paths = {
+    '/auth/phone-verifications/request': {
+        post: {
+            tags: ['Auth'],
+            summary: 'Request phone verification OTP',
+            description: 'CHANGE_PHONE requires a bearer access token. REGISTER is public.',
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            $ref: '#/components/schemas/PhoneVerificationRequest',
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'OTP sent successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/PhoneVerificationChallengeResponse',
+                            },
+                        },
+                    },
+                },
+                400: {
+                    description: 'Validation failed',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/ErrorResponse',
+                            },
+                        },
+                    },
+                },
+                401: {
+                    description: 'Authentication is required for CHANGE_PHONE',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/ErrorResponse',
+                            },
+                        },
+                    },
+                },
+                409: {
+                    description: 'Phone already exists',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/ErrorResponse',
+                            },
+                        },
+                    },
+                },
+                429: {
+                    description: 'OTP request rate limited',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/ErrorResponse',
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/auth/phone-verifications/verify': {
+        post: {
+            tags: ['Auth'],
+            summary: 'Verify phone OTP',
+            description: 'CHANGE_PHONE requires the same authenticated user that requested the OTP.',
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            $ref: '#/components/schemas/PhoneVerificationVerifyRequest',
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'Phone verified successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/PhoneVerificationTokenResponse',
+                            },
+                        },
+                    },
+                },
+                400: {
+                    description: 'OTP is invalid or expired',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/ErrorResponse',
+                            },
+                        },
+                    },
+                },
+                403: {
+                    description: 'Verification belongs to another user',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/ErrorResponse',
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/auth/register': {
         post: {
             tags: ['Auth'],
@@ -218,7 +475,7 @@ const paths = {
                     content: {
                         'application/json': {
                             schema: {
-                                $ref: '#/components/schemas/AuthUserResponse',
+                                $ref: '#/components/schemas/AuthRegisterResponse',
                             },
                         },
                     },

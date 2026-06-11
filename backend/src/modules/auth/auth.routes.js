@@ -3,15 +3,34 @@ const express = require('express');
 const authController = require('./auth.controller');
 const {
     registerSchema,
+    requestPhoneVerificationSchema,
+    verifyPhoneOtpSchema,
     loginSchema,
     changePasswordSchema,
     forgotPasswordSchema,
     resetPasswordSchema,
 } = require('./auth.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
-const { authenticate } = require('../../shared/middlewares/auth.middleware');
+const {
+    authenticate,
+    optionalAuthenticate,
+} = require('../../shared/middlewares/auth.middleware');
 
 const router = express.Router();
+
+router.post(
+    '/phone-verifications/request',
+    optionalAuthenticate,
+    validate(requestPhoneVerificationSchema),
+    authController.requestPhoneVerification
+);
+
+router.post(
+    '/phone-verifications/verify',
+    optionalAuthenticate,
+    validate(verifyPhoneOtpSchema),
+    authController.verifyPhoneOtp
+);
 
 router.post(
     '/register',

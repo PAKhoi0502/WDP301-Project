@@ -3,6 +3,7 @@ require('dotenv').config();
 const app = require('./app');
 const { connectDB, disconnectDB } = require('./config/db');
 const schedulerService = require('./jobs/scheduler.service');
+const phoneVerificationService = require('./modules/auth/services/phoneVerification.service');
 
 const PORT = process.env.PORT || 5000;
 
@@ -53,6 +54,7 @@ process.on('uncaughtException', (error) => {
 });
 
 const startServer = async () => {
+    phoneVerificationService.validateConfiguration();
     await connectDB();
 
     const schedulerStatus = schedulerService.startSchedulers();

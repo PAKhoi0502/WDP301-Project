@@ -29,6 +29,11 @@ const userSchema = new mongoose.Schema(
             maxlength: [20, 'Phone number must not exceed 20 characters'],
         },
 
+        phone_verified_at: {
+            type: Date,
+            default: null,
+        },
+
         password_hash: {
             type: String,
             required: [true, 'Password hash is required'],

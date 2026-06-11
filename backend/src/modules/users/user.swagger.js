@@ -20,7 +20,18 @@ const schemas = {
             },
             phone: {
                 type: 'string',
+                description: 'Accepted in local or E.164 format and stored as E.164',
                 example: '0901234567',
+            },
+            current_password: {
+                type: 'string',
+                description: 'Required when changing phone',
+                example: 'Customer@123',
+            },
+            phone_verification_token: {
+                type: 'string',
+                description: 'Required when changing phone',
+                example: '96-character-verification-token',
             },
             avatar_url: {
                 type: 'string',

@@ -10,6 +10,7 @@ const toUserDto = (user) => {
         full_name: plainUser.full_name || '',
         email: plainUser.email || null,
         phone: plainUser.phone || null,
+        phone_verified_at: plainUser.phone_verified_at || null,
         role: plainUser.role,
         avatar_url: plainUser.avatar_url || '',
         is_active: plainUser.is_active,

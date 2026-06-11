@@ -1,5 +1,10 @@
 const { z } = require('zod');
 
+const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
+const {
+    PHONE_VERIFICATION_PURPOSE_VALUES,
+} = require('./phoneVerification.constant');
+
 const emptyToUndefined = (value) => {
     if (typeof value === 'string' && value.trim() === '') {
         return undefined;
@@ -12,8 +17,9 @@ const phoneField = z
     .string()
     .trim()
     .min(9, 'Phone must have at least 9 characters')
-    .max(15, 'Phone must have at most 15 characters')
-    .regex(/^\+?[0-9]{9,15}$/, 'Phone is invalid');
+    .max(30, 'Phone must have at most 30 characters')
+    .transform(normalizePhone)
+    .refine(isValidPhone, 'Phone is invalid');
 
 const passwordField = z
     .string()
@@ -46,6 +52,12 @@ const resetTokenField = z
     .min(32, 'Reset token is invalid')
     .max(200, 'Reset token is invalid');
 
+const phoneVerificationTokenField = z
+    .string()
+    .trim()
+    .min(64, 'Phone verification token is invalid')
+    .max(200, 'Phone verification token is invalid');
+
 const registerSchema = z.object({
     body: z
         .object({
@@ -53,6 +65,31 @@ const registerSchema = z.object({
             password: passwordField,
             email: optionalEmailField,
             full_name: optionalFullNameField,
+            phone_verification_token: phoneVerificationTokenField,
+        })
+        .strict(),
+});
+
+const requestPhoneVerificationSchema = z.object({
+    body: z
+        .object({
+            phone: phoneField,
+            purpose: z.enum(PHONE_VERIFICATION_PURPOSE_VALUES),
+        })
+        .strict(),
+});
+
+const verifyPhoneOtpSchema = z.object({
+    body: z
+        .object({
+            challenge_id: z
+                .string()
+                .trim()
+                .regex(/^[0-9a-fA-F]{24}$/, 'Challenge id is invalid'),
+            otp: z
+                .string()
+                .trim()
+                .regex(/^[0-9]{6}$/, 'OTP must contain exactly 6 digits'),
         })
         .strict(),
 });
@@ -99,6 +136,8 @@ const resetPasswordSchema = z.object({
 
 module.exports = {
     registerSchema,
+    requestPhoneVerificationSchema,
+    verifyPhoneOtpSchema,
     loginSchema,
     changePasswordSchema,
     forgotPasswordSchema,
