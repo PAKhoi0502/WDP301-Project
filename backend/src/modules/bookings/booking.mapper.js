@@ -63,6 +63,7 @@ const toGarageSummaryDto = (garage) => {
         opening_time: garage.opening_time,
         closing_time: garage.closing_time,
         slot_interval_minutes: garage.slot_interval_minutes,
+        late_grace_minutes: garage.late_grace_minutes,
         is_active: garage.is_active,
     };
 };
@@ -233,6 +234,24 @@ const toBookingDto = (booking) => {
         promotion: toPromotionSummaryDto(plainBooking.promotion_id),
         requires_wash_bay: plainBooking.requires_wash_bay,
         status: plainBooking.status,
+        arrival_status: plainBooking.arrival_status,
+        arrived_at: plainBooking.arrived_at,
+        arrival_reference_start_time: plainBooking.arrival_reference_start_time,
+        late_minutes: plainBooking.late_minutes || 0,
+        grace_exceeded_minutes: plainBooking.grace_exceeded_minutes || 0,
+        late_resolution: plainBooking.late_resolution,
+        late_resolution_required: plainBooking.arrival_status === 'LATE'
+            && !plainBooking.late_resolution
+            && ['PENDING', 'CONFIRMED'].includes(plainBooking.status),
+        late_accepted_by_id: toId(plainBooking.late_accepted_by_id),
+        late_accepted_at: plainBooking.late_accepted_at,
+        late_resolution_note: plainBooking.late_resolution_note,
+        original_start_time: plainBooking.original_start_time,
+        original_end_time: plainBooking.original_end_time,
+        rescheduled_at: plainBooking.rescheduled_at,
+        rescheduled_by_id: toId(plainBooking.rescheduled_by_id),
+        reschedule_reason: plainBooking.reschedule_reason,
+        reschedule_count: plainBooking.reschedule_count || 0,
         checked_in_at: plainBooking.checked_in_at,
         started_at: plainBooking.started_at,
         completed_at: plainBooking.completed_at,

@@ -5,6 +5,8 @@ const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
 const {
     BOOKING_STATUS,
     BOOKING_STATUS_VALUES,
+    BOOKING_ARRIVAL_STATUS_VALUES,
+    BOOKING_LATE_RESOLUTION_VALUES,
     BOOKING_PAYMENT_METHOD,
     BOOKING_PAYMENT_METHOD_VALUES,
     BOOKING_PAYMENT_STATUS,
@@ -429,6 +431,92 @@ const bookingSchema = new mongoose.Schema(
             type: String,
             enum: BOOKING_STATUS_VALUES,
             default: BOOKING_STATUS.CONFIRMED,
+        },
+
+        arrival_status: {
+            type: String,
+            enum: BOOKING_ARRIVAL_STATUS_VALUES,
+            default: null,
+        },
+
+        arrived_at: {
+            type: Date,
+            default: null,
+        },
+
+        arrival_reference_start_time: {
+            type: Date,
+            default: null,
+        },
+
+        late_minutes: {
+            type: Number,
+            min: [0, 'Late minutes must be greater than or equal to 0'],
+            default: 0,
+        },
+
+        grace_exceeded_minutes: {
+            type: Number,
+            min: [0, 'Grace exceeded minutes must be greater than or equal to 0'],
+            default: 0,
+        },
+
+        late_resolution: {
+            type: String,
+            enum: BOOKING_LATE_RESOLUTION_VALUES,
+            default: null,
+        },
+
+        late_accepted_by_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        late_accepted_at: {
+            type: Date,
+            default: null,
+        },
+
+        late_resolution_note: {
+            type: String,
+            trim: true,
+            maxlength: [1000, 'Late resolution note must not exceed 1000 characters'],
+            default: null,
+        },
+
+        original_start_time: {
+            type: Date,
+            default: null,
+        },
+
+        original_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        rescheduled_at: {
+            type: Date,
+            default: null,
+        },
+
+        rescheduled_by_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        reschedule_reason: {
+            type: String,
+            trim: true,
+            maxlength: [500, 'Reschedule reason must not exceed 500 characters'],
+            default: null,
+        },
+
+        reschedule_count: {
+            type: Number,
+            min: [0, 'Reschedule count must be greater than or equal to 0'],
+            default: 0,
         },
 
         checked_in_at: {

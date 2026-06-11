@@ -97,4 +97,24 @@ describe('booking module', () => {
         expect(booking.booking_items[0].care_staff_end_time).toBeNull();
         expect(booking.booking_items[0].assigned_care_staff).toHaveLength(0);
     });
+
+    it('accepts late arrival and reschedule metadata', async () => {
+        const staffId = new mongoose.Types.ObjectId();
+        const booking = createBooking({
+            arrival_status: 'LATE',
+            arrived_at: new Date('2999-01-01T06:45:00.000Z'),
+            arrival_reference_start_time: new Date('2999-01-01T06:00:00.000Z'),
+            late_minutes: 45,
+            grace_exceeded_minutes: 30,
+            late_resolution: 'RESCHEDULED',
+            original_start_time: new Date('2999-01-01T06:00:00.000Z'),
+            original_end_time: new Date('2999-01-01T07:30:00.000Z'),
+            rescheduled_at: new Date('2999-01-01T06:46:00.000Z'),
+            rescheduled_by_id: staffId,
+            reschedule_reason: 'CUSTOMER_LATE',
+            reschedule_count: 1,
+        });
+
+        await expect(booking.validate()).resolves.toBeUndefined();
+    });
 });

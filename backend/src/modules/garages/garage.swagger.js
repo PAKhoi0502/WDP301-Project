@@ -69,6 +69,10 @@ const schemas = {
                 type: 'integer',
                 example: 30,
             },
+            late_grace_minutes: {
+                type: 'integer',
+                example: 15,
+            },
             description: {
                 type: 'string',
                 nullable: true,
@@ -141,6 +145,10 @@ const schemas = {
             slot_interval_minutes: {
                 type: 'integer',
                 example: 30,
+            },
+            late_grace_minutes: {
+                type: 'integer',
+                example: 15,
             },
             description: {
                 type: 'string',
@@ -228,6 +236,10 @@ const schemas = {
             slot_interval_minutes: {
                 type: 'integer',
                 example: 30,
+            },
+            late_grace_minutes: {
+                type: 'integer',
+                example: 15,
             },
             description: {
                 type: 'string',

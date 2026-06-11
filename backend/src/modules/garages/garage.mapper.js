@@ -20,6 +20,7 @@ const toGarageDto = (garage) => {
         opening_time: plainGarage.opening_time,
         closing_time: plainGarage.closing_time,
         slot_interval_minutes: plainGarage.slot_interval_minutes,
+        late_grace_minutes: plainGarage.late_grace_minutes,
         description: plainGarage.description,
         is_active: plainGarage.is_active,
         created_at: plainGarage.created_at,
@@ -86,6 +87,10 @@ const toCreatePayload = (data = {}) => {
         payload.slot_interval_minutes = data.slot_interval_minutes;
     }
 
+    if (data.late_grace_minutes !== undefined) {
+        payload.late_grace_minutes = data.late_grace_minutes;
+    }
+
     if (data.description !== undefined) {
         payload.description = data.description;
     }
@@ -150,6 +155,10 @@ const toUpdatePayload = (data = {}) => {
 
     if (data.slot_interval_minutes !== undefined) {
         payload.slot_interval_minutes = data.slot_interval_minutes;
+    }
+
+    if (data.late_grace_minutes !== undefined) {
+        payload.late_grace_minutes = data.late_grace_minutes;
     }
 
     if (data.description !== undefined) {

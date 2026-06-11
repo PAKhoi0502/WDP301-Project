@@ -246,6 +246,10 @@ describe('booking care staff capacity', () => {
         });
     });
 
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
     it('assigns a concrete available care staff when service starts', async () => {
         const bookingId = '507f1f77bcf86cd799439030';
         const staffAId = '507f1f77bcf86cd799439031';
@@ -873,6 +877,225 @@ describe('booking care staff capacity', () => {
             statusCode: 401,
             errorCode: 'AUTHENTICATION_REQUIRED',
         });
+    });
+
+    it('starts today availability from the next future garage slot', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-06-11T18:17:00+07:00'));
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            opening_time: '07:00',
+            closing_time: '19:00',
+        });
+        ServicePackage.findById.mockResolvedValue({
+            ...washService,
+            duration_minutes: 15,
+            wash_bay_duration_minutes: 15,
+        });
+        Booking.aggregate.mockResolvedValue([]);
+
+        const result = await bookingService.getAvailableSlots({
+            garage_id: garageId,
+            service_package_id: washServiceId,
+            date: '2026-06-11',
+        });
+
+        expect(result.slots).toHaveLength(1);
+        expect(result.slots[0].start_time.toISOString()).toBe('2026-06-11T11:30:00.000Z');
+        expect(result.slots[0].end_time.toISOString()).toBe('2026-06-11T11:45:00.000Z');
+        expect(result.slots[0].wash_bay_reserved_until.toISOString()).toBe('2026-06-11T12:00:00.000Z');
+        expect(result.available_slots).toHaveLength(1);
+    });
+
+    it('moves past a slot when current time is exactly on its boundary', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-06-11T18:30:00+07:00'));
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            opening_time: '07:00',
+            closing_time: '19:00',
+        });
+        ServicePackage.findById.mockResolvedValue({
+            ...washService,
+            duration_minutes: 15,
+            wash_bay_duration_minutes: 15,
+        });
+
+        const result = await bookingService.getAvailableSlots({
+            garage_id: garageId,
+            service_package_id: washServiceId,
+            date: '2026-06-11',
+        });
+
+        expect(result.slots).toEqual([]);
+        expect(result.days[0].reason).toBe('NO_FUTURE_SLOT_TODAY');
+        expect(Booking.aggregate).not.toHaveBeenCalled();
+        expect(WashBay.countDocuments).not.toHaveBeenCalled();
+    });
+
+    it('does not offer a future slot when the service cannot finish before closing', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-06-11T18:17:00+07:00'));
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            opening_time: '07:00',
+            closing_time: '19:00',
+        });
+        ServicePackage.findById.mockResolvedValue({
+            ...careStaffServicePackage,
+            duration_minutes: 60,
+            care_staff_duration_minutes: 60,
+        });
+
+        const result = await bookingService.getAvailableSlots({
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            date: '2026-06-11',
+        });
+
+        expect(result.slots).toEqual([]);
+        expect(result.days[0].reason).toBe('NO_CONTINUOUS_SLOT_AVAILABLE');
+        expect(Booking.aggregate).not.toHaveBeenCalled();
+        expect(StaffProfile.countDocuments).not.toHaveBeenCalled();
+    });
+
+    it('skips capacity queries for a past date', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-06-11T18:17:00+07:00'));
+
+        const result = await bookingService.getAvailableSlots({
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            date: '2026-06-10',
+        });
+
+        expect(result.slots).toEqual([]);
+        expect(result.available_slots).toEqual([]);
+        expect(result.days[0].reason).toBe('DATE_IN_PAST');
+        expect(Booking.aggregate).not.toHaveBeenCalled();
+        expect(StaffProfile.countDocuments).not.toHaveBeenCalled();
+    });
+
+    it('limits available slots to the customer booking window', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-06-11T08:00:00+07:00'));
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            opening_time: '07:00',
+            closing_time: '10:00',
+        });
+        ServicePackage.findById.mockResolvedValue({
+            ...careStaffServicePackage,
+            duration_minutes: 30,
+            care_staff_duration_minutes: 30,
+        });
+        CustomerLoyalty.findOne.mockReturnValue({
+            select: jest.fn().mockReturnValue({
+                lean: jest.fn().mockResolvedValue({
+                    current_tier: 'GOLD',
+                }),
+            }),
+        });
+        TierRule.findOne.mockReturnValue({
+            lean: jest.fn().mockResolvedValue({
+                tier_name: 'GOLD',
+                booking_window_days: 1,
+                max_upcoming_bookings: 1,
+                priority_level: 1,
+            }),
+        });
+        Booking.aggregate.mockResolvedValue([]);
+
+        const result = await bookingService.getAvailableSlots({
+            customer_id: customerId,
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            start_date: '2026-06-12',
+            days: 2,
+        });
+
+        expect(result.booking_tier).toBe('GOLD');
+        expect(result.booking_window_days).toBe(1);
+        expect(result.booking_window_end.toISOString()).toBe('2026-06-12T01:00:00.000Z');
+        expect(result.days[0].available_slots.map((slot) => slot.start_time.toISOString())).toEqual([
+            '2026-06-12T00:00:00.000Z',
+            '2026-06-12T00:30:00.000Z',
+            '2026-06-12T01:00:00.000Z',
+        ]);
+        expect(result.days[1]).toMatchObject({
+            date: '2026-06-13',
+            has_available_slots: false,
+            reason: 'BOOKING_WINDOW_EXCEEDED',
+        });
+    });
+
+    it('rejects customer booking at a past start time using the same request clock', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-06-11T18:17:00+07:00'));
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            opening_time: '07:00',
+            closing_time: '19:00',
+        });
+        ServicePackage.findById.mockResolvedValue({
+            ...careStaffServicePackage,
+            duration_minutes: 30,
+            care_staff_duration_minutes: 30,
+        });
+
+        await expect(bookingService.createCustomerBooking(customerId, {
+            garage_id: garageId,
+            vehicle_id: vehicleId,
+            service_package_id: servicePackageId,
+            start_time: '2026-06-11T18:00:00+07:00',
+        })).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'BOOKING_START_TIME_IN_PAST',
+        });
+
+        expect(Booking.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects customer booking beyond the same tier booking window', async () => {
+        jest.useFakeTimers();
+        jest.setSystemTime(new Date('2026-06-11T08:00:00+07:00'));
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            opening_time: '07:00',
+            closing_time: '10:00',
+        });
+        ServicePackage.findById.mockResolvedValue({
+            ...careStaffServicePackage,
+            duration_minutes: 30,
+            care_staff_duration_minutes: 30,
+        });
+        CustomerLoyalty.findOne.mockReturnValue({
+            select: jest.fn().mockReturnValue({
+                lean: jest.fn().mockResolvedValue({
+                    current_tier: 'GOLD',
+                }),
+            }),
+        });
+        TierRule.findOne.mockReturnValue({
+            lean: jest.fn().mockResolvedValue({
+                tier_name: 'GOLD',
+                booking_window_days: 1,
+                max_upcoming_bookings: 1,
+                priority_level: 1,
+            }),
+        });
+
+        await expect(bookingService.createCustomerBooking(customerId, {
+            garage_id: garageId,
+            vehicle_id: vehicleId,
+            service_package_id: servicePackageId,
+            start_time: '2026-06-12T08:30:00+07:00',
+        })).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'BOOKING_WINDOW_EXCEEDED',
+        });
+
+        expect(Booking.create).not.toHaveBeenCalled();
     });
 
     it('rounds a 15-minute wash bay reservation to the next garage slot', async () => {

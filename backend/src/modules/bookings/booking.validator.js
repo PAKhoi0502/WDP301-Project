@@ -1,7 +1,11 @@
 const { z } = require('zod');
 
 const { VEHICLE_TYPE_VALUES } = require('../../shared/constants/vehicle.constant');
-const { BOOKING_STATUS_VALUES } = require('../../shared/constants/booking.constant');
+const {
+    BOOKING_STATUS_VALUES,
+    BOOKING_LATE_RESOLUTION_VALUES,
+    BOOKING_LATE_RESOLUTION,
+} = require('../../shared/constants/booking.constant');
 
 const emptyToUndefined = (value) => {
     if (typeof value === 'string' && value.trim() === '') {
@@ -243,6 +247,61 @@ const bookingOperationSchema = z.object({
         .default({}),
 });
 
+const getLateArrivalOptionsSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    query: z
+        .object({
+            days: z.coerce.number().int().min(1).max(7).default(1),
+        })
+        .strict(),
+});
+
+const resolveLateArrivalSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object({
+            resolution: z.enum(BOOKING_LATE_RESOLUTION_VALUES),
+            new_start_time: z.preprocess(
+                emptyToUndefined,
+                isoDateTimeField.optional()
+            ),
+            reason: optionalTextField(500),
+            note: optionalTextField(1000),
+        })
+        .strict()
+        .superRefine((data, context) => {
+            if (
+                data.resolution === BOOKING_LATE_RESOLUTION.RESCHEDULED
+                && !data.new_start_time
+            ) {
+                context.addIssue({
+                    code: 'custom',
+                    path: ['new_start_time'],
+                    message: 'new_start_time is required for reschedule',
+                });
+            }
+
+            if (
+                data.resolution === BOOKING_LATE_RESOLUTION.ACCEPT_WITHIN_ORIGINAL_WINDOW
+                && data.new_start_time
+            ) {
+                context.addIssue({
+                    code: 'custom',
+                    path: ['new_start_time'],
+                    message: 'new_start_time is not allowed when accepting the original window',
+                });
+            }
+        }),
+});
+
 const assignWashBaySchema = z.object({
     params: z
         .object({
@@ -282,6 +341,8 @@ module.exports = {
     cancelBookingSchema,
     markNoShowSchema,
     bookingOperationSchema,
+    getLateArrivalOptionsSchema,
+    resolveLateArrivalSchema,
     assignWashBaySchema,
     serviceStepParamSchema,
 };

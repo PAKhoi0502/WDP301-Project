@@ -162,6 +162,7 @@ const createGarageSchema = z.object({
             opening_time: timeField.default('07:00'),
             closing_time: timeField.default('18:00'),
             slot_interval_minutes: z.coerce.number().int().min(5).max(240).default(30),
+            late_grace_minutes: z.coerce.number().int().min(0).max(240).default(15),
             description: optionalTextField(1000),
             is_active: z.boolean().optional(),
         })
@@ -200,6 +201,10 @@ const updateGarageSchema = z.object({
             slot_interval_minutes: z.preprocess(
                 emptyToUndefined,
                 z.coerce.number().int().min(5).max(240).optional()
+            ),
+            late_grace_minutes: z.preprocess(
+                emptyToUndefined,
+                z.coerce.number().int().min(0).max(240).optional()
             ),
             description: optionalTextField(1000),
             is_active: z.boolean().optional(),

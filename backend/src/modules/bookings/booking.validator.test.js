@@ -1,4 +1,8 @@
-const { getAvailableSlotsSchema } = require('./booking.validator');
+const {
+    getAvailableSlotsSchema,
+    getLateArrivalOptionsSchema,
+    resolveLateArrivalSchema,
+} = require('./booking.validator');
 
 describe('booking available slots validator', () => {
     const baseQuery = {
@@ -57,6 +61,66 @@ describe('booking available slots validator', () => {
                 ...baseQuery,
                 start_date: '2026-06-11',
                 days: '8',
+            },
+        });
+
+        expect(result.success).toBe(false);
+    });
+});
+
+describe('booking late arrival validator', () => {
+    const bookingId = '507f1f77bcf86cd799439011';
+
+    it('accepts a seven-day late arrival option query', () => {
+        const result = getLateArrivalOptionsSchema.safeParse({
+            params: {
+                id: bookingId,
+            },
+            query: {
+                days: '7',
+            },
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data.query.days).toBe(7);
+    });
+
+    it('requires a new start time when rescheduling', () => {
+        const result = resolveLateArrivalSchema.safeParse({
+            params: {
+                id: bookingId,
+            },
+            body: {
+                resolution: 'RESCHEDULED',
+            },
+        });
+
+        expect(result.success).toBe(false);
+    });
+
+    it('accepts a valid reschedule request', () => {
+        const result = resolveLateArrivalSchema.safeParse({
+            params: {
+                id: bookingId,
+            },
+            body: {
+                resolution: 'RESCHEDULED',
+                new_start_time: '2026-06-11T12:00:00+07:00',
+                reason: 'CUSTOMER_LATE',
+            },
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    it('rejects a new start time when accepting the original window', () => {
+        const result = resolveLateArrivalSchema.safeParse({
+            params: {
+                id: bookingId,
+            },
+            body: {
+                resolution: 'ACCEPT_WITHIN_ORIGINAL_WINDOW',
+                new_start_time: '2026-06-11T12:00:00+07:00',
             },
         });
 

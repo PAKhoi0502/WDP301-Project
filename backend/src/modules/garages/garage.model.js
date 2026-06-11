@@ -102,6 +102,14 @@ const garageSchema = new mongoose.Schema(
             max: [240, 'Slot interval must not exceed 240 minutes'],
         },
 
+        late_grace_minutes: {
+            type: Number,
+            required: [true, 'Late grace period is required'],
+            default: 15,
+            min: [0, 'Late grace period must be greater than or equal to 0'],
+            max: [240, 'Late grace period must not exceed 240 minutes'],
+        },
+
         description: {
             type: String,
             trim: true,

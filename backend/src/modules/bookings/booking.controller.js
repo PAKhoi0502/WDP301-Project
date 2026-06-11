@@ -1,5 +1,6 @@
 const bookingService = require('./booking.service');
 const bookingWaitlistService = require('../booking-waitlists/bookingWaitlist.service');
+const { getAuditRequestContext } = require('../audit-logs/auditLog.service');
 const { asyncHandler } = require('../../shared/utils/asyncHandler');
 const { sendSuccess, sendCreated } = require('../../shared/utils/apiResponse');
 
@@ -128,10 +129,46 @@ const checkInBooking = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
     const { body } = req.validated;
 
-    const result = await bookingService.checkInBooking(req.user, id, body || {});
+    const result = await bookingService.checkInBooking(
+        req.user,
+        id,
+        body || {},
+        getAuditRequestContext(req)
+    );
 
     return sendSuccess(res, {
-        message: 'Check in booking successfully',
+        message: result.late_resolution_required
+            ? 'Record late arrival successfully. Late resolution is required.'
+            : 'Check in booking successfully',
+        data: result,
+    });
+});
+
+const getLateArrivalOptions = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const { query } = req.validated;
+
+    const result = await bookingService.getLateArrivalOptions(req.user, id, query);
+
+    return sendSuccess(res, {
+        message: 'Get late arrival options successfully',
+        data: result,
+    });
+});
+
+const resolveLateArrival = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const { body } = req.validated;
+
+    const result = await bookingService.resolveLateArrival(
+        req.user,
+        id,
+        body,
+        getAuditRequestContext(req)
+    );
+
+    return sendSuccess(res, {
+        message: 'Resolve late arrival successfully',
         data: result,
     });
 });
@@ -196,6 +233,8 @@ module.exports = {
     getAllBookings,
     createWalkInBooking,
     checkInBooking,
+    getLateArrivalOptions,
+    resolveLateArrival,
     assignWashBay,
     startService,
     completeService,

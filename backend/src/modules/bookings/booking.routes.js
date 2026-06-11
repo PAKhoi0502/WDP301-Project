@@ -13,6 +13,8 @@ const {
     cancelBookingSchema,
     markNoShowSchema,
     bookingOperationSchema,
+    getLateArrivalOptionsSchema,
+    resolveLateArrivalSchema,
     assignWashBaySchema,
     serviceStepParamSchema,
 } = require('./booking.validator');
@@ -96,6 +98,18 @@ adminRouter.patch(
     '/:id/check-in',
     validate(bookingOperationSchema),
     bookingController.checkInBooking
+);
+
+adminRouter.get(
+    '/:id/late-arrival-options',
+    validate(getLateArrivalOptionsSchema),
+    bookingController.getLateArrivalOptions
+);
+
+adminRouter.patch(
+    '/:id/resolve-late-arrival',
+    validate(resolveLateArrivalSchema),
+    bookingController.resolveLateArrival
 );
 
 adminRouter.patch(

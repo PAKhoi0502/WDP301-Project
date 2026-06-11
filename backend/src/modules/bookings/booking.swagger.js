@@ -119,6 +119,30 @@ const bookingSchema = {
             type: 'string',
             enum: ['PENDING', 'CONFIRMED', 'CHECKED_IN', 'IN_PROGRESS', 'COMPLETED', 'CANCELED', 'NO_SHOW'],
         },
+        arrival_status: {
+            type: 'string',
+            enum: ['EARLY', 'ON_TIME', 'LATE'],
+            nullable: true,
+        },
+        arrived_at: { type: 'string', format: 'date-time', nullable: true },
+        arrival_reference_start_time: { type: 'string', format: 'date-time', nullable: true },
+        late_minutes: { type: 'integer' },
+        grace_exceeded_minutes: { type: 'integer' },
+        late_resolution: {
+            type: 'string',
+            enum: ['ACCEPT_WITHIN_ORIGINAL_WINDOW', 'RESCHEDULED'],
+            nullable: true,
+        },
+        late_resolution_required: { type: 'boolean' },
+        late_accepted_by_id: { type: 'string', nullable: true },
+        late_accepted_at: { type: 'string', format: 'date-time', nullable: true },
+        late_resolution_note: { type: 'string', nullable: true },
+        original_start_time: { type: 'string', format: 'date-time', nullable: true },
+        original_end_time: { type: 'string', format: 'date-time', nullable: true },
+        rescheduled_at: { type: 'string', format: 'date-time', nullable: true },
+        rescheduled_by_id: { type: 'string', nullable: true },
+        reschedule_reason: { type: 'string', nullable: true },
+        reschedule_count: { type: 'integer' },
         checked_in_at: { type: 'string', format: 'date-time', nullable: true },
         started_at: { type: 'string', format: 'date-time', nullable: true },
         completed_at: { type: 'string', format: 'date-time', nullable: true },
@@ -156,7 +180,7 @@ const availableSlotSchema = {
             type: 'array',
             items: {
                 type: 'string',
-                enum: ['START_TIME_IN_PAST', 'VEHICLE_BOOKING_OVERLAP', 'WASH_BAY_CAPACITY_FULL', 'CARE_STAFF_CAPACITY_FULL'],
+                enum: ['VEHICLE_BOOKING_OVERLAP', 'WASH_BAY_CAPACITY_FULL', 'CARE_STAFF_CAPACITY_FULL'],
             },
         },
         available_capacity: { type: 'number', nullable: true },
@@ -227,7 +251,12 @@ const bookingAvailabilityDaySchema = {
         has_available_slots: { type: 'boolean' },
         reason: {
             type: 'string',
-            enum: ['NO_CONTINUOUS_SLOT_AVAILABLE'],
+            enum: [
+                'DATE_IN_PAST',
+                'NO_FUTURE_SLOT_TODAY',
+                'BOOKING_WINDOW_EXCEEDED',
+                'NO_CONTINUOUS_SLOT_AVAILABLE',
+            ],
             nullable: true,
         },
         available_slots: {
@@ -245,6 +274,75 @@ const markNoShowRequest = {
     type: 'object',
     properties: {
         reason: { type: 'string', example: 'Customer did not arrive for the scheduled appointment' },
+    },
+};
+
+const resolveLateArrivalRequest = {
+    type: 'object',
+    required: ['resolution'],
+    properties: {
+        resolution: {
+            type: 'string',
+            enum: ['ACCEPT_WITHIN_ORIGINAL_WINDOW', 'RESCHEDULED'],
+        },
+        new_start_time: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+            example: '2026-06-11T12:30:00+07:00',
+        },
+        reason: {
+            type: 'string',
+            example: 'CUSTOMER_LATE',
+        },
+        note: {
+            type: 'string',
+        },
+    },
+};
+
+const lateArrivalOptionsResponse = {
+    type: 'object',
+    properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        data: {
+            type: 'object',
+            properties: {
+                booking_id: { type: 'string' },
+                arrival_status: { type: 'string', enum: ['LATE'] },
+                arrived_at: { type: 'string', format: 'date-time' },
+                arrival_reference_start_time: { type: 'string', format: 'date-time' },
+                late_minutes: { type: 'integer' },
+                grace_exceeded_minutes: { type: 'integer' },
+                search_start_time: { type: 'string', format: 'date-time' },
+                suggested_slots: {
+                    type: 'array',
+                    items: availableSlotSchema,
+                },
+                days: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            date: { type: 'string', format: 'date' },
+                            opening_time: { type: 'string' },
+                            closing_time: { type: 'string' },
+                            has_available_slots: { type: 'boolean' },
+                            reason: {
+                                type: 'string',
+                                enum: ['NO_CONTINUOUS_SLOT_AVAILABLE'],
+                                nullable: true,
+                            },
+                            suggested_slots: {
+                                type: 'array',
+                                items: availableSlotSchema,
+                            },
+                        },
+                    },
+                },
+            },
+        },
     },
 };
 
@@ -440,6 +538,10 @@ const paths = {
                                             date: { type: 'string' },
                                             start_date: { type: 'string', format: 'date' },
                                             requested_days: { type: 'integer' },
+                                            generated_at: { type: 'string', format: 'date-time' },
+                                            booking_tier: { type: 'string' },
+                                            booking_window_days: { type: 'integer' },
+                                            booking_window_end: { type: 'string', format: 'date-time' },
                                             vehicle_type: { type: 'string' },
                                             service_duration_minutes: { type: 'integer' },
                                             requires_wash_bay: { type: 'boolean' },
@@ -658,6 +760,43 @@ const paths = {
             },
         },
     },
+    '/admin/bookings/{id}/late-arrival-options': {
+        get: {
+            tags: ['Admin Bookings'],
+            summary: 'Get available reschedule options for a late arrival',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                { name: 'days', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 7, default: 1 } },
+            ],
+            responses: {
+                200: {
+                    description: 'Late arrival options',
+                    content: { 'application/json': { schema: lateArrivalOptionsResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/bookings/{id}/resolve-late-arrival': {
+        patch: {
+            tags: ['Admin Bookings'],
+            summary: 'Accept the original window or reschedule a late booking',
+            security: [{ bearerAuth: [] }],
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            requestBody: {
+                required: true,
+                content: { 'application/json': { schema: resolveLateArrivalRequest } },
+            },
+            responses: {
+                200: {
+                    description: 'Late arrival resolved',
+                    content: { 'application/json': { schema: successBookingResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/bookings/{id}/assign-wash-bay': {
         patch: {
             tags: ['Admin Bookings'],
@@ -850,6 +989,7 @@ const schemas = {
     CreateWalkInBookingRequest: createWalkInBookingRequest,
     CancelBookingRequest: cancelBookingRequest,
     MarkNoShowRequest: markNoShowRequest,
+    ResolveLateArrivalRequest: resolveLateArrivalRequest,
     BookingOperationRequest: bookingOperationRequest,
     AssignWashBayRequest: assignWashBayRequest,
     ServiceStepDoneRequest: serviceStepDoneRequest,
