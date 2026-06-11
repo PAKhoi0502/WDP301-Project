@@ -243,6 +243,8 @@ const assertNoActiveDuplicateWaitlist = async ({
 };
 
 const assertDesiredSlotCanUseWaitlist = async ({
+    customerId,
+    vehicleId,
     garageId,
     servicePackageId,
     addOnServiceIds,
@@ -250,6 +252,8 @@ const assertDesiredSlotCanUseWaitlist = async ({
 }) => {
     const bookingService = require('../bookings/booking.service');
     const slotsResult = await bookingService.getAvailableSlots({
+        customer_id: customerId,
+        vehicle_id: toObjectIdString(vehicleId),
         garage_id: toObjectIdString(garageId),
         service_package_id: toObjectIdString(servicePackageId),
         add_on_service_ids: normalizeAddOnServiceIds(addOnServiceIds),
@@ -270,6 +274,8 @@ const assertDesiredSlotCanUseWaitlist = async ({
 };
 
 const assertDesiredSlotIsAvailableForOffer = async ({
+    customerId,
+    vehicleId,
     garageId,
     servicePackageId,
     addOnServiceIds,
@@ -277,6 +283,8 @@ const assertDesiredSlotIsAvailableForOffer = async ({
 }) => {
     const bookingService = require('../bookings/booking.service');
     const slotsResult = await bookingService.getAvailableSlots({
+        customer_id: customerId,
+        vehicle_id: toObjectIdString(vehicleId),
         garage_id: toObjectIdString(garageId),
         service_package_id: toObjectIdString(servicePackageId),
         add_on_service_ids: normalizeAddOnServiceIds(addOnServiceIds),
@@ -460,6 +468,8 @@ const createMyWaitlist = async (customerId, payload = {}) => {
     assertServiceMatchesVehicle(servicePackage, vehicle.vehicle_type);
     await getActiveAddOnServices(addOnServiceIds, vehicle.vehicle_type);
     await assertDesiredSlotCanUseWaitlist({
+        customerId,
+        vehicleId: vehicle._id,
         garageId: garage._id,
         servicePackageId: servicePackage._id,
         addOnServiceIds,
@@ -650,6 +660,8 @@ const offerWaitlist = async (user, waitlistId, { offer_expires_in_minutes } = {}
 
     assertDesiredStartTimeIsFuture(desiredStartTime);
     await assertDesiredSlotIsAvailableForOffer({
+        customerId: waitlist.customer_id,
+        vehicleId: waitlist.vehicle_id,
         garageId: waitlist.garage_id,
         servicePackageId: waitlist.service_package_id,
         addOnServiceIds: waitlist.add_on_service_ids,

@@ -21,7 +21,7 @@ const {
     getVehicleInspectionsSchema,
 } = require('../vehicle-inspections/vehicleInspection.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
-const { authenticate, authorize } = require('../../shared/middlewares/auth.middleware');
+const { authenticate, optionalAuthenticate, authorize } = require('../../shared/middlewares/auth.middleware');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 
 const customerRouter = express.Router();
@@ -29,6 +29,7 @@ const adminRouter = express.Router();
 
 customerRouter.get(
     '/available-slots',
+    optionalAuthenticate,
     validate(getAvailableSlotsSchema),
     bookingController.getAvailableSlots
 );

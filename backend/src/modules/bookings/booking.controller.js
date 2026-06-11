@@ -14,7 +14,10 @@ const offerNextWaitlistForReleasedBooking = async (booking) => {
 const getAvailableSlots = asyncHandler(async (req, res) => {
     const { query } = req.validated;
 
-    const result = await bookingService.getAvailableSlots(query);
+    const result = await bookingService.getAvailableSlots({
+        ...query,
+        customer_id: req.user?._id,
+    });
 
     return sendSuccess(res, {
         message: 'Get available booking slots successfully',

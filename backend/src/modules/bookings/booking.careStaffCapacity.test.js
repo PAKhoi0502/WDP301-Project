@@ -771,6 +771,110 @@ describe('booking care staff capacity', () => {
         expect(WashBay.countDocuments).not.toHaveBeenCalled();
     });
 
+    it('returns available slots grouped by each requested day', async () => {
+        Booking.aggregate.mockResolvedValue([]);
+
+        const result = await bookingService.getAvailableSlots({
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            start_date: '2999-01-01',
+            days: 3,
+        });
+
+        expect(result.start_date).toBe('2999-01-01');
+        expect(result.requested_days).toBe(3);
+        expect(result.service_duration_minutes).toBe(90);
+        expect(result.days).toHaveLength(3);
+        expect(result.days.map((item) => item.date)).toEqual([
+            '2999-01-01',
+            '2999-01-02',
+            '2999-01-03',
+        ]);
+        expect(result.days.every((item) => item.has_available_slots)).toBe(true);
+        expect(result.days.every((item) => item.available_slots.length === 1)).toBe(true);
+        expect(Booking.aggregate).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns a no-continuous-slot reason when every candidate is full', async () => {
+        StaffProfile.countDocuments.mockResolvedValue(1);
+        Booking.aggregate.mockResolvedValue([
+            {
+                booking_id: '507f1f77bcf86cd799439090',
+                start_time: new Date('2999-01-01T00:00:00.000Z'),
+                reserved_until: new Date('2999-01-02T00:00:00.000Z'),
+                required_count: 1,
+            },
+        ]);
+
+        const result = await bookingService.getAvailableSlots({
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            date: '2999-01-01',
+        });
+
+        expect(result.has_available_slots).toBe(false);
+        expect(result.available_slots).toEqual([]);
+        expect(result.days[0]).toMatchObject({
+            date: '2999-01-01',
+            has_available_slots: false,
+            reason: 'NO_CONTINUOUS_SLOT_AVAILABLE',
+        });
+        expect(result.days[0].slots[0].unavailable_reasons).toContain('CARE_STAFF_CAPACITY_FULL');
+    });
+
+    it('filters only candidate times that overlap the selected vehicle booking', async () => {
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            closing_time: '14:30',
+        });
+        ServicePackage.findById.mockResolvedValue({
+            ...careStaffServicePackage,
+            duration_minutes: 30,
+            care_staff_duration_minutes: 30,
+        });
+        Booking.aggregate.mockImplementation((pipeline) => {
+            const serializedPipeline = JSON.stringify(pipeline);
+
+            if (serializedPipeline.includes('"vehicle_id"') && !serializedPipeline.includes('"booking_items"')) {
+                return Promise.resolve([
+                    {
+                        booking_id: '507f1f77bcf86cd799439091',
+                        start_time: new Date('2999-01-01T06:30:00.000Z'),
+                        end_time: new Date('2999-01-01T07:00:00.000Z'),
+                    },
+                ]);
+            }
+
+            return Promise.resolve([]);
+        });
+
+        const result = await bookingService.getAvailableSlots({
+            customer_id: customerId,
+            vehicle_id: vehicleId,
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            date: '2999-01-01',
+        });
+
+        expect(result.vehicle_id).toBe(vehicleId);
+        expect(result.slots).toHaveLength(3);
+        expect(result.slots.map((slot) => slot.is_available)).toEqual([true, false, true]);
+        expect(result.slots[1].unavailable_reasons).toContain('VEHICLE_BOOKING_OVERLAP');
+        expect(result.available_slots).toHaveLength(2);
+    });
+
+    it('requires authentication when availability is checked for a vehicle', async () => {
+        await expect(bookingService.getAvailableSlots({
+            vehicle_id: vehicleId,
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            date: '2999-01-01',
+        })).rejects.toMatchObject({
+            statusCode: 401,
+            errorCode: 'AUTHENTICATION_REQUIRED',
+        });
+    });
+
     it('rounds a 15-minute wash bay reservation to the next garage slot', async () => {
         Garage.findById.mockResolvedValue({
             ...garage,
@@ -847,6 +951,49 @@ describe('booking care staff capacity', () => {
 
         expect(result.slots).toHaveLength(expectedSlotCount);
         expect(result.slots.at(-1).care_staff_reserved_until.toISOString()).toBe('2999-01-01T11:00:00.000Z');
+    });
+
+    it('requires one continuous resource window for a three-hour service', async () => {
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            opening_time: '07:00',
+            closing_time: '13:00',
+        });
+        ServicePackage.findById.mockResolvedValue({
+            ...careStaffServicePackage,
+            duration_minutes: 180,
+            care_staff_duration_minutes: 180,
+        });
+        StaffProfile.countDocuments.mockResolvedValue(1);
+        Booking.aggregate.mockResolvedValue([
+            {
+                booking_id: '507f1f77bcf86cd799439092',
+                start_time: new Date('2999-01-01T01:00:00.000Z'),
+                reserved_until: new Date('2999-01-01T02:00:00.000Z'),
+                required_count: 1,
+            },
+        ]);
+
+        const result = await bookingService.getAvailableSlots({
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            date: '2999-01-01',
+        });
+
+        expect(result.slots.map((slot) => slot.is_available)).toEqual([
+            false,
+            false,
+            false,
+            false,
+            true,
+            true,
+            true,
+        ]);
+        expect(result.available_slots.map((slot) => slot.start_time.toISOString())).toEqual([
+            '2999-01-01T02:00:00.000Z',
+            '2999-01-01T02:30:00.000Z',
+            '2999-01-01T03:00:00.000Z',
+        ]);
     });
 
     it('rejects booking creation when start time is outside the garage slot grid', async () => {

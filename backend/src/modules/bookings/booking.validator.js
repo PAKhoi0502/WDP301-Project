@@ -48,6 +48,11 @@ const optionalDateTimeFilter = z.preprocess(
     isoDateTimeField.optional()
 );
 
+const optionalDateOnlyField = z.preprocess(
+    emptyToUndefined,
+    dateOnlyField.optional()
+);
+
 const optionalObjectIdField = z.preprocess(
     emptyToUndefined,
     objectIdField.optional()
@@ -98,11 +103,34 @@ const getAvailableSlotsSchema = z.object({
     query: z
         .object({
             garage_id: objectIdField,
+            vehicle_id: optionalObjectIdField,
             service_package_id: objectIdField,
             add_on_service_ids: optionalObjectIdListField,
-            date: dateOnlyField,
+            date: optionalDateOnlyField,
+            start_date: optionalDateOnlyField,
+            days: z.preprocess(
+                emptyToUndefined,
+                z.coerce.number().int().min(1).max(7).optional()
+            ),
         })
-        .strict(),
+        .strict()
+        .superRefine((data, context) => {
+            if (!data.date && !data.start_date) {
+                context.addIssue({
+                    code: 'custom',
+                    path: ['date'],
+                    message: 'date or start_date is required',
+                });
+            }
+
+            if (data.date && data.start_date) {
+                context.addIssue({
+                    code: 'custom',
+                    path: ['start_date'],
+                    message: 'Use either date or start_date, not both',
+                });
+            }
+        }),
 });
 
 const getMyBookingsSchema = z.object({

@@ -13,47 +13,59 @@ const extractBearerToken = (req) => {
     return authorization.split(' ')[1];
 };
 
-const authenticate = async (req, res, next) => {
+const resolveAuthenticatedUser = async (req, required) => {
+    const token = extractBearerToken(req);
+
+    if (!token) {
+        if (!required) {
+            return null;
+        }
+
+        throw new AppError(
+            'Access token is required',
+            401,
+            'ACCESS_TOKEN_REQUIRED'
+        );
+    }
+
+    const decoded = verifyAccessToken(token);
+
+    if (!decoded.user_id) {
+        throw new AppError(
+            'Invalid access token',
+            401,
+            'INVALID_ACCESS_TOKEN'
+        );
+    }
+
+    const user = await User.findById(decoded.user_id);
+
+    if (!user) {
+        throw new AppError(
+            'User not found',
+            401,
+            'USER_NOT_FOUND'
+        );
+    }
+
+    if (!user.is_active) {
+        throw new AppError(
+            'User account is inactive',
+            403,
+            'USER_INACTIVE'
+        );
+    }
+
+    return user;
+};
+
+const createAuthenticateMiddleware = (required) => async (req, res, next) => {
     try {
-        const token = extractBearerToken(req);
+        const user = await resolveAuthenticatedUser(req, required);
 
-        if (!token) {
-            throw new AppError(
-                'Access token is required',
-                401,
-                'ACCESS_TOKEN_REQUIRED'
-            );
+        if (user) {
+            req.user = user;
         }
-
-        const decoded = verifyAccessToken(token);
-
-        if (!decoded.user_id) {
-            throw new AppError(
-                'Invalid access token',
-                401,
-                'INVALID_ACCESS_TOKEN'
-            );
-        }
-
-        const user = await User.findById(decoded.user_id);
-
-        if (!user) {
-            throw new AppError(
-                'User not found',
-                401,
-                'USER_NOT_FOUND'
-            );
-        }
-
-        if (!user.is_active) {
-            throw new AppError(
-                'User account is inactive',
-                403,
-                'USER_INACTIVE'
-            );
-        }
-
-        req.user = user;
 
         return next();
     } catch (error) {
@@ -80,6 +92,9 @@ const authenticate = async (req, res, next) => {
         return next(error);
     }
 };
+
+const authenticate = createAuthenticateMiddleware(true);
+const optionalAuthenticate = createAuthenticateMiddleware(false);
 
 const authorize = (...roles) => {
     return (req, res, next) => {
@@ -121,5 +136,6 @@ const authorize = (...roles) => {
 
 module.exports = {
     authenticate,
+    optionalAuthenticate,
     authorize,
 };

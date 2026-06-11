@@ -138,6 +138,32 @@ const createDateFromLocalTime = (dateString, timeString) => {
     return new Date(`${dateString}T${timeString}:00${DEFAULT_TIMEZONE_OFFSET}`);
 };
 
+const parseDateOnly = (dateString) => {
+    const [year, month, day] = String(dateString).split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+        !Number.isInteger(year)
+        || !Number.isInteger(month)
+        || !Number.isInteger(day)
+        || date.getUTCFullYear() !== year
+        || date.getUTCMonth() !== month - 1
+        || date.getUTCDate() !== day
+    ) {
+        throw new AppError('Booking date is invalid', 400, 'INVALID_BOOKING_DATE');
+    }
+
+    return date;
+};
+
+const addDaysToDateString = (dateString, days) => {
+    const date = parseDateOnly(dateString);
+
+    date.setUTCDate(date.getUTCDate() + days);
+
+    return date.toISOString().slice(0, 10);
+};
+
 const ceilToGarageSlot = (date, garage) => {
     const openingDate = createDateFromLocalTime(getLocalDateString(date), garage.opening_time);
     const intervalMilliseconds = garage.slot_interval_minutes * 60 * 1000;
@@ -778,7 +804,13 @@ const getPeakConcurrentResourceUsage = (reservations, rangeStart, rangeEnd) => {
     return peakUsage;
 };
 
-const countOverlappedWashBayBookings = async (garageId, vehicleType, washBayStartTime, washBayReservedUntil, excludedBookingId = null) => {
+const getWashBayReservations = async (
+    garageId,
+    vehicleType,
+    rangeStart,
+    rangeEnd,
+    excludedBookingId = null
+) => {
     const filter = {
         garage_id: garageId,
         vehicle_type: vehicleType,
@@ -787,12 +819,12 @@ const countOverlappedWashBayBookings = async (garageId, vehicleType, washBayStar
             $elemMatch: {
                 requires_wash_bay: true,
                 status: { $in: BOOKING_ITEM_HOLD_STATUSES },
-                wash_bay_start_time: { $lt: washBayReservedUntil },
+                wash_bay_start_time: { $lt: rangeEnd },
                 $or: [
-                    { wash_bay_reserved_until: { $gt: washBayStartTime } },
+                    { wash_bay_reserved_until: { $gt: rangeStart } },
                     {
                         wash_bay_reserved_until: null,
-                        wash_bay_end_time: { $gt: washBayStartTime },
+                        wash_bay_end_time: { $gt: rangeStart },
                     },
                 ],
             },
@@ -810,12 +842,12 @@ const countOverlappedWashBayBookings = async (garageId, vehicleType, washBayStar
             $match: {
                 'booking_items.requires_wash_bay': true,
                 'booking_items.status': { $in: BOOKING_ITEM_HOLD_STATUSES },
-                'booking_items.wash_bay_start_time': { $lt: washBayReservedUntil },
+                'booking_items.wash_bay_start_time': { $lt: rangeEnd },
                 $or: [
-                    { 'booking_items.wash_bay_reserved_until': { $gt: washBayStartTime } },
+                    { 'booking_items.wash_bay_reserved_until': { $gt: rangeStart } },
                     {
                         'booking_items.wash_bay_reserved_until': null,
-                        'booking_items.wash_bay_end_time': { $gt: washBayStartTime },
+                        'booking_items.wash_bay_end_time': { $gt: rangeStart },
                     },
                 ],
             },
@@ -836,6 +868,18 @@ const countOverlappedWashBayBookings = async (garageId, vehicleType, washBayStar
         },
     ]);
 
+    return reservations;
+};
+
+const countOverlappedWashBayBookings = async (garageId, vehicleType, washBayStartTime, washBayReservedUntil, excludedBookingId = null) => {
+    const reservations = await getWashBayReservations(
+        garageId,
+        vehicleType,
+        washBayStartTime,
+        washBayReservedUntil,
+        excludedBookingId
+    );
+
     return getPeakConcurrentResourceUsage(
         reservations,
         washBayStartTime,
@@ -851,7 +895,13 @@ const countActiveCareStaff = async (garageId, careStaffType = STAFF_TYPES.VEHICL
     });
 };
 
-const countOverlappedCareStaffBookings = async (garageId, careStaffType, careStaffStartTime, careStaffReservedUntil, excludedBookingId = null) => {
+const getCareStaffReservations = async (
+    garageId,
+    careStaffType,
+    rangeStart,
+    rangeEnd,
+    excludedBookingId = null
+) => {
     const filter = {
         garage_id: garageId,
         status: { $in: BOOKING_RESOURCE_HOLD_STATUSES },
@@ -860,12 +910,12 @@ const countOverlappedCareStaffBookings = async (garageId, careStaffType, careSta
                 requires_care_staff: true,
                 status: { $in: BOOKING_ITEM_HOLD_STATUSES },
                 care_staff_type: careStaffType,
-                care_staff_start_time: { $lt: careStaffReservedUntil },
+                care_staff_start_time: { $lt: rangeEnd },
                 $or: [
-                    { care_staff_reserved_until: { $gt: careStaffStartTime } },
+                    { care_staff_reserved_until: { $gt: rangeStart } },
                     {
                         care_staff_reserved_until: null,
-                        care_staff_end_time: { $gt: careStaffStartTime },
+                        care_staff_end_time: { $gt: rangeStart },
                     },
                 ],
             },
@@ -884,12 +934,12 @@ const countOverlappedCareStaffBookings = async (garageId, careStaffType, careSta
                 'booking_items.requires_care_staff': true,
                 'booking_items.status': { $in: BOOKING_ITEM_HOLD_STATUSES },
                 'booking_items.care_staff_type': careStaffType,
-                'booking_items.care_staff_start_time': { $lt: careStaffReservedUntil },
+                'booking_items.care_staff_start_time': { $lt: rangeEnd },
                 $or: [
-                    { 'booking_items.care_staff_reserved_until': { $gt: careStaffStartTime } },
+                    { 'booking_items.care_staff_reserved_until': { $gt: rangeStart } },
                     {
                         'booking_items.care_staff_reserved_until': null,
-                        'booking_items.care_staff_end_time': { $gt: careStaffStartTime },
+                        'booking_items.care_staff_end_time': { $gt: rangeStart },
                     },
                 ],
             },
@@ -910,6 +960,18 @@ const countOverlappedCareStaffBookings = async (garageId, careStaffType, careSta
         },
     ]);
 
+    return reservations;
+};
+
+const countOverlappedCareStaffBookings = async (garageId, careStaffType, careStaffStartTime, careStaffReservedUntil, excludedBookingId = null) => {
+    const reservations = await getCareStaffReservations(
+        garageId,
+        careStaffType,
+        careStaffStartTime,
+        careStaffReservedUntil,
+        excludedBookingId
+    );
+
     return getPeakConcurrentResourceUsage(
         reservations,
         careStaffStartTime,
@@ -919,6 +981,42 @@ const countOverlappedCareStaffBookings = async (garageId, careStaffType, careSta
 
 const hasTimeOverlap = (startTime, endTime, comparedStartTime, comparedEndTime) => {
     return startTime < comparedEndTime && endTime > comparedStartTime;
+};
+
+const getVehicleBookingReservations = async (vehicleId, rangeStart, rangeEnd) => {
+    if (!vehicleId) {
+        return [];
+    }
+
+    return Booking.aggregate([
+        {
+            $match: {
+                vehicle_id: vehicleId,
+                status: { $in: BOOKING_HOLD_SLOT_STATUSES },
+                start_time: { $lt: rangeEnd },
+                end_time: { $gt: rangeStart },
+            },
+        },
+        {
+            $project: {
+                _id: 0,
+                booking_id: '$_id',
+                start_time: '$start_time',
+                end_time: '$end_time',
+            },
+        },
+    ]);
+};
+
+const hasVehicleBookingOverlap = (reservations, startTime, endTime) => {
+    return reservations.some((reservation) => {
+        const reservationStartTime = new Date(reservation.start_time);
+        const reservationEndTime = new Date(reservation.end_time);
+
+        return !Number.isNaN(reservationStartTime.getTime())
+            && !Number.isNaN(reservationEndTime.getTime())
+            && hasTimeOverlap(startTime, endTime, reservationStartTime, reservationEndTime);
+    });
 };
 
 const findActiveCareStaffProfiles = async (garageId, careStaffType = STAFF_TYPES.VEHICLE_CARE_STAFF) => {
@@ -1524,18 +1622,59 @@ const markBookingItemDoneIfReady = async (booking, bookingItemKey) => {
     }
 };
 
-const getAvailableSlots = async ({ garage_id, service_package_id, add_on_service_ids = [], date } = {}) => {
+const getAvailableSlots = async ({
+    garage_id,
+    vehicle_id,
+    service_package_id,
+    add_on_service_ids = [],
+    date,
+    start_date,
+    days,
+    customer_id,
+} = {}) => {
+    const requestedStartDate = start_date || date;
+    const requestedDayCount = days || (start_date ? 7 : 1);
+
+    parseDateOnly(requestedStartDate);
+
     const garage = await getActiveGarage(garage_id);
     const servicePackage = await getActiveServicePackage(service_package_id);
+    let vehicle = null;
+
+    if (vehicle_id) {
+        if (!customer_id) {
+            throw new AppError(
+                'Authentication is required to check vehicle availability',
+                401,
+                'AUTHENTICATION_REQUIRED'
+            );
+        }
+
+        vehicle = await getActiveVehicleForCustomer(vehicle_id, customer_id);
+        assertServicePackageMatchesVehicleType(servicePackage, vehicle.vehicle_type);
+    }
+
+    const vehicleType = vehicle?.vehicle_type || servicePackage.vehicle_type;
     const { serviceItems, addOnServices } = await resolveBookingServiceItems({
         servicePackage,
         addOnServiceIds: add_on_service_ids,
-        vehicleType: servicePackage.vehicle_type,
+        vehicleType,
     });
-    const openingDate = createDateFromLocalTime(date, garage.opening_time);
-    const closingDate = createDateFromLocalTime(date, garage.closing_time);
+    const requestedDates = Array.from(
+        { length: requestedDayCount },
+        (_, index) => addDaysToDateString(requestedStartDate, index)
+    );
+    const firstOpeningDate = createDateFromLocalTime(requestedDates[0], garage.opening_time);
+    const lastClosingDate = createDateFromLocalTime(
+        requestedDates[requestedDates.length - 1],
+        garage.closing_time
+    );
 
-    if (Number.isNaN(openingDate.getTime()) || Number.isNaN(closingDate.getTime())) {
+    if (
+        Number.isNaN(firstOpeningDate.getTime())
+        || Number.isNaN(lastClosingDate.getTime())
+        || firstOpeningDate >= createDateFromLocalTime(requestedDates[0], garage.closing_time)
+    ) {
         throw new AppError('Invalid garage business hours', 400, 'INVALID_GARAGE_BUSINESS_HOURS');
     }
 
@@ -1543,112 +1682,193 @@ const getAvailableSlots = async ({ garage_id, service_package_id, add_on_service
     const careStaffTypes = [...new Set(serviceItems
         .filter((item) => item.servicePackage.requires_care_staff)
         .map((item) => item.servicePackage.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF))];
-    const activeWashBayCount = hasWashBayItem
-        ? await getBookableWashBayCount(garage._id, servicePackage.vehicle_type)
-        : null;
+    const activeWashBayCountPromise = hasWashBayItem
+        ? getBookableWashBayCount(garage._id, vehicleType)
+        : Promise.resolve(null);
     const activeCareStaffByType = {};
+    const careStaffReservationsByType = {};
+    const activeCareStaffEntriesPromise = Promise.all(careStaffTypes.map(async (careStaffType) => {
+        const [activeCareStaffCount, reservations] = await Promise.all([
+            countActiveCareStaff(garage._id, careStaffType),
+            getCareStaffReservations(
+                garage._id,
+                careStaffType,
+                firstOpeningDate,
+                lastClosingDate
+            ),
+        ]);
 
-    for (const careStaffType of careStaffTypes) {
-        activeCareStaffByType[careStaffType] = await countActiveCareStaff(garage._id, careStaffType);
+        return {
+            careStaffType,
+            activeCareStaffCount,
+            reservations,
+        };
+    }));
+    const [activeWashBayCount, washBayReservations, vehicleReservations, activeCareStaffEntries] = await Promise.all([
+        activeWashBayCountPromise,
+        hasWashBayItem
+            ? getWashBayReservations(
+                garage._id,
+                vehicleType,
+                firstOpeningDate,
+                lastClosingDate
+            )
+            : Promise.resolve([]),
+        getVehicleBookingReservations(vehicle?._id, firstOpeningDate, lastClosingDate),
+        activeCareStaffEntriesPromise,
+    ]);
+
+    for (const entry of activeCareStaffEntries) {
+        activeCareStaffByType[entry.careStaffType] = entry.activeCareStaffCount;
+        careStaffReservationsByType[entry.careStaffType] = entry.reservations;
     }
 
-    const slots = [];
-    let currentStartTime = new Date(openingDate);
+    const availabilityDays = requestedDates.map((requestedDate) => {
+        const openingDate = createDateFromLocalTime(requestedDate, garage.opening_time);
+        const closingDate = createDateFromLocalTime(requestedDate, garage.closing_time);
+        const slots = [];
+        let currentStartTime = new Date(openingDate);
 
-    while (currentStartTime < closingDate) {
-        const bookingPlan = buildBookingPlan({
-            startTime: currentStartTime,
-            servicePackage,
-            serviceItems,
-            addOnServices,
-            garage,
-        });
-        const endTime = addMinutes(currentStartTime, bookingPlan.totalDurationMinutes);
-        const latestPlannedEnd = getLatestPlannedEnd({
-            end_time: endTime,
-            wash_bay_reserved_until: bookingPlan.wash_bay_reserved_until,
-            care_staff_reserved_until: bookingPlan.care_staff_reserved_until,
-        });
-
-        if (latestPlannedEnd <= closingDate) {
-            let isAvailable = currentStartTime > new Date();
-            let availableCapacity = null;
-            let availableWashBayCapacity = null;
-            let availableCareStaffCapacity = null;
-
-            for (const item of bookingPlan.bookingItems) {
-                if (item.requires_wash_bay) {
-                    const overlappedBookingCount = await countOverlappedWashBayBookings(
-                        garage._id,
-                        servicePackage.vehicle_type,
-                        item.wash_bay_start_time,
-                        item.wash_bay_reserved_until
-                    );
-                    const itemAvailableWashBayCapacity = Math.max(activeWashBayCount - overlappedBookingCount, 0);
-
-                    availableWashBayCapacity = availableWashBayCapacity === null
-                        ? itemAvailableWashBayCapacity
-                        : Math.min(availableWashBayCapacity, itemAvailableWashBayCapacity);
-                    isAvailable = isAvailable && activeWashBayCount > 0 && itemAvailableWashBayCapacity > 0;
-                }
-
-                if (item.requires_care_staff) {
-                    const activeCareStaffCount = activeCareStaffByType[item.care_staff_type] || 0;
-                    const busyCareStaffCount = await countOverlappedCareStaffBookings(
-                        garage._id,
-                        item.care_staff_type,
-                        item.care_staff_start_time,
-                        item.care_staff_reserved_until
-                    );
-                    const itemAvailableCareStaffCapacity = Math.max(activeCareStaffCount - busyCareStaffCount, 0);
-
-                    availableCareStaffCapacity = availableCareStaffCapacity === null
-                        ? itemAvailableCareStaffCapacity
-                        : Math.min(availableCareStaffCapacity, itemAvailableCareStaffCapacity);
-                    isAvailable = isAvailable
-                        && activeCareStaffCount > 0
-                        && itemAvailableCareStaffCapacity >= item.care_staff_required_count;
-                }
-            }
-
-            if (availableWashBayCapacity !== null) {
-                availableCapacity = availableWashBayCapacity;
-            }
-
-            if (availableCareStaffCapacity !== null) {
-                availableCapacity = availableCapacity === null
-                    ? availableCareStaffCapacity
-                    : Math.min(availableCapacity, availableCareStaffCapacity);
-            }
-
-            slots.push({
-                start_time: currentStartTime,
-                end_time: endTime,
-                wash_bay_start_time: bookingPlan.wash_bay_start_time,
-                wash_bay_end_time: bookingPlan.wash_bay_end_time,
-                wash_bay_work_end_time: bookingPlan.wash_bay_work_end_time,
-                wash_bay_reserved_until: bookingPlan.wash_bay_reserved_until,
-                care_staff_start_time: bookingPlan.care_staff_start_time,
-                care_staff_end_time: bookingPlan.care_staff_end_time,
-                care_staff_work_end_time: bookingPlan.care_staff_work_end_time,
-                care_staff_reserved_until: bookingPlan.care_staff_reserved_until,
-                booking_items: bookingPlan.bookingItems,
-                is_available: isAvailable,
-                available_capacity: availableCapacity,
-                available_wash_bay_capacity: availableWashBayCapacity,
-                available_care_staff_capacity: availableCareStaffCapacity,
+        while (currentStartTime < closingDate) {
+            const bookingPlan = buildBookingPlan({
+                startTime: currentStartTime,
+                servicePackage,
+                serviceItems,
+                addOnServices,
+                garage,
             });
+            const endTime = addMinutes(currentStartTime, bookingPlan.totalDurationMinutes);
+            const latestPlannedEnd = getLatestPlannedEnd({
+                end_time: endTime,
+                wash_bay_reserved_until: bookingPlan.wash_bay_reserved_until,
+                care_staff_reserved_until: bookingPlan.care_staff_reserved_until,
+            });
+
+            if (latestPlannedEnd <= closingDate) {
+                const unavailableReasons = [];
+                let isAvailable = currentStartTime > new Date();
+                let availableCapacity = null;
+                let availableWashBayCapacity = null;
+                let availableCareStaffCapacity = null;
+
+                if (!isAvailable) {
+                    unavailableReasons.push('START_TIME_IN_PAST');
+                }
+
+                if (hasVehicleBookingOverlap(vehicleReservations, currentStartTime, endTime)) {
+                    isAvailable = false;
+                    unavailableReasons.push('VEHICLE_BOOKING_OVERLAP');
+                }
+
+                for (const item of bookingPlan.bookingItems) {
+                    if (item.requires_wash_bay) {
+                        const overlappedBookingCount = getPeakConcurrentResourceUsage(
+                            washBayReservations,
+                            item.wash_bay_start_time,
+                            item.wash_bay_reserved_until
+                        );
+                        const itemAvailableWashBayCapacity = Math.max(
+                            activeWashBayCount - overlappedBookingCount,
+                            0
+                        );
+
+                        availableWashBayCapacity = availableWashBayCapacity === null
+                            ? itemAvailableWashBayCapacity
+                            : Math.min(availableWashBayCapacity, itemAvailableWashBayCapacity);
+
+                        if (activeWashBayCount <= 0 || itemAvailableWashBayCapacity <= 0) {
+                            isAvailable = false;
+                            unavailableReasons.push('WASH_BAY_CAPACITY_FULL');
+                        }
+                    }
+
+                    if (item.requires_care_staff) {
+                        const activeCareStaffCount = activeCareStaffByType[item.care_staff_type] || 0;
+                        const busyCareStaffCount = getPeakConcurrentResourceUsage(
+                            careStaffReservationsByType[item.care_staff_type] || [],
+                            item.care_staff_start_time,
+                            item.care_staff_reserved_until
+                        );
+                        const itemAvailableCareStaffCapacity = Math.max(
+                            activeCareStaffCount - busyCareStaffCount,
+                            0
+                        );
+
+                        availableCareStaffCapacity = availableCareStaffCapacity === null
+                            ? itemAvailableCareStaffCapacity
+                            : Math.min(availableCareStaffCapacity, itemAvailableCareStaffCapacity);
+
+                        if (
+                            activeCareStaffCount <= 0
+                            || itemAvailableCareStaffCapacity < item.care_staff_required_count
+                        ) {
+                            isAvailable = false;
+                            unavailableReasons.push('CARE_STAFF_CAPACITY_FULL');
+                        }
+                    }
+                }
+
+                if (availableWashBayCapacity !== null) {
+                    availableCapacity = availableWashBayCapacity;
+                }
+
+                if (availableCareStaffCapacity !== null) {
+                    availableCapacity = availableCapacity === null
+                        ? availableCareStaffCapacity
+                        : Math.min(availableCapacity, availableCareStaffCapacity);
+                }
+
+                slots.push({
+                    start_time: currentStartTime,
+                    end_time: endTime,
+                    wash_bay_start_time: bookingPlan.wash_bay_start_time,
+                    wash_bay_end_time: bookingPlan.wash_bay_end_time,
+                    wash_bay_work_end_time: bookingPlan.wash_bay_work_end_time,
+                    wash_bay_reserved_until: bookingPlan.wash_bay_reserved_until,
+                    care_staff_start_time: bookingPlan.care_staff_start_time,
+                    care_staff_end_time: bookingPlan.care_staff_end_time,
+                    care_staff_work_end_time: bookingPlan.care_staff_work_end_time,
+                    care_staff_reserved_until: bookingPlan.care_staff_reserved_until,
+                    booking_items: bookingPlan.bookingItems,
+                    is_available: isAvailable,
+                    unavailable_reasons: [...new Set(unavailableReasons)],
+                    available_capacity: availableCapacity,
+                    available_wash_bay_capacity: availableWashBayCapacity,
+                    available_care_staff_capacity: availableCareStaffCapacity,
+                });
+            }
+
+            currentStartTime = addMinutes(currentStartTime, garage.slot_interval_minutes);
         }
 
-        currentStartTime = addMinutes(currentStartTime, garage.slot_interval_minutes);
-    }
+        const availableSlots = slots.filter((slot) => slot.is_available);
+
+        return {
+            date: requestedDate,
+            opening_time: garage.opening_time,
+            closing_time: garage.closing_time,
+            latest_start_time: slots.at(-1)?.start_time || null,
+            has_available_slots: availableSlots.length > 0,
+            reason: availableSlots.length > 0 ? null : 'NO_CONTINUOUS_SLOT_AVAILABLE',
+            available_slots: availableSlots,
+            slots,
+        };
+    });
+    const firstDay = availabilityDays[0];
 
     return {
         garage_id: garage._id.toString(),
+        vehicle_id: vehicle?._id.toString() || null,
         service_package_id: servicePackage._id.toString(),
         add_on_service_ids: addOnServices.map((item) => item._id.toString()),
-        date,
-        vehicle_type: servicePackage.vehicle_type,
+        date: requestedStartDate,
+        start_date: requestedStartDate,
+        requested_days: requestedDayCount,
+        vehicle_type: vehicleType,
+        service_duration_minutes: serviceItems.reduce(
+            (total, item) => total + item.servicePackage.duration_minutes,
+            0
+        ),
         requires_wash_bay: serviceItems.some((item) => item.servicePackage.requires_wash_bay),
         requires_care_staff: serviceItems.some((item) => item.servicePackage.requires_care_staff),
         care_staff_type: careStaffTypes.length === 1 ? careStaffTypes[0] : null,
@@ -1663,7 +1883,10 @@ const getAvailableSlots = async ({ garage_id, service_package_id, add_on_service
         active_wash_bay_count: activeWashBayCount,
         active_care_staff_count: careStaffTypes.length === 1 ? activeCareStaffByType[careStaffTypes[0]] : null,
         active_care_staff_by_type: activeCareStaffByType,
-        slots,
+        has_available_slots: availabilityDays.some((item) => item.has_available_slots),
+        available_slots: firstDay.available_slots,
+        slots: firstDay.slots,
+        days: availabilityDays,
     };
 };
 

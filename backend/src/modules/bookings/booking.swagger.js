@@ -152,6 +152,13 @@ const availableSlotSchema = {
         care_staff_work_end_time: { type: 'string', format: 'date-time', nullable: true },
         care_staff_reserved_until: { type: 'string', format: 'date-time', nullable: true },
         is_available: { type: 'boolean' },
+        unavailable_reasons: {
+            type: 'array',
+            items: {
+                type: 'string',
+                enum: ['START_TIME_IN_PAST', 'VEHICLE_BOOKING_OVERLAP', 'WASH_BAY_CAPACITY_FULL', 'CARE_STAFF_CAPACITY_FULL'],
+            },
+        },
         available_capacity: { type: 'number', nullable: true },
         available_wash_bay_capacity: { type: 'number', nullable: true },
         available_care_staff_capacity: { type: 'number', nullable: true },
@@ -207,6 +214,30 @@ const cancelBookingRequest = {
     type: 'object',
     properties: {
         reason: { type: 'string', example: 'Customer changed schedule' },
+    },
+};
+
+const bookingAvailabilityDaySchema = {
+    type: 'object',
+    properties: {
+        date: { type: 'string', format: 'date' },
+        opening_time: { type: 'string', example: '07:00' },
+        closing_time: { type: 'string', example: '19:00' },
+        latest_start_time: { type: 'string', format: 'date-time', nullable: true },
+        has_available_slots: { type: 'boolean' },
+        reason: {
+            type: 'string',
+            enum: ['NO_CONTINUOUS_SLOT_AVAILABLE'],
+            nullable: true,
+        },
+        available_slots: {
+            type: 'array',
+            items: availableSlotSchema,
+        },
+        slots: {
+            type: 'array',
+            items: availableSlotSchema,
+        },
     },
 };
 
@@ -375,12 +406,16 @@ const paths = {
     '/bookings/available-slots': {
         get: {
             tags: ['Bookings'],
-            summary: 'Get available booking slots',
+            summary: 'Get available booking slots for one day or a date range',
+            security: [{ bearerAuth: [] }, {}],
             parameters: [
                 { name: 'garage_id', in: 'query', required: true, schema: { type: 'string' } },
+                { name: 'vehicle_id', in: 'query', required: false, description: 'Requires customer authentication when provided', schema: { type: 'string' } },
                 { name: 'service_package_id', in: 'query', required: true, schema: { type: 'string' } },
                 { name: 'add_on_service_ids', in: 'query', required: false, schema: { type: 'string', example: '665f0d3d8b4f5d0012a00004,665f0d3d8b4f5d0012a00005' } },
-                { name: 'date', in: 'query', required: true, schema: { type: 'string', example: '2026-06-10' } },
+                { name: 'date', in: 'query', required: false, description: 'Legacy single-day query. Use either date or start_date.', schema: { type: 'string', format: 'date', example: '2026-06-10' } },
+                { name: 'start_date', in: 'query', required: false, description: 'First day of the availability range. Defaults to 7 days when used.', schema: { type: 'string', format: 'date', example: '2026-06-10' } },
+                { name: 'days', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 7, example: 7 } },
             ],
             responses: {
                 200: {
@@ -396,13 +431,17 @@ const paths = {
                                         type: 'object',
                                         properties: {
                                             garage_id: { type: 'string' },
+                                            vehicle_id: { type: 'string', nullable: true },
                                             service_package_id: { type: 'string' },
                                             add_on_service_ids: {
                                                 type: 'array',
                                                 items: { type: 'string' },
                                             },
                                             date: { type: 'string' },
+                                            start_date: { type: 'string', format: 'date' },
+                                            requested_days: { type: 'integer' },
                                             vehicle_type: { type: 'string' },
+                                            service_duration_minutes: { type: 'integer' },
                                             requires_wash_bay: { type: 'boolean' },
                                             requires_care_staff: { type: 'boolean' },
                                             care_staff_type: {
@@ -414,9 +453,18 @@ const paths = {
                                             slot_interval_minutes: { type: 'number' },
                                             active_wash_bay_count: { type: 'number', nullable: true },
                                             active_care_staff_count: { type: 'number', nullable: true },
+                                            has_available_slots: { type: 'boolean' },
+                                            available_slots: {
+                                                type: 'array',
+                                                items: availableSlotSchema,
+                                            },
                                             slots: {
                                                 type: 'array',
                                                 items: availableSlotSchema,
+                                            },
+                                            days: {
+                                                type: 'array',
+                                                items: bookingAvailabilityDaySchema,
                                             },
                                         },
                                     },
