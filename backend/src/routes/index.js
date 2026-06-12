@@ -17,6 +17,8 @@ const paymentRoutes = require('../modules/payments/payment.routes');
 const uploadRoutes = require('../modules/uploads/upload.routes');
 const auditLogRoutes = require('../modules/audit-logs/auditLog.routes');
 const surveyRoutes = require('../modules/surveys/survey.routes');
+const analyticsRoutes = require('../modules/analytics/analytics.routes');
+const researchRoutes = require('../modules/research/research.routes');
 
 const router = express.Router();
 
@@ -51,6 +53,8 @@ router.use('/admin/payments', paymentRoutes.adminRouter);
 router.use('/admin/uploads', uploadRoutes.adminRouter);
 router.use('/admin/audit-logs', auditLogRoutes.adminRouter);
 router.use('/admin/surveys', surveyRoutes.adminRouter);
+router.use('/admin/analytics', analyticsRoutes.adminRouter);
+router.use('/admin/research', researchRoutes.adminRouter);
 router.use('/admin/promotions', promotionRoutes.adminRouter);
 router.use('/admin/loyalty', loyaltyRoutes.adminRouter);
 router.use('/admin/wash-histories', washHistoryRoutes.adminRouter);

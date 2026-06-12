@@ -19,6 +19,8 @@ const paymentSwagger = require('../../modules/payments/payment.swagger');
 const uploadSwagger = require('../../modules/uploads/upload.swagger');
 const auditLogSwagger = require('../../modules/audit-logs/auditLog.swagger');
 const surveySwagger = require('../../modules/surveys/survey.swagger');
+const analyticsSwagger = require('../../modules/analytics/analytics.swagger');
+const researchSwagger = require('../../modules/research/research.swagger');
 
 const openApiSpec = {
     openapi: '3.0.0',
@@ -53,6 +55,8 @@ const openApiSpec = {
         ...uploadSwagger.tags,
         ...auditLogSwagger.tags,
         ...surveySwagger.tags,
+        ...analyticsSwagger.tags,
+        ...researchSwagger.tags,
     ],
     paths,
     components: {
@@ -78,6 +82,8 @@ const openApiSpec = {
             ...uploadSwagger.schemas,
             ...auditLogSwagger.schemas,
             ...surveySwagger.schemas,
+            ...analyticsSwagger.schemas,
+            ...researchSwagger.schemas,
         },
     },
 };

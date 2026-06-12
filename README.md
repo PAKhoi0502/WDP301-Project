@@ -526,6 +526,32 @@ Implemented:
 - Admin response listing through `GET /api/v1/admin/surveys/:id/responses`
 - Audit events for survey lifecycle and customer response submission
 
+## Analytics
+
+Implemented:
+
+- Admin-only analytics through `/api/v1/admin/analytics`
+- Overview, booking, revenue, garage, service, promotion and wash-bay reports
+- Survey analytics with rating distribution, NPS and choice distribution
+- Shared date, garage, service-package, vehicle-type and grouping filters
+- Revenue sourced from paid wash histories
+- Promotion metrics sourced from consumed promotion usages
+- Estimated wash-bay utilization with explicit data-quality notes
+- Idempotent demo data through `npm run seed:analytics-demo`
+
+## Research
+
+Implemented:
+
+- Admin-only research report lifecycle through `/api/v1/admin/research`
+- `SURVEY_INSIGHT` reports using aggregated survey analytics and anonymous feedback
+- Atomic `DRAFT`, `PROCESSING`, `COMPLETED` and `FAILED` state transitions
+- Structured Gemini output validated with Zod
+- One structured-output retry before report failure
+- PII redaction, feedback limits and verifiable snapshot hashes
+- Retry for failed reports using the saved data snapshot
+- Audit events for create, update, delete, start, completion and failure
+
 ## Testing
 
 Run all backend tests:
@@ -547,7 +573,6 @@ Current verified state:
 These items are future work. They are not implemented as modules in the current checkout:
 
 - Frontend app
-- Analytics/research module
 - Advanced job dashboard, distributed locks and retry backoff controls
 
-Some npm dependencies are already installed for future capabilities, such as `@google/generative-ai`, but the corresponding full modules are not currently implemented.
+The backend uses `@google/genai` for structured survey insight reports.

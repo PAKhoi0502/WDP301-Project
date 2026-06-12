@@ -10,6 +10,8 @@
     "seed:reset": "node src/scripts/seed.js --reset",
     "db:reset": "node src/scripts/resetDatabase.js",
     "seed:user": "node src/scripts/seed.js",
+    "seed:analytics-demo": "node src/scripts/seedAnalyticsDemo.js",
+    "seed:analytics-demo:dry-run": "node src/scripts/seedAnalyticsDemo.js --dry-run",
     "migrate:phone-e164": "node src/scripts/migrateUserPhonesToE164.js",
     "migrate:walk-in-promotions": "node src/scripts/migrateWalkInPromotionClaims.js"
   },
@@ -18,7 +20,7 @@
   "license": "ISC",
   "description": "WDP301-Project-AutoWash Pro",
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^2.8.0",
     "@payos/node": "^2.0.5",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.10.0",

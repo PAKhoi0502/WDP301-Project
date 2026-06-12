@@ -17,6 +17,8 @@ const paymentSwagger = require('../../modules/payments/payment.swagger');
 const uploadSwagger = require('../../modules/uploads/upload.swagger');
 const auditLogSwagger = require('../../modules/audit-logs/auditLog.swagger');
 const surveySwagger = require('../../modules/surveys/survey.swagger');
+const analyticsSwagger = require('../../modules/analytics/analytics.swagger');
+const researchSwagger = require('../../modules/research/research.swagger');
 
 const paths = {
     ...authSwagger.paths,
@@ -38,6 +40,8 @@ const paths = {
     ...uploadSwagger.paths,
     ...auditLogSwagger.paths,
     ...surveySwagger.paths,
+    ...analyticsSwagger.paths,
+    ...researchSwagger.paths,
 };
 
 module.exports = paths;
