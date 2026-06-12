@@ -215,6 +215,13 @@ const bookingSchema = new mongoose.Schema(
             default: null,
         },
 
+        normalized_guest_phone: {
+            type: String,
+            trim: true,
+            maxlength: [20, 'Normalized guest phone must not exceed 20 characters'],
+            default: null,
+        },
+
         guest_email: {
             type: String,
             trim: true,
@@ -301,6 +308,17 @@ const bookingSchema = new mongoose.Schema(
         },
 
         wash_bay_end_time: {
+            type: Date,
+            default: null,
+        },
+
+        claimed_customer_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        claimed_at: {
             type: Date,
             default: null,
         },
@@ -612,6 +630,7 @@ bookingSchema.index({ service_package_id: 1 });
 bookingSchema.index({ status: 1 });
 bookingSchema.index({ payment_status: 1 });
 bookingSchema.index({ is_walk_in: 1 });
+bookingSchema.index({ normalized_guest_phone: 1, is_walk_in: 1, claimed_customer_id: 1 });
 bookingSchema.index({ normalized_license_plate: 1, vehicle_type: 1, start_time: 1 });
 bookingSchema.index({ created_by_staff_id: 1 });
 bookingSchema.index({ created_at: -1 });
@@ -772,8 +791,8 @@ bookingSchema.pre('validate', function (next) {
         this.invalidate('customer_id', 'Customer booking requires customer and vehicle');
     }
 
-    if (this.is_walk_in && (!this.guest_name || !this.guest_phone || !this.license_plate || !this.normalized_license_plate || !this.created_by_staff_id)) {
-        this.invalidate('guest_name', 'Walk-in booking requires guest information');
+    if (this.is_walk_in && (!this.license_plate || !this.normalized_license_plate || !this.created_by_staff_id)) {
+        this.invalidate('license_plate', 'Walk-in booking requires vehicle and staff information');
     }
 
     next();

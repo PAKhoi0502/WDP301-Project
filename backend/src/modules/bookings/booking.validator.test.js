@@ -2,6 +2,7 @@ const {
     getAvailableSlotsSchema,
     getLateArrivalOptionsSchema,
     resolveLateArrivalSchema,
+    createWalkInBookingSchema,
 } = require('./booking.validator');
 
 describe('booking available slots validator', () => {
@@ -121,6 +122,47 @@ describe('booking late arrival validator', () => {
             body: {
                 resolution: 'ACCEPT_WITHIN_ORIGINAL_WINDOW',
                 new_start_time: '2026-06-11T12:00:00+07:00',
+            },
+        });
+
+        expect(result.success).toBe(false);
+    });
+});
+
+describe('walk-in booking validator', () => {
+    const baseBody = {
+        garage_id: '507f1f77bcf86cd799439011',
+        service_package_id: '507f1f77bcf86cd799439012',
+        start_time: '2026-06-11T12:00:00+07:00',
+        license_plate: '59A-123.45',
+        vehicle_type: 'CAR',
+    };
+
+    it('allows booking without guest identity fields', () => {
+        const result = createWalkInBookingSchema.safeParse({
+            body: baseBody,
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    it('normalizes a provided guest phone', () => {
+        const result = createWalkInBookingSchema.safeParse({
+            body: {
+                ...baseBody,
+                guest_phone: '0901 234 567',
+            },
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data.body.guest_phone).toBe('+84901234567');
+    });
+
+    it('rejects an invalid provided guest phone', () => {
+        const result = createWalkInBookingSchema.safeParse({
+            body: {
+                ...baseBody,
+                guest_phone: '123',
             },
         });
 

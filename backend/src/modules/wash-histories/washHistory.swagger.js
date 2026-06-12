@@ -153,6 +153,22 @@ const washHistoryResponse = {
     },
 };
 
+const claimResponse = {
+    type: 'object',
+    properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        data: {
+            type: 'object',
+            properties: {
+                claimed_bookings: { type: 'number' },
+                claimed_wash_histories: { type: 'number' },
+                linked_promotion_usages: { type: 'number' },
+            },
+        },
+    },
+};
+
 const paginationParameters = [
     { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
     { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
@@ -209,6 +225,24 @@ const paths = {
                     content: {
                         'application/json': {
                             schema: washHistoryResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/wash-histories/claim': {
+        post: {
+            tags: ['Wash Histories'],
+            summary: 'Claim completed paid walk-in histories by verified phone',
+            security: [{ bearerAuth: [] }],
+            responses: {
+                200: {
+                    description: 'Success',
+                    content: {
+                        'application/json': {
+                            schema: claimResponse,
                         },
                     },
                 },

@@ -6,7 +6,11 @@ const ServicePackage = require('../service-packages/servicePackage.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
 const loyaltyService = require('../loyalty/loyalty.service');
 const { AppError } = require('../../shared/utils/appError');
-const { PROMOTION_DISCOUNT_TYPES } = require('../../shared/constants/promotion.constant');
+const {
+    PROMOTION_DISCOUNT_TYPES,
+    PROMOTION_AUDIENCES,
+    PROMOTION_USAGE_STATUS,
+} = require('../../shared/constants/promotion.constant');
 
 const normalizeText = (value) => {
     if (typeof value !== 'string') {
@@ -85,6 +89,18 @@ const normalizeBasePayload = (payload = {}) => {
         normalizedPayload.min_order_amount = payload.min_order_amount;
     }
 
+    if (payload.audience !== undefined) {
+        normalizedPayload.audience = payload.audience;
+    }
+
+    if (payload.phone_required !== undefined) {
+        normalizedPayload.phone_required = payload.phone_required;
+    }
+
+    if (payload.per_phone_limit !== undefined) {
+        normalizedPayload.per_phone_limit = payload.per_phone_limit;
+    }
+
     if (payload.applicable_tiers !== undefined) {
         normalizedPayload.applicable_tiers = normalizeStringList(payload.applicable_tiers);
     }
@@ -120,7 +136,7 @@ const normalizeBasePayload = (payload = {}) => {
     return normalizedPayload;
 };
 
-const buildSearchFilter = ({ search, vehicle_type, tier, is_active, valid_only, service_package_id } = {}) => {
+const buildSearchFilter = ({ search, vehicle_type, tier, audience, is_active, valid_only, service_package_id } = {}) => {
     const filter = {};
 
     if (search) {
@@ -152,6 +168,10 @@ const buildSearchFilter = ({ search, vehicle_type, tier, is_active, valid_only, 
                 { applicable_tiers: tier },
             ],
         });
+    }
+
+    if (audience) {
+        filter.audience = audience;
     }
 
     if (service_package_id) {
@@ -207,6 +227,38 @@ const assertDiscountRuleValid = (payload, currentPromotion = null) => {
 
     if (discountType === PROMOTION_DISCOUNT_TYPES.PERCENTAGE && discountValue > 100) {
         throw new AppError('Percentage discount must not exceed 100', 400, 'PROMOTION_PERCENTAGE_INVALID');
+    }
+};
+
+const assertAudienceRuleValid = (payload, currentPromotion = null) => {
+    const audience = payload.audience !== undefined
+        ? payload.audience
+        : currentPromotion?.audience || PROMOTION_AUDIENCES.ALL;
+    const applicableTiers = payload.applicable_tiers !== undefined
+        ? payload.applicable_tiers
+        : currentPromotion?.applicable_tiers || [];
+    const perCustomerLimit = payload.per_customer_limit !== undefined
+        ? payload.per_customer_limit
+        : currentPromotion?.per_customer_limit;
+    const phoneRequired = payload.phone_required !== undefined
+        ? payload.phone_required
+        : currentPromotion?.phone_required;
+    const perPhoneLimit = payload.per_phone_limit !== undefined
+        ? payload.per_phone_limit
+        : currentPromotion?.per_phone_limit;
+
+    if (
+        audience === PROMOTION_AUDIENCES.WALK_IN
+        && (applicableTiers.length || perCustomerLimit)
+    ) {
+        throw new AppError('Walk-in promotion cannot require customer tier or customer usage limit', 400, 'PROMOTION_AUDIENCE_RULE_INVALID');
+    }
+
+    if (
+        audience === PROMOTION_AUDIENCES.CUSTOMER
+        && (phoneRequired || perPhoneLimit)
+    ) {
+        throw new AppError('Customer promotion cannot require walk-in phone rules', 400, 'PROMOTION_AUDIENCE_RULE_INVALID');
     }
 };
 
@@ -307,8 +359,19 @@ const getCustomerTier = async (customerId) => {
     return loyalty.current_tier;
 };
 
-const assertPromotionApplicable = async ({ promotion, customerId, customerTier, servicePackage, vehicleType, orderAmount }) => {
+const assertPromotionApplicable = async ({
+    promotion,
+    customerId,
+    customerTier,
+    guestPhoneNormalized,
+    servicePackage,
+    vehicleType,
+    orderAmount,
+    session = null,
+}) => {
     const effectiveTime = new Date();
+    const audience = promotion.audience || PROMOTION_AUDIENCES.ALL;
+    const isWalkIn = !customerId;
 
     if (!promotion.is_active) {
         throw new AppError('Promotion is inactive', 400, 'PROMOTION_INACTIVE');
@@ -320,6 +383,17 @@ const assertPromotionApplicable = async ({ promotion, customerId, customerTier, 
 
     if (orderAmount < promotion.min_order_amount) {
         throw new AppError('Order amount does not meet promotion minimum amount', 400, 'PROMOTION_MIN_ORDER_NOT_MET');
+    }
+
+    if (
+        (isWalkIn && audience === PROMOTION_AUDIENCES.CUSTOMER)
+        || (!isWalkIn && audience === PROMOTION_AUDIENCES.WALK_IN)
+    ) {
+        throw new AppError('Promotion is not available for this booking audience', 400, 'PROMOTION_AUDIENCE_NOT_ELIGIBLE');
+    }
+
+    if (isWalkIn && (promotion.phone_required || promotion.per_phone_limit) && !guestPhoneNormalized) {
+        throw new AppError('Guest phone is required for this promotion', 400, 'PROMOTION_PHONE_REQUIRED');
     }
 
     if (promotion.applicable_tiers?.length) {
@@ -346,8 +420,20 @@ const assertPromotionApplicable = async ({ promotion, customerId, customerTier, 
     }
 
     if (promotion.usage_limit) {
-        const totalUsageCount = await PromotionUsage.countDocuments({ promotion_id: promotion._id });
-        const effectiveUsageCount = Math.max(totalUsageCount, promotion.used_count || 0);
+        const usageQuery = PromotionUsage.countDocuments({
+            promotion_id: promotion._id,
+            status: { $ne: PROMOTION_USAGE_STATUS.RELEASED },
+        });
+
+        if (session && usageQuery.session) {
+            usageQuery.session(session);
+        }
+
+        const totalUsageCount = await usageQuery;
+        const effectiveUsageCount = Math.max(
+            totalUsageCount,
+            (promotion.used_count || 0) + (promotion.reserved_count || 0)
+        );
 
         if (effectiveUsageCount >= promotion.usage_limit) {
             throw new AppError('Promotion usage limit has been reached', 409, 'PROMOTION_USAGE_LIMIT_REACHED');
@@ -359,21 +445,47 @@ const assertPromotionApplicable = async ({ promotion, customerId, customerTier, 
             throw new AppError('Customer account is required for this promotion', 400, 'PROMOTION_CUSTOMER_REQUIRED');
         }
 
-        const customerUsageCount = await PromotionUsage.countDocuments({
+        const customerUsageQuery = PromotionUsage.countDocuments({
             promotion_id: promotion._id,
             customer_id: customerId,
+            status: { $ne: PROMOTION_USAGE_STATUS.RELEASED },
         });
+
+        if (session && customerUsageQuery.session) {
+            customerUsageQuery.session(session);
+        }
+
+        const customerUsageCount = await customerUsageQuery;
 
         if (customerUsageCount >= promotion.per_customer_limit) {
             throw new AppError('Customer promotion usage limit has been reached', 409, 'PROMOTION_CUSTOMER_USAGE_LIMIT_REACHED');
         }
     }
+
+    if (isWalkIn && promotion.per_phone_limit && guestPhoneNormalized) {
+        const phoneUsageQuery = PromotionUsage.countDocuments({
+            promotion_id: promotion._id,
+            guest_phone_normalized: guestPhoneNormalized,
+            status: { $ne: PROMOTION_USAGE_STATUS.RELEASED },
+        });
+
+        if (session && phoneUsageQuery.session) {
+            phoneUsageQuery.session(session);
+        }
+
+        const phoneUsageCount = await phoneUsageQuery;
+
+        if (phoneUsageCount >= promotion.per_phone_limit) {
+            throw new AppError('Phone promotion usage limit has been reached', 409, 'PROMOTION_PHONE_USAGE_LIMIT_REACHED');
+        }
+    }
 };
 
-const getPublicPromotions = async ({ page = 1, limit = 20, search, vehicle_type, service_package_id } = {}) => {
+const getPublicPromotions = async ({ page = 1, limit = 20, search, vehicle_type, audience, service_package_id } = {}) => {
     const filter = buildSearchFilter({
         search,
         vehicle_type,
+        audience,
         service_package_id,
         valid_only: true,
     });
@@ -414,11 +526,12 @@ const getPublicPromotionById = async (promotionId) => {
     return PromotionMapper.toPromotionDto(promotion);
 };
 
-const getAllPromotions = async ({ page = 1, limit = 20, search, vehicle_type, tier, is_active, valid_only } = {}) => {
+const getAllPromotions = async ({ page = 1, limit = 20, search, vehicle_type, tier, audience, is_active, valid_only } = {}) => {
     const filter = buildSearchFilter({
         search,
         vehicle_type,
         tier,
+        audience,
         is_active,
         valid_only,
     });
@@ -454,6 +567,7 @@ const createPromotion = async (actorId, payload = {}) => {
 
     assertPromotionDateRangeValid(createPayload);
     assertDiscountRuleValid(createPayload);
+    assertAudienceRuleValid(createPayload);
     await assertCodeAvailable(createPayload.code);
     await assertServicePackagesValid(createPayload.applicable_service_package_ids || []);
 
@@ -474,6 +588,7 @@ const updatePromotion = async (actorId, promotionId, payload = {}) => {
     assertUpdatePayloadNotEmpty(updatePayload);
     assertPromotionDateRangeValid(updatePayload, promotion);
     assertDiscountRuleValid(updatePayload, promotion);
+    assertAudienceRuleValid(updatePayload, promotion);
 
     if (updatePayload.code !== undefined) {
         await assertCodeAvailable(updatePayload.code, promotionId);
@@ -535,7 +650,16 @@ const deletePromotion = async (promotionId) => {
     return PromotionMapper.toPromotionDto(promotion);
 };
 
-const validatePromotionForBooking = async ({ promotion_code, customer_id, servicePackage, vehicleType, orderAmount, bookingStartTime } = {}) => {
+const validatePromotionForBooking = async ({
+    promotion_code,
+    customer_id,
+    guest_phone_normalized,
+    servicePackage,
+    vehicleType,
+    orderAmount,
+    bookingStartTime,
+    session = null,
+} = {}) => {
     if (!promotion_code) {
         return {
             promotion: null,
@@ -551,9 +675,11 @@ const validatePromotionForBooking = async ({ promotion_code, customer_id, servic
         promotion,
         customerId: customer_id,
         customerTier,
+        guestPhoneNormalized: guest_phone_normalized,
         servicePackage,
         vehicleType,
         orderAmount,
+        session,
     });
 
     const discountAmount = calculateDiscountAmount(promotion, orderAmount);

@@ -12,6 +12,7 @@ const bookingServiceStepService = require('../booking-service-steps/bookingServi
 const bookingPaymentService = require('./bookingPayment.service');
 const auditLogService = require('../audit-logs/auditLog.service');
 const promotionService = require('../promotions/promotion.service');
+const promotionUsageService = require('../promotion-usages/promotionUsage.service');
 const loyaltyService = require('../loyalty/loyalty.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
@@ -22,6 +23,7 @@ const { STAFF_TYPES } = require('../../shared/constants/staff.constant');
 const { WASH_BAY_STATUS } = require('../../shared/constants/washBay.constant');
 const { SERVICE_PACKAGE_TYPES } = require('../../shared/constants/servicePackage.constant');
 const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
+const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 const {
     BOOKING_STATUS,
     BOOKING_ARRIVAL_STATUS,
@@ -2551,8 +2553,15 @@ const createWalkInBooking = async (user, payload = {}) => {
     ]);
     const startTime = parseDateTime(createPayload.start_time, 'start_time');
     const normalizedLicensePlate = normalizeLicensePlate(createPayload.license_plate);
+    const normalizedGuestPhone = createPayload.guest_phone
+        ? normalizePhone(createPayload.guest_phone)
+        : null;
 
     await assertStaffCanAccessGarage(user, garage._id);
+
+    if (normalizedGuestPhone && !isValidPhone(normalizedGuestPhone)) {
+        throw new AppError('Guest phone is invalid', 400, 'INVALID_GUEST_PHONE');
+    }
 
     assertServicePackageMatchesVehicleType(
         servicePackage,
@@ -2575,6 +2584,7 @@ const createWalkInBooking = async (user, payload = {}) => {
     const promotionResult = await promotionService.validatePromotionForBooking({
         promotion_code: createPayload.promotion_code,
         customer_id: null,
+        guest_phone_normalized: normalizedGuestPhone,
         servicePackage,
         vehicleType: createPayload.vehicle_type,
         orderAmount: bookingPlan.originalPrice,
@@ -2611,18 +2621,67 @@ const createWalkInBooking = async (user, payload = {}) => {
         bookingItems: basePayload.booking_items,
     });
 
-    const booking = await Booking.create({
-        ...basePayload,
+    const buildWalkInPayload = (effectiveBasePayload) => ({
+        ...effectiveBasePayload,
         customer_id: null,
         vehicle_id: null,
         is_walk_in: true,
-        guest_name: normalizeRequiredText(createPayload.guest_name),
-        guest_phone: normalizeRequiredText(createPayload.guest_phone),
+        guest_name: normalizeText(createPayload.guest_name),
+        guest_phone: normalizedGuestPhone,
+        normalized_guest_phone: normalizedGuestPhone,
         guest_email: normalizeEmail(createPayload.guest_email),
         license_plate: normalizeRequiredText(createPayload.license_plate),
         normalized_license_plate: normalizedLicensePlate,
         created_by_staff_id: user._id,
     });
+
+    let booking;
+
+    if (promotionResult?.promotion) {
+        const session = await mongoose.startSession();
+
+        try {
+            await session.withTransaction(async () => {
+                const transactionalPromotionResult = await promotionService.validatePromotionForBooking({
+                    promotion_code: createPayload.promotion_code,
+                    customer_id: null,
+                    guest_phone_normalized: normalizedGuestPhone,
+                    servicePackage,
+                    vehicleType: createPayload.vehicle_type,
+                    orderAmount: bookingPlan.originalPrice,
+                    bookingStartTime: startTime,
+                    session,
+                });
+                const transactionalBasePayload = buildBookingBasePayload({
+                    garage,
+                    servicePackage,
+                    bookingPlan,
+                    startTime,
+                    vehicleType: createPayload.vehicle_type,
+                    note: createPayload.note,
+                    promotionResult: transactionalPromotionResult,
+                });
+                const documents = await Booking.create(
+                    [buildWalkInPayload(transactionalBasePayload)],
+                    { session }
+                );
+
+                [booking] = documents;
+
+                await promotionUsageService.reservePromotionUsageForBooking({
+                    booking,
+                    promotion: transactionalPromotionResult.promotion,
+                    guestPhoneNormalized: normalizedGuestPhone,
+                    actorId: user._id,
+                    session,
+                });
+            });
+        } finally {
+            await session.endSession();
+        }
+    } else {
+        booking = await Booking.create(buildWalkInPayload(basePayload));
+    }
 
     const populatedBooking = await getBookingDocumentById(booking._id);
 
@@ -2687,7 +2746,23 @@ const cancelBooking = async (user, bookingId, { reason } = {}) => {
     booking.canceled_by_id = user._id;
     booking.cancel_reason = normalizeText(reason);
 
-    await booking.save();
+    if (booking.is_walk_in && booking.promotion_id) {
+        const session = await mongoose.startSession();
+
+        try {
+            await session.withTransaction(async () => {
+                await booking.save({ session });
+                await promotionUsageService.releaseReservedPromotionForBooking({
+                    bookingId: booking._id,
+                    session,
+                });
+            });
+        } finally {
+            await session.endSession();
+        }
+    } else {
+        await booking.save();
+    }
     await loyaltyService.refundRedeemedPointsForBooking({
         booking,
         actorId: user._id,

@@ -1,6 +1,7 @@
 const { z } = require('zod');
 
 const { VEHICLE_TYPE_VALUES } = require('../../shared/constants/vehicle.constant');
+const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 const {
     BOOKING_STATUS_VALUES,
     BOOKING_LATE_RESOLUTION_VALUES,
@@ -92,6 +93,16 @@ const optionalPromotionCodeField = z.preprocess(
         .max(40)
         .regex(/^[A-Za-z0-9_]+$/, 'Promotion code is invalid')
         .transform((value) => value.toUpperCase())
+        .optional()
+);
+
+const optionalGuestPhoneField = z.preprocess(
+    emptyToUndefined,
+    z
+        .string()
+        .trim()
+        .transform(normalizePhone)
+        .refine(isValidPhone, 'Phone number is invalid')
         .optional()
 );
 
@@ -191,8 +202,8 @@ const createWalkInBookingSchema = z.object({
             service_package_id: objectIdField,
             add_on_service_ids: z.array(objectIdField).default([]),
             start_time: isoDateTimeField,
-            guest_name: z.string().trim().min(2).max(120),
-            guest_phone: z.string().trim().min(8).max(20),
+            guest_name: optionalTextField(120),
+            guest_phone: optionalGuestPhoneField,
             guest_email: z.preprocess(
                 emptyToUndefined,
                 z.string().trim().email().max(120).optional()

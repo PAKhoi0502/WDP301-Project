@@ -169,7 +169,7 @@ const createWashHistoryFromBooking = async ({ booking, earnedPoints = 0, session
         [
             {
                 booking_id: booking._id,
-                customer_id: booking.customer_id || null,
+                customer_id: booking.customer_id || booking.claimed_customer_id || null,
                 vehicle_id: booking.vehicle_id || null,
                 garage_id: booking.garage_id,
                 wash_bay_id: booking.wash_bay_id || null,

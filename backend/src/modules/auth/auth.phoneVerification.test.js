@@ -35,10 +35,15 @@ jest.mock('../notifications/notification.service', () => ({
     createEmailNotification: jest.fn(),
 }));
 
+jest.mock('../wash-histories/walkInClaim.service', () => ({
+    claimWalkInHistoryForCustomer: jest.fn(),
+}));
+
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const User = require('../users/user.model');
 const phoneVerificationService = require('./services/phoneVerification.service');
+const walkInClaimService = require('../wash-histories/walkInClaim.service');
 const authCoreService = require('./services/auth.core.service');
 const {
     PHONE_VERIFICATION_PURPOSES,
@@ -60,6 +65,11 @@ describe('auth registration phone verification', () => {
             _id: '665f1b7b2a5f9d0012a12345',
         });
         phoneVerificationService.consumeVerifiedChallenge.mockResolvedValue({});
+        walkInClaimService.claimWalkInHistoryForCustomer.mockResolvedValue({
+            claimed_bookings: 0,
+            claimed_wash_histories: 0,
+            linked_promotion_usages: 0,
+        });
         User.create.mockImplementation(async ([payload]) => ([
             {
                 _id: '665f1b7b2a5f9d0012a54321',
@@ -96,6 +106,11 @@ describe('auth registration phone verification', () => {
         );
         expect(session.withTransaction).toHaveBeenCalledTimes(1);
         expect(session.endSession).toHaveBeenCalledTimes(1);
+        expect(walkInClaimService.claimWalkInHistoryForCustomer).toHaveBeenCalledWith({
+            customerId: '665f1b7b2a5f9d0012a54321',
+            phone: '+84901234567',
+            phoneVerifiedAt: expect.any(Date),
+        });
         expect(result.user.phone_verified_at).toEqual(expect.any(Date));
     });
 });

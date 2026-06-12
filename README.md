@@ -86,6 +86,7 @@ npm run seed
 npm run seed:reset
 npm run db:reset
 npm run migrate:phone-e164
+npm run migrate:walk-in-promotions
 ```
 
 `seed:reset` runs seed with reset mode. `db:reset` drops configured collections through `src/scripts/resetDatabase.js`.
@@ -139,6 +140,7 @@ WAITLIST_EXPIRE_BATCH_SIZE
 EMAIL_RETRY_JOB_INTERVAL_MS
 EMAIL_RETRY_BATCH_SIZE
 POINT_EXPIRATION_JOB_INTERVAL_MS
+WALK_IN_CLAIM_LOOKBACK_MONTHS
 
 SMTP_HOST
 SMTP_PORT
@@ -235,6 +237,8 @@ Development defaults to `SMS_PROVIDER=mock`. The request response includes `debu
 
 Run `npm run migrate:phone-e164` once before deploying this normalization change to a database that already contains local-format user phones. The migration stops on normalization collisions instead of merging accounts.
 
+Run `npm run migrate:walk-in-promotions` once before deploying walk-in promotion reservations and history claims to an existing database. The migration normalizes valid guest phones, marks legacy promotion usages as consumed, initializes promotion audience fields and synchronizes usage counters.
+
 Roles currently used:
 
 ```txt
@@ -277,7 +281,22 @@ Customer booking:
 Walk-in booking:
 
 - Staff/Admin can create booking for guest customer
-- Guest name, phone, optional email, license plate and vehicle type are stored on booking
+- Garage, service package, start time, license plate and vehicle type are required
+- Guest name, phone, email, add-ons, promotion code and note are optional
+- A valid guest phone is required when the selected promotion uses phone identification
+- Walk-in promotion usage is reserved at booking creation, consumed after completed payment and released when the booking is canceled
+- One-time walk-in promotions can use `audience=WALK_IN`, `phone_required=true` and `per_phone_limit=1`
+- Guest phones are normalized to E.164 before storage and promotion checks
+- Completed paid walk-in histories from the configured lookback period are claimed after account registration by verified phone
+- History claim links wash history and promotion usage but does not grant loyalty points, visits, spending or tier progress
+
+Customer history claim retry:
+
+```txt
+POST /api/v1/wash-histories/claim
+```
+
+The endpoint always uses the authenticated customer's verified account phone and is idempotent.
 
 Staff/Admin operations:
 
@@ -519,8 +538,8 @@ npm test -- --runInBand
 Current verified state:
 
 ```txt
-30 test suites passed
-155 tests passed
+42 test suites passed
+235 tests passed
 ```
 
 ## Current Gaps

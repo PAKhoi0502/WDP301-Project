@@ -30,7 +30,10 @@ const bookingSchema = {
         is_walk_in: { type: 'boolean' },
         guest_name: { type: 'string', nullable: true },
         guest_phone: { type: 'string', nullable: true },
+        normalized_guest_phone: { type: 'string', nullable: true },
         guest_email: { type: 'string', nullable: true },
+        claimed_customer_id: { type: 'string', nullable: true },
+        claimed_at: { type: 'string', format: 'date-time', nullable: true },
         license_plate: { type: 'string', nullable: true },
         normalized_license_plate: { type: 'string', nullable: true },
         vehicle_type: { type: 'string', enum: ['MOTORBIKE', 'CAR'] },
@@ -214,7 +217,7 @@ const createCustomerBookingRequest = {
 
 const createWalkInBookingRequest = {
     type: 'object',
-    required: ['garage_id', 'service_package_id', 'start_time', 'guest_name', 'guest_phone', 'license_plate', 'vehicle_type'],
+    required: ['garage_id', 'service_package_id', 'start_time', 'license_plate', 'vehicle_type'],
     properties: {
         garage_id: { type: 'string', example: '665f0d3d8b4f5d0012a00001' },
         service_package_id: { type: 'string', example: '665f0d3d8b4f5d0012a00003' },
@@ -224,8 +227,13 @@ const createWalkInBookingRequest = {
             example: ['665f0d3d8b4f5d0012a00004'],
         },
         start_time: { type: 'string', format: 'date-time', example: '2026-06-10T09:00:00+07:00' },
-        guest_name: { type: 'string', example: 'Guest Customer' },
-        guest_phone: { type: 'string', example: '0901234567' },
+        guest_name: { type: 'string', nullable: true, example: 'Guest Customer' },
+        guest_phone: {
+            type: 'string',
+            nullable: true,
+            example: '0901234567',
+            description: 'Required when the selected promotion requires guest phone identification',
+        },
         guest_email: { type: 'string', example: 'guest@example.com' },
         license_plate: { type: 'string', example: '59A-123.45' },
         vehicle_type: { type: 'string', enum: ['MOTORBIKE', 'CAR'], example: 'CAR' },

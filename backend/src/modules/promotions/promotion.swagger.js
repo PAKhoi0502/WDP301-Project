@@ -20,6 +20,9 @@ const promotionSchema = {
         discount_value: { type: 'number' },
         max_discount_amount: { type: 'number', nullable: true },
         min_order_amount: { type: 'number' },
+        audience: { type: 'string', enum: ['ALL', 'CUSTOMER', 'WALK_IN'] },
+        phone_required: { type: 'boolean' },
+        per_phone_limit: { type: 'number', nullable: true, enum: [1] },
         applicable_tiers: {
             type: 'array',
             items: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
@@ -37,6 +40,7 @@ const promotionSchema = {
         usage_limit: { type: 'number', nullable: true },
         per_customer_limit: { type: 'number', nullable: true },
         used_count: { type: 'number' },
+        reserved_count: { type: 'number' },
         is_active: { type: 'boolean' },
         created_by_id: { type: 'string', nullable: true },
         updated_by_id: { type: 'string', nullable: true },
@@ -56,6 +60,9 @@ const createPromotionRequest = {
         discount_value: { type: 'number', example: 10 },
         max_discount_amount: { type: 'number', nullable: true, example: 50000 },
         min_order_amount: { type: 'number', example: 100000 },
+        audience: { type: 'string', enum: ['ALL', 'CUSTOMER', 'WALK_IN'], example: 'WALK_IN' },
+        phone_required: { type: 'boolean', example: true },
+        per_phone_limit: { type: 'number', nullable: true, enum: [1], example: 1 },
         applicable_tiers: {
             type: 'array',
             items: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
@@ -151,6 +158,7 @@ const paths = {
                 { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
                 { name: 'search', in: 'query', schema: { type: 'string' } },
                 { name: 'vehicle_type', in: 'query', schema: { type: 'string', enum: ['MOTORBIKE', 'CAR'] } },
+                { name: 'audience', in: 'query', schema: { type: 'string', enum: ['ALL', 'CUSTOMER', 'WALK_IN'] } },
                 { name: 'service_package_id', in: 'query', schema: { type: 'string' } },
             ],
             responses: {
@@ -223,6 +231,7 @@ const paths = {
                 { name: 'search', in: 'query', schema: { type: 'string' } },
                 { name: 'vehicle_type', in: 'query', schema: { type: 'string', enum: ['MOTORBIKE', 'CAR'] } },
                 { name: 'tier', in: 'query', schema: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] } },
+                { name: 'audience', in: 'query', schema: { type: 'string', enum: ['ALL', 'CUSTOMER', 'WALK_IN'] } },
                 { name: 'is_active', in: 'query', schema: { type: 'boolean' } },
                 { name: 'valid_only', in: 'query', schema: { type: 'boolean' } },
             ],

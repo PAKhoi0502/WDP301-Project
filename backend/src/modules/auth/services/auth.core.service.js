@@ -8,6 +8,7 @@ const TokenService = require('../services/token.service');
 const emailService = require('../../emails/email.service');
 const notificationService = require('../../notifications/notification.service');
 const phoneVerificationService = require('./phoneVerification.service');
+const walkInClaimService = require('../../wash-histories/walkInClaim.service');
 const { hashToken } = require('../security/token.hash');
 const PasswordReset = require('../models/passwordResetToken.model');
 const PasswordResetRateLimit = require('../models/passwordResetRateLimit.model');
@@ -278,8 +279,27 @@ const register = async (payload) => {
         await session.endSession();
     }
 
+    let walkInHistoryClaim;
+
+    try {
+        walkInHistoryClaim = await walkInClaimService.claimWalkInHistoryForCustomer({
+            customerId: user._id,
+            phone: user.phone,
+            phoneVerifiedAt: user.phone_verified_at,
+        });
+    } catch (error) {
+        walkInHistoryClaim = {
+            claimed_bookings: 0,
+            claimed_wash_histories: 0,
+            linked_promotion_usages: 0,
+            retry_required: true,
+            error_code: error.errorCode || 'WALK_IN_HISTORY_CLAIM_FAILED',
+        };
+    }
+
     return {
         user: AuthMapper.toUserDto(user),
+        walk_in_history_claim: walkInHistoryClaim,
     };
 };
 

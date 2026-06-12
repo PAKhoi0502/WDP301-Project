@@ -10,7 +10,8 @@
     "seed:reset": "node src/scripts/seed.js --reset",
     "db:reset": "node src/scripts/resetDatabase.js",
     "seed:user": "node src/scripts/seed.js",
-    "migrate:phone-e164": "node src/scripts/migrateUserPhonesToE164.js"
+    "migrate:phone-e164": "node src/scripts/migrateUserPhonesToE164.js",
+    "migrate:walk-in-promotions": "node src/scripts/migrateWalkInPromotionClaims.js"
   },
   "keywords": [],
   "author": "Pham Anh Khoi",

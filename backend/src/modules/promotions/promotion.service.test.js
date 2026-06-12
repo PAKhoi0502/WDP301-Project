@@ -38,6 +38,8 @@ const createValidPromotion = (overrides = {}) => ({
     usage_limit: 10,
     per_customer_limit: 1,
     used_count: 0,
+    reserved_count: 0,
+    audience: 'ALL',
     is_active: true,
     ...overrides,
 });
@@ -80,10 +82,12 @@ describe('promotion service business rules', () => {
         expect(Promotion.findOne).toHaveBeenCalledWith({ code: 'GOLD20' });
         expect(PromotionUsage.countDocuments).toHaveBeenNthCalledWith(1, {
             promotion_id: promotion._id,
+            status: { $ne: 'RELEASED' },
         });
         expect(PromotionUsage.countDocuments).toHaveBeenNthCalledWith(2, {
             promotion_id: promotion._id,
             customer_id: customerId,
+            status: { $ne: 'RELEASED' },
         });
         expect(result).toMatchObject({
             promotion,
@@ -147,6 +151,68 @@ describe('promotion service business rules', () => {
         ).rejects.toMatchObject({
             statusCode: 409,
             errorCode: 'PROMOTION_CUSTOMER_USAGE_LIMIT_REACHED',
+        });
+    });
+
+    it('requires phone for a walk-in phone promotion', async () => {
+        const promotion = createValidPromotion({
+            audience: 'WALK_IN',
+            phone_required: true,
+            per_phone_limit: 1,
+            applicable_tiers: [],
+            per_customer_limit: null,
+            usage_limit: null,
+        });
+
+        Promotion.findOne.mockResolvedValue(promotion);
+
+        await expect(
+            promotionService.validatePromotionForBooking({
+                promotion_code: 'GOLD20',
+                customer_id: null,
+                servicePackage: {
+                    _id: servicePackageId,
+                    vehicle_type: 'CAR',
+                    base_price: 200000,
+                },
+                vehicleType: 'CAR',
+                orderAmount: 200000,
+            })
+        ).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'PROMOTION_PHONE_REQUIRED',
+        });
+    });
+
+    it('rejects a repeated walk-in phone promotion', async () => {
+        const promotion = createValidPromotion({
+            audience: 'WALK_IN',
+            phone_required: true,
+            per_phone_limit: 1,
+            applicable_tiers: [],
+            per_customer_limit: null,
+            usage_limit: null,
+        });
+
+        Promotion.findOne.mockResolvedValue(promotion);
+        PromotionUsage.countDocuments.mockResolvedValue(1);
+
+        await expect(
+            promotionService.validatePromotionForBooking({
+                promotion_code: 'GOLD20',
+                customer_id: null,
+                guest_phone_normalized: '+84901234567',
+                servicePackage: {
+                    _id: servicePackageId,
+                    vehicle_type: 'CAR',
+                    base_price: 200000,
+                },
+                vehicleType: 'CAR',
+                orderAmount: 200000,
+            })
+        ).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'PROMOTION_PHONE_USAGE_LIMIT_REACHED',
         });
     });
 });

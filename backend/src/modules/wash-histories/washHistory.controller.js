@@ -1,4 +1,5 @@
 const washHistoryService = require('./washHistory.service');
+const walkInClaimService = require('./walkInClaim.service');
 const { asyncHandler } = require('../../shared/utils/asyncHandler');
 const { sendSuccess } = require('../../shared/utils/apiResponse');
 
@@ -21,6 +22,19 @@ const getMyWashHistoryById = asyncHandler(async (req, res) => {
 
     return sendSuccess(res, {
         message: 'Get wash history successfully',
+        data: result,
+    });
+});
+
+const claimMyWalkInHistories = asyncHandler(async (req, res) => {
+    const result = await walkInClaimService.claimWalkInHistoryForCustomer({
+        customerId: req.user._id,
+        phone: req.user.phone,
+        phoneVerifiedAt: req.user.phone_verified_at,
+    });
+
+    return sendSuccess(res, {
+        message: 'Claim walk-in histories successfully',
         data: result,
     });
 });
@@ -51,6 +65,7 @@ const getWashHistoryById = asyncHandler(async (req, res) => {
 module.exports = {
     getMyWashHistories,
     getMyWashHistoryById,
+    claimMyWalkInHistories,
     getAllWashHistories,
     getWashHistoryById,
 };

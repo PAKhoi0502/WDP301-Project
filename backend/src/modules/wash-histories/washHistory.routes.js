@@ -22,6 +22,11 @@ customerRouter.get(
     washHistoryController.getMyWashHistories
 );
 
+customerRouter.post(
+    '/claim',
+    washHistoryController.claimMyWalkInHistories
+);
+
 customerRouter.get(
     '/:id',
     validate(idParamSchema),

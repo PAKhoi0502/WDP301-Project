@@ -2,7 +2,10 @@ const { z } = require('zod');
 
 const { VEHICLE_TYPE_VALUES } = require('../../shared/constants/vehicle.constant');
 const { LOYALTY_TIER_VALUES } = require('../../shared/constants/loyalty.constant');
-const { PROMOTION_DISCOUNT_TYPE_VALUES } = require('../../shared/constants/promotion.constant');
+const {
+    PROMOTION_DISCOUNT_TYPE_VALUES,
+    PROMOTION_AUDIENCE_VALUES,
+} = require('../../shared/constants/promotion.constant');
 
 const emptyToUndefined = (value) => {
     if (typeof value === 'string' && value.trim() === '') {
@@ -57,6 +60,7 @@ const descriptionField = z.preprocess(emptyToUndefined, z.string().trim().max(20
 const discountTypeField = z.enum(PROMOTION_DISCOUNT_TYPE_VALUES);
 const vehicleTypeField = z.enum(VEHICLE_TYPE_VALUES);
 const loyaltyTierField = z.enum(LOYALTY_TIER_VALUES);
+const promotionAudienceField = z.enum(PROMOTION_AUDIENCE_VALUES);
 
 const paginationQueryFields = {
     page: z.coerce.number().int().min(1).default(1),
@@ -77,6 +81,7 @@ const getPublicPromotionsSchema = z.object({
             ...paginationQueryFields,
             search: optionalTextField(100),
             vehicle_type: vehicleTypeField.optional(),
+            audience: promotionAudienceField.optional(),
             service_package_id: z.preprocess(emptyToUndefined, objectIdField.optional()),
         })
         .strict(),
@@ -89,6 +94,7 @@ const getAdminPromotionsSchema = z.object({
             search: optionalTextField(100),
             vehicle_type: vehicleTypeField.optional(),
             tier: loyaltyTierField.optional(),
+            audience: promotionAudienceField.optional(),
             is_active: stringBooleanField.optional(),
             valid_only: stringBooleanField.optional(),
         })
@@ -114,6 +120,9 @@ const createPromotionSchema = z.object({
             discount_value: z.coerce.number().min(0.01),
             max_discount_amount: optionalNumberField(z.coerce.number().min(0)),
             min_order_amount: z.coerce.number().min(0).default(0),
+            audience: promotionAudienceField.default('ALL'),
+            phone_required: z.boolean().default(false),
+            per_phone_limit: optionalNumberField(z.coerce.number().int().min(1).max(1)),
             applicable_tiers: z.array(loyaltyTierField).default([]),
             applicable_vehicle_types: z.array(vehicleTypeField).default([]),
             applicable_service_package_ids: z.array(objectIdField).default([]),
@@ -147,6 +156,9 @@ const updatePromotionSchema = z.object({
             discount_value: z.preprocess(emptyToUndefined, z.coerce.number().min(0.01).optional()),
             max_discount_amount: optionalNumberField(z.coerce.number().min(0)),
             min_order_amount: z.preprocess(emptyToUndefined, z.coerce.number().min(0).optional()),
+            audience: promotionAudienceField.optional(),
+            phone_required: z.boolean().optional(),
+            per_phone_limit: optionalNumberField(z.coerce.number().int().min(1).max(1)),
             applicable_tiers: z.array(loyaltyTierField).optional(),
             applicable_vehicle_types: z.array(vehicleTypeField).optional(),
             applicable_service_package_ids: z.array(objectIdField).optional(),

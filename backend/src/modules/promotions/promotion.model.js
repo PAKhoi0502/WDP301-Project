@@ -5,6 +5,8 @@ const { LOYALTY_TIER_VALUES } = require('../../shared/constants/loyalty.constant
 const {
     PROMOTION_DISCOUNT_TYPES,
     PROMOTION_DISCOUNT_TYPE_VALUES,
+    PROMOTION_AUDIENCES,
+    PROMOTION_AUDIENCE_VALUES,
 } = require('../../shared/constants/promotion.constant');
 
 const promotionSchema = new mongoose.Schema(
@@ -58,6 +60,24 @@ const promotionSchema = new mongoose.Schema(
             default: 0,
         },
 
+        audience: {
+            type: String,
+            enum: PROMOTION_AUDIENCE_VALUES,
+            default: PROMOTION_AUDIENCES.ALL,
+        },
+
+        phone_required: {
+            type: Boolean,
+            default: false,
+        },
+
+        per_phone_limit: {
+            type: Number,
+            min: [1, 'Per phone limit must be 1'],
+            max: [1, 'Per phone limit must be 1'],
+            default: null,
+        },
+
         applicable_tiers: {
             type: [String],
             enum: LOYALTY_TIER_VALUES,
@@ -102,6 +122,12 @@ const promotionSchema = new mongoose.Schema(
         used_count: {
             type: Number,
             min: [0, 'Used count must be greater than or equal to 0'],
+            default: 0,
+        },
+
+        reserved_count: {
+            type: Number,
+            min: [0, 'Reserved count must be greater than or equal to 0'],
             default: 0,
         },
 
@@ -157,6 +183,14 @@ promotionSchema.pre('validate', function (next) {
 
     if (this.per_customer_limit === undefined) {
         this.per_customer_limit = null;
+    }
+
+    if (this.per_phone_limit === undefined) {
+        this.per_phone_limit = null;
+    }
+
+    if (this.per_phone_limit) {
+        this.phone_required = true;
     }
 
     next();
