@@ -31,8 +31,8 @@ const openApiSpec = {
     },
     servers: [
         {
-            url: 'http://localhost:5000/api/v1',
-            description: 'Local development server',
+            url: '/api/v1',
+            description: 'Current server',
         },
     ],
     tags: [
