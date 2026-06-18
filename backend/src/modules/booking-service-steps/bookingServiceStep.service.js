@@ -8,10 +8,10 @@ const {
 } = require('../../shared/constants/bookingServiceStep.constant');
 const { SERVICE_STEP_TYPES } = require('../../shared/constants/servicePackage.constant');
 
-const PRE_SERVICE_GROUP_NAME = 'Pre-service';
-const ADD_ON_GROUP_NAME = 'Add-on Services';
-const POST_SERVICE_GROUP_NAME = 'Post-service';
-const PRIMARY_SERVICE_GROUP_NAME = 'Service';
+const PRE_SERVICE_GROUP_NAME = 'Trước dịch vụ';
+const ADD_ON_GROUP_NAME = 'Dịch vụ bổ sung';
+const POST_SERVICE_GROUP_NAME = 'Sau dịch vụ';
+const PRIMARY_SERVICE_GROUP_NAME = 'Dịch vụ chính';
 
 const normalizeText = (value) => {
     if (value === null || value === undefined) {
@@ -119,7 +119,7 @@ const buildPreServiceDocument = (booking, fallbackServicePackage) => ({
     service_package_id: fallbackServicePackage?._id || booking.service_package_id,
     booking_item_key: null,
     step_code: 'PRE_SERVICE_CHECK_IN',
-    step_name: 'Pre-service inspection',
+    step_name: 'Kiểm tra trước dịch vụ',
     order: 1,
     step_type: SERVICE_STEP_TYPES.MANUAL_SERVICE_STEP,
     workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.PRE_SERVICE,
@@ -133,10 +133,10 @@ const buildPreServiceDocument = (booking, fallbackServicePackage) => ({
     confirmed_by_staff_id: null,
     status: BOOKING_SERVICE_STEP_STATUS.PENDING,
     instructions: [
-        'Verify booking and vehicle information',
-        'Inspect and record vehicle condition before service',
-        'Protect sensitive equipment if needed',
-        'Protect electric vehicle charging areas if applicable',
+        'Xác nhận thông tin đặt lịch và xe',
+        'Kiểm tra và ghi nhận tình trạng xe trước dịch vụ',
+        'Che chắn thiết bị nhạy cảm nếu cần',
+        'Che chắn khu vực sạc xe điện nếu có',
     ],
     started_at: null,
     completed_at: null,
@@ -149,7 +149,7 @@ const buildPostServiceDocument = (booking, fallbackServicePackage, order) => ({
     service_package_id: fallbackServicePackage?._id || booking.service_package_id,
     booking_item_key: null,
     step_code: 'POST_SERVICE_HANDOVER',
-    step_name: 'Final inspection and handover',
+    step_name: 'Kiểm tra cuối và bàn giao',
     order,
     step_type: SERVICE_STEP_TYPES.MANUAL_SERVICE_STEP,
     workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.POST_SERVICE,
@@ -163,10 +163,10 @@ const buildPostServiceDocument = (booking, fallbackServicePackage, order) => ({
     confirmed_by_staff_id: null,
     status: BOOKING_SERVICE_STEP_STATUS.PENDING,
     instructions: [
-        'Perform final overall inspection',
-        'Take after-service photos if needed',
-        'Record post-service condition',
-        'Handover vehicle to customer',
+        'Kiểm tra tổng thể lần cuối',
+        'Chụp ảnh sau dịch vụ nếu cần',
+        'Ghi nhận tình trạng sau dịch vụ',
+        'Bàn giao xe cho khách hàng',
     ],
     started_at: null,
     completed_at: null,
