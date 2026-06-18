@@ -213,6 +213,21 @@ describe('booking late arrival', () => {
         expect(JSON.stringify(Booking.aggregate.mock.calls)).toContain('$ne');
     });
 
+    it('suggests replacement slots for a late scheduled walk-in', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2026-06-11T04:45:00.000Z'));
+        const booking = createLateBooking({
+            is_walk_in: true,
+            vehicle_id: null,
+        });
+        Booking.findById.mockReturnValueOnce(booking);
+
+        const result = await bookingService.getLateArrivalOptions(adminUser, bookingId, {
+            days: 1,
+        });
+
+        expect(result.suggested_slots[0].start_time.toISOString()).toBe('2026-06-11T05:00:00.000Z');
+    });
+
     it('accepts a late customer within the original timeline without shifting it', async () => {
         jest.useFakeTimers().setSystemTime(new Date('2026-06-11T04:46:00.000Z'));
         const booking = createLateBooking();

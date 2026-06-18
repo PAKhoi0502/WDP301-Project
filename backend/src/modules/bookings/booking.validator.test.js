@@ -146,6 +146,36 @@ describe('walk-in booking validator', () => {
         expect(result.success).toBe(true);
     });
 
+    it('allows immediate walk-in without start time', () => {
+        const { start_time, ...immediateBody } = baseBody;
+        const result = createWalkInBookingSchema.safeParse({
+            body: {
+                ...immediateBody,
+                serve_now: true,
+            },
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data.body.serve_now).toBe(true);
+        expect(result.data.body.suggestion_days).toBe(1);
+    });
+
+    it('requires exactly one immediate or scheduled start mode', () => {
+        const { start_time, ...bodyWithoutStartTime } = baseBody;
+        const missingStart = createWalkInBookingSchema.safeParse({
+            body: bodyWithoutStartTime,
+        });
+        const conflictingStart = createWalkInBookingSchema.safeParse({
+            body: {
+                ...baseBody,
+                serve_now: true,
+            },
+        });
+
+        expect(missingStart.success).toBe(false);
+        expect(conflictingStart.success).toBe(false);
+    });
+
     it('normalizes a provided guest phone', () => {
         const result = createWalkInBookingSchema.safeParse({
             body: {

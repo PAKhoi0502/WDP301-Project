@@ -11,6 +11,7 @@ jest.mock('./booking.model', () => ({
 jest.mock('../users/user.model', () => ({}));
 jest.mock('../vehicles/vehicle.model', () => ({
     findOne: jest.fn(),
+    exists: jest.fn(),
 }));
 jest.mock('../garages/garage.model', () => ({
     findById: jest.fn(),
@@ -222,6 +223,7 @@ describe('booking care staff capacity', () => {
             normalized_license_plate: '59A12345',
             is_active: true,
         });
+        Vehicle.exists.mockResolvedValue(null);
         promotionService.validatePromotionForBooking.mockResolvedValue(null);
         loyaltyService.calculateBookingRedeemDiscount.mockResolvedValue({
             loyalty: null,
@@ -310,6 +312,9 @@ describe('booking care staff capacity', () => {
             .mockResolvedValueOnce([
                 createCapacityReservation('507f1f77bcf86cd799439080'),
             ])
+            .mockResolvedValueOnce([
+                createCapacityReservation('507f1f77bcf86cd799439080'),
+            ])
             .mockResolvedValueOnce([{ _id: staffAId }]);
         bookingServiceStepService.createStepsForBooking.mockResolvedValue([
             {
@@ -346,7 +351,7 @@ describe('booking care staff capacity', () => {
             }),
             careStaffServicePackage
         );
-        const activeAssignmentPipeline = Booking.aggregate.mock.calls[1][0];
+        const activeAssignmentPipeline = Booking.aggregate.mock.calls[2][0];
         const serializedPipeline = JSON.stringify(activeAssignmentPipeline);
 
         expect(serializedPipeline).toContain('assigned_care_staff.released_at');
@@ -375,6 +380,52 @@ describe('booking care staff capacity', () => {
 
         expect(StaffProfile.find).not.toHaveBeenCalled();
         expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('rechecks resource capacity before starting a checked-in booking', async () => {
+        const booking = {
+            _id: '507f1f77bcf86cd799439096',
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            vehicle_type: 'CAR',
+            status: 'CHECKED_IN',
+            start_time: new Date('2000-01-01T00:00:00.000Z'),
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    requires_wash_bay: false,
+                    requires_care_staff: true,
+                    care_staff_type: 'VEHICLE_CARE_STAFF',
+                    care_staff_required_count: 1,
+                    care_staff_start_time: new Date('2000-01-01T00:00:00.000Z'),
+                    care_staff_end_time: new Date('2000-01-01T01:30:00.000Z'),
+                    care_staff_reserved_until: new Date('2000-01-01T01:30:00.000Z'),
+                    status: 'PENDING',
+                },
+            ],
+        };
+        Booking.findById.mockResolvedValue(booking);
+        StaffProfile.countDocuments.mockResolvedValue(1);
+        Booking.aggregate.mockResolvedValueOnce([
+            {
+                booking_id: '507f1f77bcf86cd799439097',
+                start_time: new Date('2000-01-01T00:00:00.000Z'),
+                reserved_until: new Date('2000-01-01T01:30:00.000Z'),
+                required_count: 1,
+            },
+        ]);
+
+        await expect(bookingService.startService(
+            { _id: '507f1f77bcf86cd799439095', role: 'ADMIN' },
+            booking._id,
+            {}
+        )).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'CARE_STAFF_CAPACITY_FULL',
+        });
+
+        expect(StaffProfile.find).not.toHaveBeenCalled();
+        expect(bookingServiceStepService.createStepsForBooking).not.toHaveBeenCalled();
     });
 
     it('keeps a released wash bay reservation unavailable until reserved time ends', async () => {
@@ -533,6 +584,7 @@ describe('booking care staff capacity', () => {
             },
         ]));
         Booking.aggregate
+            .mockResolvedValueOnce([])
             .mockResolvedValueOnce([])
             .mockResolvedValueOnce([{ _id: busyStaffProfileId }]);
 
@@ -742,21 +794,31 @@ describe('booking care staff capacity', () => {
         });
     });
 
-    it('rejects no-show for walk-in booking', async () => {
+    it('allows no-show for a scheduled walk-in booking', async () => {
         const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
-
-        Booking.findById.mockReturnValueOnce({
+        const booking = {
             _id: '507f1f77bcf86cd799439048',
             garage_id: garageId,
             status: 'CONFIRMED',
             payment_status: 'UNPAID',
             is_walk_in: true,
-        });
+            wash_bay_id: null,
+            booking_items: [],
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
 
-        await expect(bookingService.markNoShow(adminUser, '507f1f77bcf86cd799439048')).rejects.toMatchObject({
-            statusCode: 400,
-            errorCode: 'WALK_IN_BOOKING_CANNOT_NO_SHOW',
-        });
+        const result = await bookingService.markNoShow(
+            adminUser,
+            '507f1f77bcf86cd799439048',
+            { reason: 'GUEST_DID_NOT_RETURN' }
+        );
+
+        expect(result.status).toBe('NO_SHOW');
+        expect(booking.no_show_reason).toBe('GUEST_DID_NOT_RETURN');
+        expect(booking.save).toHaveBeenCalledTimes(1);
     });
 
     it('marks slot available when care staff capacity remains', async () => {
@@ -1381,6 +1443,97 @@ describe('booking care staff capacity', () => {
         })).rejects.toMatchObject({
             statusCode: 409,
             errorCode: 'CARE_STAFF_CAPACITY_FULL',
+        });
+
+        expect(Booking.create).not.toHaveBeenCalled();
+    });
+
+    it('creates an immediate walk-in at the current minute and checks it in', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2999-01-01T06:15:00.000Z'));
+        const bookingId = '507f1f77bcf86cd799439061';
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            closing_time: '15:00',
+        });
+        Booking.aggregate.mockResolvedValue([]);
+        Booking.create.mockImplementation(async (payload) => ({
+            _id: bookingId,
+            ...payload,
+        }));
+        Booking.findById.mockReturnValue(createPopulateQuery({
+            _id: bookingId,
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            vehicle_type: 'CAR',
+            is_walk_in: true,
+            status: 'CHECKED_IN',
+            arrival_status: 'ON_TIME',
+            start_time: new Date('2999-01-01T06:15:00.000Z'),
+            end_time: new Date('2999-01-01T07:45:00.000Z'),
+            booking_items: [],
+            add_on_service_ids: [],
+        }));
+
+        const result = await bookingService.createWalkInBooking(
+            { _id: '507f1f77bcf86cd799439062', role: 'ADMIN' },
+            {
+                garage_id: garageId,
+                service_package_id: servicePackageId,
+                serve_now: true,
+                license_plate: '59A-123.45',
+                vehicle_type: 'CAR',
+            }
+        );
+
+        expect(Booking.create).toHaveBeenCalledWith(expect.objectContaining({
+            is_walk_in: true,
+            status: 'CHECKED_IN',
+            arrival_status: 'ON_TIME',
+            start_time: new Date('2999-01-01T06:15:00.000Z'),
+            checked_in_at: new Date('2999-01-01T06:15:00.000Z'),
+        }));
+        expect(result).toMatchObject({
+            id: bookingId,
+            status: 'CHECKED_IN',
+            start_time: new Date('2999-01-01T06:15:00.000Z'),
+        });
+    });
+
+    it('returns suggested slots without creating an immediate walk-in when staff is full', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2999-01-01T06:15:00.000Z'));
+        Garage.findById.mockResolvedValue({
+            ...garage,
+            closing_time: '18:00',
+        });
+        Booking.aggregate
+            .mockResolvedValueOnce([
+                createCapacityReservation('507f1f77bcf86cd799439080'),
+                createCapacityReservation('507f1f77bcf86cd799439081'),
+            ])
+            .mockResolvedValueOnce([]);
+
+        await expect(bookingService.createWalkInBooking(
+            { _id: '507f1f77bcf86cd799439062', role: 'ADMIN' },
+            {
+                garage_id: garageId,
+                service_package_id: servicePackageId,
+                serve_now: true,
+                suggestion_days: 1,
+                license_plate: '59A-123.45',
+                vehicle_type: 'CAR',
+            }
+        )).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'CARE_STAFF_CAPACITY_FULL',
+            errors: expect.objectContaining({
+                can_serve_now: false,
+                unavailable_reasons: ['CARE_STAFF_CAPACITY_FULL'],
+                suggested_slots: expect.arrayContaining([
+                    expect.objectContaining({
+                        start_time: new Date('2999-01-01T06:30:00.000Z'),
+                    }),
+                ]),
+            }),
         });
 
         expect(Booking.create).not.toHaveBeenCalled();

@@ -281,7 +281,11 @@ Customer booking:
 Walk-in booking:
 
 - Staff/Admin can create booking for guest customer
-- Garage, service package, start time, license plate and vehicle type are required
+- Garage, service package, license plate and vehicle type are required
+- Use `serve_now=true` without `start_time` to create an immediate walk-in at the current minute; successful immediate bookings are checked in automatically
+- Scheduled walk-ins use `start_time` and remain aligned with the garage slot interval
+- When WashBay or care-staff capacity is unavailable, the error includes `errors.suggested_slots`; no booking is created
+- Scheduled walk-ins use the same grace-period, late-arrival suggestions, rescheduling and no-show flow as customer bookings
 - Guest name, phone, email, add-ons, promotion code and note are optional
 - A valid guest phone is required when the selected promotion uses phone identification
 - Walk-in promotion usage is reserved at booking creation, consumed after completed payment and released when the booking is canceled
@@ -382,8 +386,7 @@ PATCH /api/v1/admin/bookings/:id/mark-no-show
 
 Rules:
 
-- Allowed for scheduled customer bookings in `PENDING` or `CONFIRMED`.
-- Not allowed for walk-in bookings.
+- Allowed for scheduled customer and walk-in bookings in `PENDING` or `CONFIRMED`.
 - Not allowed after check-in or service start.
 - Not allowed when booking is `PAID`.
 - Not allowed when booking has pending PayOS payment.

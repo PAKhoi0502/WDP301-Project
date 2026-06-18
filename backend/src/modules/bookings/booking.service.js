@@ -807,7 +807,9 @@ const evaluateLateArrivalCandidates = async ({
             booking.vehicle_id,
             rangeStart,
             rangeEnd,
-            booking._id
+            booking._id,
+            booking.normalized_license_plate,
+            booking.vehicle_type
         ),
         Promise.all(careStaffTypes.map(async (careStaffType) => {
             const [activeCount, reservations] = await Promise.all([
@@ -1295,18 +1297,26 @@ const getVehicleBookingReservations = async (
     vehicleId,
     rangeStart,
     rangeEnd,
-    excludedBookingId = null
+    excludedBookingId = null,
+    normalizedLicensePlate = null,
+    vehicleType = null
 ) => {
-    if (!vehicleId) {
+    if (!vehicleId && !normalizedLicensePlate) {
         return [];
     }
 
     const filter = {
-        vehicle_id: vehicleId,
         status: { $in: BOOKING_HOLD_SLOT_STATUSES },
         start_time: { $lt: rangeEnd },
         end_time: { $gt: rangeStart },
     };
+
+    if (vehicleId) {
+        filter.vehicle_id = vehicleId;
+    } else {
+        filter.normalized_license_plate = normalizedLicensePlate;
+        filter.vehicle_type = vehicleType;
+    }
 
     if (excludedBookingId) {
         filter._id = { $ne: excludedBookingId };
@@ -2551,7 +2561,10 @@ const createWalkInBooking = async (user, payload = {}) => {
         getActiveGarage(createPayload.garage_id),
         getActiveServicePackage(createPayload.service_package_id),
     ]);
-    const startTime = parseDateTime(createPayload.start_time, 'start_time');
+    const serveNow = createPayload.serve_now === true;
+    const startTime = serveNow
+        ? now
+        : parseDateTime(createPayload.start_time, 'start_time');
     const normalizedLicensePlate = normalizeLicensePlate(createPayload.license_plate);
     const normalizedGuestPhone = createPayload.guest_phone
         ? normalizePhone(createPayload.guest_phone)
@@ -2600,8 +2613,10 @@ const createWalkInBooking = async (user, payload = {}) => {
         promotionResult,
     });
 
-    assertBookingStartTimeInFuture(startTime, now);
-    assertBookingStartTimeAligned(garage, startTime);
+    if (!serveNow) {
+        assertBookingStartTimeInFuture(startTime, now);
+        assertBookingStartTimeAligned(garage, startTime);
+    }
     assertBookingInsideGarageBusinessHours(garage, basePayload.start_time, getLatestPlannedEnd(basePayload));
 
     if (!normalizedLicensePlate || normalizedLicensePlate.length < 5 || normalizedLicensePlate.length > 20) {
@@ -2615,11 +2630,53 @@ const createWalkInBooking = async (user, payload = {}) => {
         startTime: basePayload.start_time,
         endTime: basePayload.end_time,
     });
-    await assertGarageCapacityAvailable({
-        garageId: garage._id,
-        vehicleType: createPayload.vehicle_type,
-        bookingItems: basePayload.booking_items,
-    });
+    try {
+        await assertGarageCapacityAvailable({
+            garageId: garage._id,
+            vehicleType: createPayload.vehicle_type,
+            bookingItems: basePayload.booking_items,
+        });
+    } catch (error) {
+        const resourceErrorCodes = new Set([
+            'WASH_BAY_CAPACITY_FULL',
+            'CARE_STAFF_CAPACITY_FULL',
+            'WASH_BAY_TEMPORARILY_UNAVAILABLE',
+            'NO_ACTIVE_WASH_BAY_FOR_VEHICLE_TYPE',
+            'NO_ACTIVE_CARE_STAFF',
+        ]);
+
+        if (!resourceErrorCodes.has(error.errorCode)) {
+            throw error;
+        }
+
+        let suggestedSlots = [];
+
+        try {
+            const availability = await getAvailableSlots({
+                garage_id: garage._id,
+                service_package_id: servicePackage._id,
+                add_on_service_ids: createPayload.add_on_service_ids || [],
+                start_date: getLocalDateString(now),
+                days: createPayload.suggestion_days || 1,
+            });
+
+            suggestedSlots = availability.days.flatMap((day) => day.available_slots);
+        } catch (availabilityError) {
+            suggestedSlots = [];
+        }
+
+        throw new AppError(
+            error.message,
+            error.statusCode,
+            error.errorCode,
+            {
+                can_serve_now: false,
+                requested_start_time: startTime,
+                unavailable_reasons: [error.errorCode],
+                suggested_slots: suggestedSlots,
+            }
+        );
+    }
 
     const buildWalkInPayload = (effectiveBasePayload) => ({
         ...effectiveBasePayload,
@@ -2633,6 +2690,13 @@ const createWalkInBooking = async (user, payload = {}) => {
         license_plate: normalizeRequiredText(createPayload.license_plate),
         normalized_license_plate: normalizedLicensePlate,
         created_by_staff_id: user._id,
+        ...(serveNow ? {
+            status: BOOKING_STATUS.CHECKED_IN,
+            arrival_status: BOOKING_ARRIVAL_STATUS.ON_TIME,
+            arrived_at: now,
+            arrival_reference_start_time: startTime,
+            checked_in_at: now,
+        } : {}),
     });
 
     let booking;
@@ -2786,10 +2850,6 @@ const markNoShow = async (user, bookingId, { reason } = {}) => {
 
     await assertStaffCanAccessBooking(user, booking);
 
-    if (booking.is_walk_in) {
-        throw new AppError('Walk-in booking cannot be marked no-show', 400, 'WALK_IN_BOOKING_CANNOT_NO_SHOW');
-    }
-
     if (booking.arrived_at) {
         throw new AppError(
             'Booking cannot be marked no-show after customer arrival',
@@ -2820,7 +2880,23 @@ const markNoShow = async (user, bookingId, { reason } = {}) => {
     booking.no_show_by_id = user._id;
     booking.no_show_reason = normalizeText(reason);
 
-    await booking.save();
+    if (booking.is_walk_in && booking.promotion_id) {
+        const session = await mongoose.startSession();
+
+        try {
+            await session.withTransaction(async () => {
+                await booking.save({ session });
+                await promotionUsageService.releaseReservedPromotionForBooking({
+                    bookingId: booking._id,
+                    session,
+                });
+            });
+        } finally {
+            await session.endSession();
+        }
+    } else {
+        await booking.save();
+    }
     await loyaltyService.refundRedeemedPointsForBooking({
         booking,
         actorId: user._id,
@@ -2903,14 +2979,6 @@ const getLateArrivalOptions = async (user, bookingId, { days = 1 } = {}) => {
         [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED],
         'BOOKING_LATE_ARRIVAL_OPTIONS_NOT_ALLOWED'
     );
-
-    if (booking.is_walk_in) {
-        throw new AppError(
-            'Late arrival handling is not available for walk-in booking',
-            400,
-            'LATE_ARRIVAL_NOT_APPLICABLE_TO_WALK_IN'
-        );
-    }
 
     if (booking.arrival_status !== BOOKING_ARRIVAL_STATUS.LATE || !booking.arrived_at) {
         throw new AppError(
@@ -3177,6 +3245,13 @@ const startService = async (user, bookingId, { note } = {}) => {
     }
 
     const servicePackage = await getServicePackageForBooking(booking);
+
+    await assertGarageCapacityAvailable({
+        garageId: booking.garage_id,
+        vehicleType: booking.vehicle_type,
+        bookingItems: booking.booking_items || [],
+        excludedBookingId: booking._id,
+    });
 
     await assignCareStaffToBookingIfNeeded(booking);
     await assignWashBayToBookingIfNeeded(booking);

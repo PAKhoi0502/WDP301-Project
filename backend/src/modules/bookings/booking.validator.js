@@ -201,7 +201,9 @@ const createWalkInBookingSchema = z.object({
             garage_id: objectIdField,
             service_package_id: objectIdField,
             add_on_service_ids: z.array(objectIdField).default([]),
-            start_time: isoDateTimeField,
+            start_time: z.preprocess(emptyToUndefined, isoDateTimeField.optional()),
+            serve_now: z.boolean().default(false),
+            suggestion_days: z.coerce.number().int().min(1).max(7).default(1),
             guest_name: optionalTextField(120),
             guest_phone: optionalGuestPhoneField,
             guest_email: z.preprocess(
@@ -213,7 +215,24 @@ const createWalkInBookingSchema = z.object({
             promotion_code: optionalPromotionCodeField,
             note: optionalTextField(1000),
         })
-        .strict(),
+        .strict()
+        .superRefine((data, context) => {
+            if (!data.serve_now && !data.start_time) {
+                context.addIssue({
+                    code: 'custom',
+                    path: ['start_time'],
+                    message: 'start_time is required unless serve_now is true',
+                });
+            }
+
+            if (data.serve_now && data.start_time) {
+                context.addIssue({
+                    code: 'custom',
+                    path: ['start_time'],
+                    message: 'Do not provide start_time when serve_now is true',
+                });
+            }
+        }),
 });
 
 const cancelBookingSchema = z.object({

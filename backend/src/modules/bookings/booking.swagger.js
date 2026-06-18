@@ -217,7 +217,8 @@ const createCustomerBookingRequest = {
 
 const createWalkInBookingRequest = {
     type: 'object',
-    required: ['garage_id', 'service_package_id', 'start_time', 'license_plate', 'vehicle_type'],
+    required: ['garage_id', 'service_package_id', 'license_plate', 'vehicle_type'],
+    description: 'Provide start_time for a scheduled walk-in, or serve_now=true without start_time for immediate service.',
     properties: {
         garage_id: { type: 'string', example: '665f0d3d8b4f5d0012a00001' },
         service_package_id: { type: 'string', example: '665f0d3d8b4f5d0012a00003' },
@@ -227,6 +228,18 @@ const createWalkInBookingRequest = {
             example: ['665f0d3d8b4f5d0012a00004'],
         },
         start_time: { type: 'string', format: 'date-time', example: '2026-06-10T09:00:00+07:00' },
+        serve_now: {
+            type: 'boolean',
+            default: false,
+            description: 'Use the current time, bypass the slot grid, and create the booking already checked in.',
+        },
+        suggestion_days: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 7,
+            default: 1,
+            description: 'Number of days searched for suggested slots when resources are unavailable.',
+        },
         guest_name: { type: 'string', nullable: true, example: 'Guest Customer' },
         guest_phone: {
             type: 'string',
@@ -696,7 +709,7 @@ const paths = {
     '/admin/bookings/walk-in': {
         post: {
             tags: ['Admin Bookings'],
-            summary: 'Create walk-in booking',
+            summary: 'Create scheduled or immediate walk-in booking',
             security: [{ bearerAuth: [] }],
             requestBody: {
                 required: true,

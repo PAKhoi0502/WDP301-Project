@@ -306,6 +306,8 @@ const walkInCreateFields = [
     'service_package_id',
     'add_on_service_ids',
     'start_time',
+    'serve_now',
+    'suggestion_days',
     'guest_name',
     'guest_phone',
     'guest_email',
