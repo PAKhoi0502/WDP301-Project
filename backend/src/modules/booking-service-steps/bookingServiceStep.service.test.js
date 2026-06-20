@@ -156,7 +156,7 @@ describe('booking service step service', () => {
         expect(inserted.some((step) => step.step_code === 'COMBO_PARENT_STEP')).toBe(false);
         expect(inserted[0]).toMatchObject({
             workflow_type: 'PRE_SERVICE',
-            group_name: 'Pre-service',
+            group_name: 'Trước dịch vụ',
             requires_wash_bay: false,
             requires_care_staff: false,
         });
@@ -170,7 +170,7 @@ describe('booking service step service', () => {
         expect(inserted[3]).toMatchObject({
             booking_item_key: 'ITEM_3_507F1F77BCF86CD799439005',
             workflow_type: 'SERVICE',
-            group_name: 'Add-on Services',
+            group_name: 'Dịch vụ bổ sung',
             requires_wash_bay: false,
             requires_care_staff: true,
         });
@@ -180,7 +180,7 @@ describe('booking service step service', () => {
         });
         expect(inserted[4]).toMatchObject({
             workflow_type: 'POST_SERVICE',
-            group_name: 'Post-service',
+            group_name: 'Sau dịch vụ',
         });
     });
 

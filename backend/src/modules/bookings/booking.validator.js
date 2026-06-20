@@ -277,6 +277,21 @@ const bookingOperationSchema = z.object({
         .default({}),
 });
 
+const startServiceSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object({
+            note: optionalTextField(1000),
+            allow_early_start: z.boolean().default(false),
+        })
+        .strict()
+        .default({}),
+});
+
 const getLateArrivalOptionsSchema = z.object({
     params: z
         .object({
@@ -371,6 +386,7 @@ module.exports = {
     cancelBookingSchema,
     markNoShowSchema,
     bookingOperationSchema,
+    startServiceSchema,
     getLateArrivalOptionsSchema,
     resolveLateArrivalSchema,
     assignWashBaySchema,

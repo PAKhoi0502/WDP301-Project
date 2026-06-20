@@ -114,6 +114,17 @@ const getAllBookings = asyncHandler(async (req, res) => {
     });
 });
 
+const getBookingById = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+
+    const result = await bookingService.getBookingById(req.user, id);
+
+    return sendSuccess(res, {
+        message: 'Get booking successfully',
+        data: result,
+    });
+});
+
 const createWalkInBooking = asyncHandler(async (req, res) => {
     const { body } = req.validated;
 
@@ -231,6 +242,7 @@ module.exports = {
     cancelBooking,
     markNoShow,
     getAllBookings,
+    getBookingById,
     createWalkInBooking,
     checkInBooking,
     getLateArrivalOptions,

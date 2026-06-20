@@ -189,6 +189,7 @@ Admin/staff routes:
 
 ```txt
 /admin/vehicles
+/admin/customers
 /admin/service-packages
 /admin/bookings
 /admin/waitlists
@@ -305,6 +306,8 @@ The endpoint always uses the authenticated customer's verified account phone and
 Staff/Admin operations:
 
 - Get all bookings
+- Get booking detail by id
+- Search registered customers by garage
 - Check in booking
 - Assign wash bay
 - Start service
@@ -315,6 +318,21 @@ Staff/Admin operations:
 - Cancel booking
 - Mark no-show
 - Create and view vehicle inspections
+
+Staff portal lookup endpoints:
+
+```txt
+GET /api/v1/admin/bookings/:id
+GET /api/v1/admin/customers?garage_id=:garageId&search=:keyword&page=1&limit=20
+```
+
+`GET /api/v1/admin/customers` returns registered customers that have at least one non-walk-in booking at the selected garage. `garage_id` is required; Staff access is scoped to the assigned garage.
+
+Early arrivals:
+
+- `PATCH /api/v1/admin/bookings/:id/check-in` records `arrival_status=EARLY` when the customer arrives before `start_time`.
+- `PATCH /api/v1/admin/bookings/:id/start-service` still rejects early service by default.
+- Send `allow_early_start=true` to start an early checked-in booking when the shifted timeline is inside garage business hours and vehicle, wash-bay and care-staff capacity are still available.
 
 Booking statuses:
 

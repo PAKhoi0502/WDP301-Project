@@ -2424,6 +2424,16 @@ const getAllBookings = async (user, query = {}) => {
     };
 };
 
+const getBookingById = async (user, bookingId) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+
+    const populatedBooking = await getBookingDocumentById(booking._id);
+
+    return BookingMapper.toBookingDto(populatedBooking);
+};
+
 const createCustomerBooking = async (customerId, payload = {}) => {
     const now = new Date();
     const createPayload = BookingMapper.toCustomerCreatePayload(payload);
@@ -3019,7 +3029,7 @@ const getLateArrivalOptions = async (user, bookingId, { days = 1 } = {}) => {
     };
 };
 
-const applyRescheduledTimeline = ({ booking, timeline, user, resolvedAt, reason, note }) => {
+const applyShiftedTimeline = ({ booking, timeline }) => {
     if (!booking.original_start_time) {
         booking.original_start_time = booking.start_time;
     }
@@ -3041,6 +3051,15 @@ const applyRescheduledTimeline = ({ booking, timeline, user, resolvedAt, reason,
     booking.care_staff_work_end_time = timeline.care_staff_work_end_time;
     booking.care_staff_reserved_until = timeline.care_staff_reserved_until;
     booking.assigned_care_staff_ids = [];
+
+    if (typeof booking.markModified === 'function') {
+        booking.markModified('booking_items');
+    }
+};
+
+const applyRescheduledTimeline = ({ booking, timeline, user, resolvedAt, reason, note }) => {
+    applyShiftedTimeline({ booking, timeline });
+
     booking.late_resolution = BOOKING_LATE_RESOLUTION.RESCHEDULED;
     booking.late_resolution_note = normalizeText(note);
     booking.rescheduled_at = resolvedAt;
@@ -3049,10 +3068,39 @@ const applyRescheduledTimeline = ({ booking, timeline, user, resolvedAt, reason,
     booking.reschedule_count = (booking.reschedule_count || 0) + 1;
     booking.status = BOOKING_STATUS.CHECKED_IN;
     booking.checked_in_at = resolvedAt;
+};
 
-    if (typeof booking.markModified === 'function') {
-        booking.markModified('booking_items');
+const applyEarlyStartTimeline = async ({ booking, user, startedAt }) => {
+    if (booking.arrival_status !== BOOKING_ARRIVAL_STATUS.EARLY || !booking.arrived_at) {
+        throw new AppError(
+            'Booking can only start early after an early arrival check-in',
+            409,
+            'BOOKING_EARLY_START_NOT_ALLOWED'
+        );
     }
+
+    const garage = await getActiveGarage(booking.garage_id);
+    const timeline = buildShiftedBookingTimeline({
+        booking,
+        startTime: startedAt,
+    });
+
+    assertBookingInsideGarageBusinessHours(garage, timeline.start_time, getLatestPlannedEnd(timeline));
+    await assertVehicleNoOverlap({
+        vehicleId: booking.vehicle_id,
+        normalizedLicensePlate: booking.normalized_license_plate,
+        vehicleType: booking.vehicle_type,
+        startTime: timeline.start_time,
+        endTime: timeline.end_time,
+        excludedBookingId: booking._id,
+    });
+
+    applyShiftedTimeline({ booking, timeline });
+
+    booking.rescheduled_at = startedAt;
+    booking.rescheduled_by_id = user._id;
+    booking.reschedule_reason = 'CUSTOMER_EARLY_REQUEST';
+    booking.reschedule_count = (booking.reschedule_count || 0) + 1;
 };
 
 const resolveLateArrival = async (
@@ -3230,18 +3278,27 @@ const assignWashBay = async (user, bookingId, { wash_bay_id } = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
-const startService = async (user, bookingId, { note } = {}) => {
+const startService = async (user, bookingId, { note, allow_early_start = false } = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
+    const startedAt = new Date();
 
     await assertStaffCanAccessBooking(user, booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.CHECKED_IN], 'BOOKING_START_SERVICE_NOT_ALLOWED');
 
-    if (booking.start_time && new Date() < booking.start_time) {
-        throw new AppError(
-            'Booking service cannot start before its scheduled time',
-            409,
-            'BOOKING_SERVICE_START_TOO_EARLY'
-        );
+    if (booking.start_time && startedAt < booking.start_time) {
+        if (allow_early_start) {
+            await applyEarlyStartTimeline({
+                booking,
+                user,
+                startedAt,
+            });
+        } else {
+            throw new AppError(
+                'Booking service cannot start before its scheduled time',
+                409,
+                'BOOKING_SERVICE_START_TOO_EARLY'
+            );
+        }
     }
 
     const servicePackage = await getServicePackageForBooking(booking);
@@ -3257,7 +3314,7 @@ const startService = async (user, bookingId, { note } = {}) => {
     await assignWashBayToBookingIfNeeded(booking);
 
     booking.status = BOOKING_STATUS.IN_PROGRESS;
-    booking.started_at = new Date();
+    booking.started_at = startedAt;
 
     if (note !== undefined) {
         booking.note = normalizeText(note);
@@ -3395,6 +3452,7 @@ module.exports = {
     getMyBookings,
     getMyBookingById,
     getAllBookings,
+    getBookingById,
     createCustomerBooking,
     createWalkInBooking,
     cancelMyBooking,

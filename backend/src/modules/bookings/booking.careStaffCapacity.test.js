@@ -382,6 +382,77 @@ describe('booking care staff capacity', () => {
         expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
+    it('shifts the booking timeline and starts service early when allowed', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2999-01-01T06:30:00.000Z'));
+
+        const booking = {
+            _id: '507f1f77bcf86cd799439030',
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            vehicle_id: vehicleId,
+            vehicle_type: 'CAR',
+            status: 'CHECKED_IN',
+            arrival_status: 'EARLY',
+            arrived_at: new Date('2999-01-01T06:20:00.000Z'),
+            start_time: new Date('2999-01-01T07:00:00.000Z'),
+            end_time: new Date('2999-01-01T07:30:00.000Z'),
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    service_package_id: careServiceId,
+                    source: 'PRIMARY',
+                    name_snapshot: 'Interior check',
+                    sequence: 1,
+                    duration_minutes: 30,
+                    item_start_time: new Date('2999-01-01T07:00:00.000Z'),
+                    item_end_time: new Date('2999-01-01T07:30:00.000Z'),
+                    requires_wash_bay: false,
+                    requires_care_staff: false,
+                    status: 'PENDING',
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+        bookingServiceStepService.createStepsForBooking.mockResolvedValue([]);
+
+        await bookingService.startService(
+            { _id: '507f1f77bcf86cd799439035', role: 'ADMIN' },
+            booking._id,
+            {
+                allow_early_start: true,
+                note: 'Customer requested early service',
+            }
+        );
+
+        expect(booking.original_start_time.toISOString()).toBe('2999-01-01T07:00:00.000Z');
+        expect(booking.original_end_time.toISOString()).toBe('2999-01-01T07:30:00.000Z');
+        expect(booking.start_time.toISOString()).toBe('2999-01-01T06:30:00.000Z');
+        expect(booking.end_time.toISOString()).toBe('2999-01-01T07:00:00.000Z');
+        expect(booking.booking_items[0].item_start_time.toISOString()).toBe('2999-01-01T06:30:00.000Z');
+        expect(booking.booking_items[0].item_end_time.toISOString()).toBe('2999-01-01T07:00:00.000Z');
+        expect(booking.status).toBe('IN_PROGRESS');
+        expect(booking.started_at.toISOString()).toBe('2999-01-01T06:30:00.000Z');
+        expect(booking.rescheduled_by_id).toBe('507f1f77bcf86cd799439035');
+        expect(booking.reschedule_reason).toBe('CUSTOMER_EARLY_REQUEST');
+        expect(booking.reschedule_count).toBe(1);
+        expect(booking.note).toBe('Customer requested early service');
+        expect(Booking.exists).toHaveBeenCalledWith(expect.objectContaining({
+            vehicle_id: vehicleId,
+            _id: { $ne: booking._id },
+        }));
+        expect(bookingServiceStepService.createStepsForBooking).toHaveBeenCalledWith(
+            expect.objectContaining({
+                start_time: new Date('2999-01-01T06:30:00.000Z'),
+            }),
+            careStaffServicePackage
+        );
+    });
+
     it('rechecks resource capacity before starting a checked-in booking', async () => {
         const booking = {
             _id: '507f1f77bcf86cd799439096',

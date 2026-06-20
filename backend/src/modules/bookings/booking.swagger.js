@@ -412,6 +412,18 @@ const bookingOperationRequest = {
     },
 };
 
+const startServiceRequest = {
+    type: 'object',
+    properties: {
+        note: { type: 'string' },
+        allow_early_start: {
+            type: 'boolean',
+            default: false,
+            description: 'Allow a checked-in early arrival to shift the booking timeline to the current time before starting service.',
+        },
+    },
+};
+
 const assignWashBayRequest = {
     type: 'object',
     properties: {
@@ -706,6 +718,23 @@ const paths = {
             },
         },
     },
+    '/admin/bookings/{id}': {
+        get: {
+            tags: ['Admin Bookings'],
+            summary: 'Get booking detail for staff or admin',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Booking detail',
+                    content: { 'application/json': { schema: successBookingResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/bookings/walk-in': {
         post: {
             tags: ['Admin Bookings'],
@@ -770,7 +799,7 @@ const paths = {
             parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
             requestBody: {
                 required: false,
-                content: { 'application/json': { schema: bookingOperationRequest } },
+                content: { 'application/json': { schema: startServiceRequest } },
             },
             responses: {
                 200: {
@@ -1012,6 +1041,7 @@ const schemas = {
     MarkNoShowRequest: markNoShowRequest,
     ResolveLateArrivalRequest: resolveLateArrivalRequest,
     BookingOperationRequest: bookingOperationRequest,
+    StartServiceRequest: startServiceRequest,
     AssignWashBayRequest: assignWashBayRequest,
     ServiceStepDoneRequest: serviceStepDoneRequest,
 };

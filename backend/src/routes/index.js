@@ -6,6 +6,7 @@ const staffProfileRoutes = require('../modules/staff-profiles/staffProfile.route
 const garageRoutes = require('../modules/garages/garage.routes');
 const washBayRoutes = require('../modules/wash-bays/washBay.routes');
 const vehicleRoutes = require('../modules/vehicles/vehicle.routes');
+const customerRoutes = require('../modules/customers/customer.routes');
 const servicePackageRoutes = require('../modules/service-packages/servicePackage.routes');
 const bookingRoutes = require('../modules/bookings/booking.routes');
 const bookingWaitlistRoutes = require('../modules/booking-waitlists/bookingWaitlist.routes');
@@ -45,6 +46,7 @@ router.use('/wash-histories', washHistoryRoutes.customerRouter);
 router.use('/payments', paymentRoutes.publicRouter);
 router.use('/uploads', uploadRoutes.publicRouter);
 router.use('/surveys', surveyRoutes.customerRouter);
+router.use('/admin/customers', customerRoutes.adminRouter);
 router.use('/admin/vehicles', vehicleRoutes.adminRouter);
 router.use('/admin/service-packages', servicePackageRoutes.adminRouter);
 router.use('/admin/bookings', bookingRoutes.adminRouter);

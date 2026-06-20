@@ -6,6 +6,7 @@ const staffProfileSwagger = require('../../modules/staff-profiles/staffProfile.s
 const garageSwagger = require('../../modules/garages/garage.swagger');
 const washBaySwagger = require('../../modules/wash-bays/washBay.swagger');
 const vehicleSwagger = require('../../modules/vehicles/vehicle.swagger');
+const customerSwagger = require('../../modules/customers/customer.swagger');
 const servicePackageSwagger = require('../../modules/service-packages/servicePackage.swagger');
 const bookingSwagger = require('../../modules/bookings/booking.swagger');
 const bookingWaitlistSwagger = require('../../modules/booking-waitlists/bookingWaitlist.swagger');
@@ -42,6 +43,7 @@ const openApiSpec = {
         ...garageSwagger.tags,
         ...washBaySwagger.tags,
         ...vehicleSwagger.tags,
+        ...customerSwagger.tags,
         ...servicePackageSwagger.tags,
         ...bookingSwagger.tags,
         ...bookingWaitlistSwagger.tags,
@@ -69,6 +71,7 @@ const openApiSpec = {
             ...garageSwagger.schemas,
             ...washBaySwagger.schemas,
             ...vehicleSwagger.schemas,
+            ...customerSwagger.schemas,
             ...servicePackageSwagger.schemas,
             ...bookingSwagger.schemas,
             ...bookingWaitlistSwagger.schemas,

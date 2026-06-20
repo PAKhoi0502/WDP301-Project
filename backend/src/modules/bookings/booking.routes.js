@@ -13,6 +13,7 @@ const {
     cancelBookingSchema,
     markNoShowSchema,
     bookingOperationSchema,
+    startServiceSchema,
     getLateArrivalOptionsSchema,
     resolveLateArrivalSchema,
     assignWashBaySchema,
@@ -82,6 +83,12 @@ adminRouter.post(
     bookingController.createWalkInBooking
 );
 
+adminRouter.get(
+    '/:id',
+    validate(idParamSchema),
+    bookingController.getBookingById
+);
+
 adminRouter.patch(
     '/:id/cancel',
     validate(cancelBookingSchema),
@@ -120,7 +127,7 @@ adminRouter.patch(
 
 adminRouter.patch(
     '/:id/start-service',
-    validate(bookingOperationSchema),
+    validate(startServiceSchema),
     bookingController.startService
 );
 
