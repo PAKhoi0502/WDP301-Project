@@ -314,6 +314,7 @@ Staff/Admin operations:
 - View service steps
 - Mark service step done
 - Complete service
+- Reopen completed service by admin when unpaid and reward is not processed
 - Mark booking paid by cash
 - Cancel booking
 - Mark no-show
@@ -409,6 +410,22 @@ Rules:
 - Not allowed when booking is `PAID`.
 - Not allowed when booking has pending PayOS payment.
 - Stores `no_show_at`, `no_show_by_id`, `no_show_reason`.
+
+## Admin Reopen Completed Service
+
+Endpoint:
+
+```txt
+PATCH /api/v1/admin/bookings/:id/reopen-service
+```
+
+Rules:
+
+- Admin only.
+- Allowed only when booking is `COMPLETED`.
+- Allowed only when `payment_status=UNPAID`, `reward_processed=false`, and `paid_at=null`.
+- Moves booking back to `IN_PROGRESS` and clears `completed_at`.
+- Reclaims the released WashBay when the booking uses one.
 
 ## Waitlist
 

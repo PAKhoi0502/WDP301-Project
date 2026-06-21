@@ -208,4 +208,29 @@ describe('booking service step service', () => {
             }
         );
     });
+
+    it('clears item resource release timestamp for a reopened booking item', async () => {
+        const bookingId = '507f1f77bcf86cd799439001';
+        const bookingItemKey = 'ITEM_1_507F1F77BCF86CD799439003';
+        const releasedAt = new Date('2999-01-01T06:30:00.000Z');
+
+        await bookingServiceStepService.clearResourceReleasedForBookingItem(
+            bookingId,
+            bookingItemKey,
+            releasedAt
+        );
+
+        expect(BookingServiceStep.updateMany).toHaveBeenCalledWith(
+            {
+                booking_id: bookingId,
+                booking_item_key: bookingItemKey,
+                resource_released_at: releasedAt,
+            },
+            {
+                $set: {
+                    resource_released_at: null,
+                },
+            }
+        );
+    });
 });

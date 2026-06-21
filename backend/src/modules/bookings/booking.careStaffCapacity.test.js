@@ -214,6 +214,7 @@ describe('booking care staff capacity', () => {
         bookingServiceStepService.createStepsForBooking = jest.fn();
         bookingServiceStepService.areAllRequiredStepsDoneForBookingItem = jest.fn();
         bookingServiceStepService.markResourceReleasedForBookingItem = jest.fn();
+        bookingServiceStepService.clearResourceReleasedForBookingItem = jest.fn();
         bookingServiceStepService.assertAllRequiredStepsDone = jest.fn();
         Vehicle.findOne.mockResolvedValue({
             _id: vehicleId,
@@ -2005,5 +2006,131 @@ describe('booking care staff capacity', () => {
             'ITEM_1_507F1F77BCF86CD799439016',
             booking.completed_at
         );
+    });
+
+    it('reopens completed unpaid booking as admin', async () => {
+        const bookingId = '507f1f77bcf86cd799439019';
+        const washBayId = '507f1f77bcf86cd799439022';
+        const completedAt = new Date('2999-01-01T07:30:00.000Z');
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'COMPLETED',
+            payment_status: 'UNPAID',
+            reward_processed: false,
+            paid_at: null,
+            completed_at: completedAt,
+            requires_wash_bay: true,
+            wash_bay_id: washBayId,
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    requires_care_staff: true,
+                    care_staff_type: 'VEHICLE_CARE_STAFF',
+                    status: 'IN_PROGRESS',
+                    assigned_care_staff: [
+                        {
+                            staff_profile_id: '507f1f77bcf86cd799439031',
+                            user_id: '507f1f77bcf86cd799439032',
+                            assigned_at: new Date('2999-01-01T06:00:00.000Z'),
+                            released_at: completedAt,
+                        },
+                    ],
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+        Booking.aggregate.mockResolvedValue([]);
+        WashBay.findOneAndUpdate.mockResolvedValue({ _id: washBayId });
+
+        await bookingService.reopenCompletedBooking(
+            { _id: '507f1f77bcf86cd799439021', role: 'ADMIN' },
+            bookingId,
+            { note: 'Service was not actually completed' }
+        );
+
+        expect(WashBay.findOneAndUpdate).toHaveBeenCalledWith(
+            {
+                _id: washBayId,
+                status: 'AVAILABLE',
+                current_booking_id: null,
+                is_active: true,
+            },
+            {
+                status: 'OCCUPIED',
+                current_booking_id: booking._id,
+            },
+            {
+                new: true,
+            }
+        );
+        expect(booking.status).toBe('IN_PROGRESS');
+        expect(booking.completed_at).toBeNull();
+        expect(booking.note).toBe('Service was not actually completed');
+        expect(booking.booking_items[0].assigned_care_staff[0].released_at).toBeNull();
+        expect(booking.markModified).toHaveBeenCalledWith('booking_items');
+        expect(bookingServiceStepService.clearResourceReleasedForBookingItem).toHaveBeenCalledWith(
+            booking._id,
+            'ITEM_1_507F1F77BCF86CD799439016',
+            completedAt
+        );
+    });
+
+    it('rejects reopening completed booking unless it is unpaid and unrewarded', async () => {
+        const adminUser = { _id: '507f1f77bcf86cd799439021', role: 'ADMIN' };
+        const bookingId = '507f1f77bcf86cd799439019';
+        const baseBooking = {
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'COMPLETED',
+            payment_status: 'UNPAID',
+            reward_processed: false,
+            paid_at: null,
+            completed_at: new Date('2999-01-01T07:30:00.000Z'),
+        };
+
+        const cases = [
+            {
+                booking: { ...baseBooking, payment_status: 'PENDING' },
+                errorCode: 'BOOKING_REOPEN_PAYMENT_NOT_ALLOWED',
+            },
+            {
+                booking: { ...baseBooking, reward_processed: true },
+                errorCode: 'BOOKING_REOPEN_REWARD_PROCESSED',
+            },
+            {
+                booking: { ...baseBooking, paid_at: new Date('2999-01-01T07:35:00.000Z') },
+                errorCode: 'BOOKING_REOPEN_PAID_AT_EXISTS',
+            },
+        ];
+
+        for (const testCase of cases) {
+            Booking.findById.mockResolvedValueOnce(testCase.booking);
+
+            await expect(
+                bookingService.reopenCompletedBooking(adminUser, bookingId, {})
+            ).rejects.toMatchObject({
+                statusCode: 409,
+                errorCode: testCase.errorCode,
+            });
+        }
+    });
+
+    it('rejects reopening completed booking by staff', async () => {
+        await expect(
+            bookingService.reopenCompletedBooking(
+                { _id: '507f1f77bcf86cd799439021', role: 'STAFF' },
+                '507f1f77bcf86cd799439019',
+                {}
+            )
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            errorCode: 'BOOKING_REOPEN_ADMIN_ONLY',
+        });
     });
 });

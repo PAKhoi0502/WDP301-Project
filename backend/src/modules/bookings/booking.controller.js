@@ -233,6 +233,18 @@ const completeService = asyncHandler(async (req, res) => {
     });
 });
 
+const reopenCompletedBooking = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const { body } = req.validated;
+
+    const result = await bookingService.reopenCompletedBooking(req.user, id, body || {});
+
+    return sendSuccess(res, {
+        message: 'Reopen completed booking successfully',
+        data: result,
+    });
+});
+
 module.exports = {
     getAvailableSlots,
     getMyBookings,
@@ -250,5 +262,6 @@ module.exports = {
     assignWashBay,
     startService,
     completeService,
+    reopenCompletedBooking,
     markPaid,
 };

@@ -348,6 +348,32 @@ const markResourceReleasedForBookingItem = async (bookingId, bookingItemKey, rel
     );
 };
 
+const clearResourceReleasedForBookingItem = async (bookingId, bookingItemKey, releasedAt = null) => {
+    if (!bookingItemKey) {
+        return;
+    }
+
+    const filter = {
+        booking_id: bookingId,
+        booking_item_key: bookingItemKey,
+    };
+
+    if (releasedAt) {
+        filter.resource_released_at = releasedAt;
+    } else {
+        filter.resource_released_at = { $ne: null };
+    }
+
+    await BookingServiceStep.updateMany(
+        filter,
+        {
+            $set: {
+                resource_released_at: null,
+            },
+        }
+    );
+};
+
 module.exports = {
     getStepsByBookingId,
     countStepsByBookingId,
@@ -357,4 +383,5 @@ module.exports = {
     assertAllRequiredStepsDone,
     areAllRequiredStepsDoneForBookingItem,
     markResourceReleasedForBookingItem,
+    clearResourceReleasedForBookingItem,
 };

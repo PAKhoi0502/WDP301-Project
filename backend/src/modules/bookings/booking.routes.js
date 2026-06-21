@@ -149,6 +149,12 @@ adminRouter.patch(
     bookingController.completeService
 );
 
+adminRouter.patch(
+    '/:id/reopen-service',
+    authorize(USER_ROLES.ADMIN),
+    validate(bookingOperationSchema),
+    bookingController.reopenCompletedBooking
+);
 
 adminRouter.patch(
     '/:id/mark-paid',

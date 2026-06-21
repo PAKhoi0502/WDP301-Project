@@ -1734,7 +1734,55 @@ const releaseWashBayForBooking = async (booking) => {
 
 };
 
+const reclaimReleasedWashBayForBooking = async (booking) => {
+    if (!booking.requires_wash_bay) {
+        return null;
+    }
+
+    if (!booking.wash_bay_id) {
+        throw new AppError(
+            'Booking wash bay is missing and cannot be reopened',
+            409,
+            'BOOKING_REOPEN_WASH_BAY_MISSING'
+        );
+    }
+
+    const washBay = await WashBay.findOneAndUpdate(
+        {
+            _id: booking.wash_bay_id,
+            status: WASH_BAY_STATUS.AVAILABLE,
+            current_booking_id: null,
+            is_active: true,
+        },
+        {
+            status: WASH_BAY_STATUS.OCCUPIED,
+            current_booking_id: booking._id,
+        },
+        {
+            new: true,
+        }
+    );
+
+    if (!washBay) {
+        throw new AppError(
+            'Assigned wash bay is not available for reopening',
+            409,
+            'BOOKING_REOPEN_WASH_BAY_UNAVAILABLE'
+        );
+    }
+
+    return washBay;
+};
+
 const normalizeBookingItemKey = (value) => normalizeText(value)?.toUpperCase() || null;
+
+const isSameDateTime = (left, right) => {
+    if (!left || !right) {
+        return false;
+    }
+
+    return new Date(left).getTime() === new Date(right).getTime();
+};
 
 const getCareStaffAssignmentStaffProfileId = (assignment) => {
     return assignment?.staff_profile_id?._id || assignment?.staff_profile_id || null;
@@ -1836,6 +1884,62 @@ const releaseActiveCareStaffAssignmentsForBooking = (booking, releasedAt) => {
     }
 
     return releasedBookingItemKeys;
+};
+
+const restoreCareStaffAssignmentsReleasedAt = async (booking, releasedAt) => {
+    const restoredBookingItemKeys = [];
+    const busyCareStaffByType = new Map();
+
+    for (const bookingItem of booking.booking_items || []) {
+        let restored = false;
+        const careStaffType = bookingItem.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF;
+
+        for (const assignment of bookingItem.assigned_care_staff || []) {
+            if (!isSameDateTime(assignment.released_at, releasedAt)) {
+                continue;
+            }
+
+            const staffProfileId = toObjectIdString(getCareStaffAssignmentStaffProfileId(assignment));
+
+            if (staffProfileId) {
+                if (!busyCareStaffByType.has(careStaffType)) {
+                    busyCareStaffByType.set(
+                        careStaffType,
+                        await getActiveAssignedCareStaffProfileIds(booking.garage_id, careStaffType, booking._id)
+                    );
+                }
+
+                if (busyCareStaffByType.get(careStaffType).has(staffProfileId)) {
+                    throw new AppError(
+                        'Assigned care staff is not available for reopening',
+                        409,
+                        'BOOKING_REOPEN_CARE_STAFF_UNAVAILABLE'
+                    );
+                }
+            }
+
+            assignment.released_at = null;
+            restored = true;
+        }
+
+        if (restored) {
+            const bookingItemKey = normalizeBookingItemKey(bookingItem.item_key);
+
+            if (bookingItemKey) {
+                restoredBookingItemKeys.push(bookingItemKey);
+            }
+        }
+    }
+
+    if (restoredBookingItemKeys.length > 0) {
+        if (typeof booking.markModified === 'function') {
+            booking.markModified('booking_items');
+        }
+
+        syncAssignedCareStaffIds(booking);
+    }
+
+    return restoredBookingItemKeys;
 };
 
 const assignCareStaffToBookingIfNeeded = async (booking) => {
@@ -3447,6 +3551,71 @@ const completeService = async (user, bookingId, { note } = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
+const reopenCompletedBooking = async (user, bookingId, { note } = {}) => {
+    if (user.role !== USER_ROLES.ADMIN) {
+        throw new AppError(
+            'Only admin can reopen completed booking',
+            403,
+            'BOOKING_REOPEN_ADMIN_ONLY'
+        );
+    }
+
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+    assertBookingStatusIn(booking, [BOOKING_STATUS.COMPLETED], 'BOOKING_REOPEN_NOT_ALLOWED');
+
+    if (booking.payment_status !== BOOKING_PAYMENT_STATUS.UNPAID) {
+        throw new AppError(
+            'Only unpaid completed booking can be reopened',
+            409,
+            'BOOKING_REOPEN_PAYMENT_NOT_ALLOWED'
+        );
+    }
+
+    if (booking.reward_processed) {
+        throw new AppError(
+            'Reward processed booking cannot be reopened',
+            409,
+            'BOOKING_REOPEN_REWARD_PROCESSED'
+        );
+    }
+
+    if (booking.paid_at) {
+        throw new AppError(
+            'Paid booking cannot be reopened',
+            409,
+            'BOOKING_REOPEN_PAID_AT_EXISTS'
+        );
+    }
+
+    const completedAt = booking.completed_at;
+    const restoredBookingItemKeys = await restoreCareStaffAssignmentsReleasedAt(booking, completedAt);
+
+    await reclaimReleasedWashBayForBooking(booking);
+
+    booking.status = BOOKING_STATUS.IN_PROGRESS;
+    booking.completed_at = null;
+
+    if (note !== undefined) {
+        booking.note = normalizeText(note);
+    }
+
+    await booking.save();
+
+    for (const bookingItemKey of restoredBookingItemKeys) {
+        await bookingServiceStepService.clearResourceReleasedForBookingItem(
+            booking._id,
+            bookingItemKey,
+            completedAt
+        );
+    }
+
+    const populatedBooking = await getBookingDocumentById(booking._id);
+
+    return BookingMapper.toBookingDto(populatedBooking);
+};
+
 module.exports = {
     getAvailableSlots,
     getMyBookings,
@@ -3466,5 +3635,6 @@ module.exports = {
     getBookingServiceSteps,
     markBookingServiceStepDone,
     completeService,
+    reopenCompletedBooking,
     markPaid,
 };

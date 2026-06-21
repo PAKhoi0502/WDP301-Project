@@ -953,6 +953,26 @@ const paths = {
         },
     },
 
+    '/admin/bookings/{id}/reopen-service': {
+        patch: {
+            tags: ['Admin Bookings'],
+            summary: 'Reopen completed unpaid booking service',
+            security: [{ bearerAuth: [] }],
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            requestBody: {
+                required: false,
+                content: { 'application/json': { schema: bookingOperationRequest } },
+            },
+            responses: {
+                200: {
+                    description: 'Booking reopened',
+                    content: { 'application/json': { schema: successBookingResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+
     '/admin/bookings/{id}/mark-paid': {
         patch: {
             tags: ['Admin Bookings'],
