@@ -8,7 +8,12 @@ jest.mock('./washHistory.model', () => ({
     create: jest.fn(),
 }));
 
+jest.mock('../staff-profiles/staffProfile.model', () => ({
+    findOne: jest.fn(),
+}));
+
 const WashHistory = require('./washHistory.model');
+const StaffProfile = require('../staff-profiles/staffProfile.model');
 const WashHistoryService = require('./washHistory.service');
 const WashHistoryMapper = require('./washHistory.mapper');
 const {
@@ -34,8 +39,10 @@ describe('wash history module', () => {
     const washHistoryId = new mongoose.Types.ObjectId();
     const bookingId = new mongoose.Types.ObjectId();
     const customerId = new mongoose.Types.ObjectId();
+    const staffId = new mongoose.Types.ObjectId();
     const vehicleId = new mongoose.Types.ObjectId();
     const garageId = new mongoose.Types.ObjectId();
+    const otherGarageId = new mongoose.Types.ObjectId();
     const washBayId = new mongoose.Types.ObjectId();
     const servicePackageId = new mongoose.Types.ObjectId();
     const paidAt = new Date('2026-06-06T10:00:00+07:00');
@@ -112,6 +119,11 @@ describe('wash history module', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        StaffProfile.findOne.mockResolvedValue({
+            user_id: staffId,
+            garage_id: garageId,
+            is_active: true,
+        });
     });
 
     it('validates customer wash history query filters', () => {
@@ -230,6 +242,86 @@ describe('wash history module', () => {
             customer_id: customerId,
         });
         expect(result.id).toBe(washHistoryId.toString());
+    });
+
+    it('gets staff wash histories scoped to assigned garage', async () => {
+        const query = createQueryMock([washHistoryDocument]);
+
+        WashHistory.find.mockReturnValue(query);
+        WashHistory.countDocuments.mockResolvedValue(1);
+
+        const result = await WashHistoryService.getAllWashHistories(
+            { _id: staffId, role: 'STAFF' },
+            {
+                page: 1,
+                limit: 20,
+                garage_id: garageId.toString(),
+                vehicle_type: 'MOTORBIKE',
+            }
+        );
+
+        expect(StaffProfile.findOne).toHaveBeenCalledWith({
+            user_id: staffId,
+            is_active: true,
+        });
+        expect(WashHistory.find).toHaveBeenCalledWith({
+            garage_id: garageId,
+            vehicle_type: 'MOTORBIKE',
+        });
+        expect(WashHistory.countDocuments).toHaveBeenCalledWith({
+            garage_id: garageId,
+            vehicle_type: 'MOTORBIKE',
+        });
+        expect(result.data[0].id).toBe(washHistoryId.toString());
+    });
+
+    it('rejects staff wash history list outside assigned garage', async () => {
+        await expect(
+            WashHistoryService.getAllWashHistories(
+                { _id: staffId, role: 'STAFF' },
+                {
+                    garage_id: otherGarageId.toString(),
+                }
+            )
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            errorCode: 'STAFF_GARAGE_ACCESS_DENIED',
+        });
+    });
+
+    it('gets staff wash history detail only in assigned garage', async () => {
+        const query = createQueryMock(washHistoryDocument);
+
+        WashHistory.findOne.mockReturnValue(query);
+
+        const result = await WashHistoryService.getWashHistoryById(
+            { _id: staffId, role: 'STAFF' },
+            washHistoryId
+        );
+
+        expect(WashHistory.findOne).toHaveBeenCalledWith({
+            _id: washHistoryId,
+            garage_id: garageId,
+        });
+        expect(result.id).toBe(washHistoryId.toString());
+    });
+
+    it('rejects staff wash histories when staff has no assigned garage', async () => {
+        StaffProfile.findOne.mockResolvedValueOnce({
+            user_id: staffId,
+            garage_id: null,
+            is_active: true,
+        });
+
+        await expect(
+            WashHistoryService.getAllWashHistories(
+                { _id: staffId, role: 'STAFF' },
+                {}
+            )
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            errorCode: 'STAFF_GARAGE_NOT_ASSIGNED',
+        });
     });
 
     it('throws when customer wash history is not found', async () => {

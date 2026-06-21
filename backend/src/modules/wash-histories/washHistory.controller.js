@@ -42,7 +42,7 @@ const claimMyWalkInHistories = asyncHandler(async (req, res) => {
 const getAllWashHistories = asyncHandler(async (req, res) => {
     const { query } = req.validated;
 
-    const result = await washHistoryService.getAllWashHistories(query);
+    const result = await washHistoryService.getAllWashHistories(req.user, query);
 
     return sendSuccess(res, {
         message: 'Get wash histories successfully',
@@ -54,7 +54,7 @@ const getAllWashHistories = asyncHandler(async (req, res) => {
 const getWashHistoryById = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
 
-    const result = await washHistoryService.getWashHistoryById(id);
+    const result = await washHistoryService.getWashHistoryById(req.user, id);
 
     return sendSuccess(res, {
         message: 'Get wash history successfully',

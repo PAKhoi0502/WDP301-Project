@@ -5,7 +5,7 @@ const tags = [
     },
     {
         name: 'Admin Wash Histories',
-        description: 'Admin wash history APIs',
+        description: 'Staff and admin wash history APIs',
     },
 ];
 
@@ -253,7 +253,7 @@ const paths = {
     '/admin/wash-histories': {
         get: {
             tags: ['Admin Wash Histories'],
-            summary: 'Get wash histories for admin',
+            summary: 'Get wash histories for staff or admin',
             security: [{ bearerAuth: [] }],
             parameters: [
                 ...commonFilterParameters,
@@ -275,7 +275,7 @@ const paths = {
     '/admin/wash-histories/{id}': {
         get: {
             tags: ['Admin Wash Histories'],
-            summary: 'Get wash history detail for admin',
+            summary: 'Get wash history detail for staff or admin',
             security: [{ bearerAuth: [] }],
             parameters: [
                 { name: 'id', in: 'path', required: true, schema: { type: 'string' } },

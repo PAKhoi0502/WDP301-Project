@@ -1,6 +1,8 @@
 const WashHistory = require('./washHistory.model');
+const StaffProfile = require('../staff-profiles/staffProfile.model');
 const WashHistoryMapper = require('./washHistory.mapper');
 const { AppError } = require('../../shared/utils/appError');
+const { USER_ROLES } = require('../../shared/constants/roles.constant');
 
 const buildDateRangeFilter = ({ from, to } = {}) => {
     if (!from && !to) {
@@ -71,6 +73,55 @@ const getWashHistoryDocumentById = async (washHistoryId) => {
     return washHistory;
 };
 
+const getActiveStaffProfile = async (staffUserId) => {
+    const staffProfile = await StaffProfile.findOne({
+        user_id: staffUserId,
+        is_active: true,
+    });
+
+    if (!staffProfile) {
+        throw new AppError('Staff profile not found', 403, 'STAFF_PROFILE_NOT_FOUND');
+    }
+
+    return staffProfile;
+};
+
+const getAdminGarageFilter = async (user, requestedGarageId) => {
+    if (!user || user.role === USER_ROLES.ADMIN) {
+        return requestedGarageId || undefined;
+    }
+
+    const staffProfile = await getActiveStaffProfile(user._id);
+
+    if (!staffProfile.garage_id) {
+        throw new AppError('Staff is not assigned to any garage', 403, 'STAFF_GARAGE_NOT_ASSIGNED');
+    }
+
+    if (requestedGarageId && staffProfile.garage_id.toString() !== requestedGarageId.toString()) {
+        throw new AppError('Staff cannot access wash histories outside assigned garage', 403, 'STAFF_GARAGE_ACCESS_DENIED');
+    }
+
+    return staffProfile.garage_id;
+};
+
+const getAdminWashHistoryDocumentById = async (user, washHistoryId) => {
+    if (!user || user.role === USER_ROLES.ADMIN) {
+        return getWashHistoryDocumentById(washHistoryId);
+    }
+
+    const garageId = await getAdminGarageFilter(user);
+    const washHistory = await populateWashHistoryQuery(WashHistory.findOne({
+        _id: washHistoryId,
+        garage_id: garageId,
+    }));
+
+    if (!washHistory) {
+        throw new AppError('Wash history not found', 404, 'WASH_HISTORY_NOT_FOUND');
+    }
+
+    return washHistory;
+};
+
 const getMyWashHistories = async (customerId, { page = 1, limit = 20, vehicle_id, garage_id, service_package_id, vehicle_type, from, to } = {}) => {
     const filter = buildWashHistoryFilter({
         customer_id: customerId,
@@ -115,7 +166,12 @@ const getMyWashHistoryById = async (customerId, washHistoryId) => {
     return WashHistoryMapper.toWashHistoryDto(washHistory);
 };
 
-const getAllWashHistories = async ({ page = 1, limit = 20, customer_id, vehicle_id, garage_id, service_package_id, vehicle_type, from, to } = {}) => {
+const getAllWashHistories = async (userOrQuery = {}, queryArg = null) => {
+    const hasUserContext = userOrQuery && userOrQuery.role;
+    const user = hasUserContext ? userOrQuery : null;
+    const query = hasUserContext ? queryArg || {} : userOrQuery || {};
+    const { page = 1, limit = 20, customer_id, vehicle_id, service_package_id, vehicle_type, from, to } = query;
+    const garage_id = await getAdminGarageFilter(user, query.garage_id);
     const filter = buildWashHistoryFilter({
         customer_id,
         vehicle_id,
@@ -146,8 +202,11 @@ const getAllWashHistories = async ({ page = 1, limit = 20, customer_id, vehicle_
     };
 };
 
-const getWashHistoryById = async (washHistoryId) => {
-    const washHistory = await getWashHistoryDocumentById(washHistoryId);
+const getWashHistoryById = async (userOrWashHistoryId, washHistoryIdArg = null) => {
+    const hasUserContext = userOrWashHistoryId && userOrWashHistoryId.role;
+    const user = hasUserContext ? userOrWashHistoryId : null;
+    const washHistoryId = hasUserContext ? washHistoryIdArg : userOrWashHistoryId;
+    const washHistory = await getAdminWashHistoryDocumentById(user, washHistoryId);
 
     return WashHistoryMapper.toWashHistoryDto(washHistory);
 };

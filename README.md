@@ -318,6 +318,7 @@ Staff/Admin operations:
 - Mark booking paid by cash
 - Cancel booking
 - Mark no-show
+- View wash histories scoped to assigned garage
 - Create and view vehicle inspections
 
 Staff portal lookup endpoints:
@@ -325,9 +326,12 @@ Staff portal lookup endpoints:
 ```txt
 GET /api/v1/admin/bookings/:id
 GET /api/v1/admin/customers?garage_id=:garageId&search=:keyword&page=1&limit=20
+GET /api/v1/admin/wash-histories?page=1&limit=20
+GET /api/v1/admin/wash-histories/:id
 ```
 
 `GET /api/v1/admin/customers` returns registered customers that have at least one non-walk-in booking at the selected garage. `garage_id` is required; Staff access is scoped to the assigned garage.
+`GET /api/v1/admin/wash-histories` returns all histories for Admin, while Staff access is scoped to the assigned garage.
 
 Early arrivals:
 

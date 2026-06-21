@@ -14,7 +14,7 @@ const customerRouter = express.Router();
 const adminRouter = express.Router();
 
 customerRouter.use(authenticate, authorize(USER_ROLES.CUSTOMER));
-adminRouter.use(authenticate, authorize(USER_ROLES.ADMIN));
+adminRouter.use(authenticate, authorize(USER_ROLES.STAFF, USER_ROLES.ADMIN));
 
 customerRouter.get(
     '/',
