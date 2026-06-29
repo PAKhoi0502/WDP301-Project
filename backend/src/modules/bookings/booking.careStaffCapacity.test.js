@@ -49,6 +49,11 @@ jest.mock('../loyalty/loyalty.service', () => ({
     redeemPointsForBooking: jest.fn(),
     refundRedeemedPointsForBooking: jest.fn(),
 }));
+jest.mock('../booking-violations/bookingViolation.service', () => ({
+    assertCustomerCanCreateBooking: jest.fn(),
+    recordLateCancelIfNeeded: jest.fn(),
+    recordNoShow: jest.fn(),
+}));
 
 const Booking = require('./booking.model');
 const Vehicle = require('../vehicles/vehicle.model');
@@ -62,6 +67,7 @@ const promotionService = require('../promotions/promotion.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
 const loyaltyService = require('../loyalty/loyalty.service');
+const bookingViolationService = require('../booking-violations/bookingViolation.service');
 const bookingService = require('./booking.service');
 
 const createFindSortLeanQuery = (result = []) => ({
@@ -234,6 +240,9 @@ describe('booking care staff capacity', () => {
         });
         loyaltyService.redeemPointsForBooking.mockResolvedValue(null);
         loyaltyService.refundRedeemedPointsForBooking.mockResolvedValue(null);
+        bookingViolationService.assertCustomerCanCreateBooking.mockResolvedValue({ allowed: true });
+        bookingViolationService.recordLateCancelIfNeeded.mockResolvedValue(null);
+        bookingViolationService.recordNoShow.mockResolvedValue(null);
         CustomerLoyalty.findOne.mockReturnValue({
             select: jest.fn().mockReturnValue({
                 lean: jest.fn().mockResolvedValue(null),
@@ -702,6 +711,8 @@ describe('booking care staff capacity', () => {
         expect(booking.save).toHaveBeenCalledTimes(1);
         expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
         expect(bookingServiceStepService.markResourceReleasedForBookingItem).not.toHaveBeenCalled();
+        expect(bookingViolationService.recordLateCancelIfNeeded).not.toHaveBeenCalled();
+        expect(bookingViolationService.recordNoShow).not.toHaveBeenCalled();
         expect(result.status).toBe('CANCELED');
     });
 
@@ -820,6 +831,12 @@ describe('booking care staff capacity', () => {
         expect(booking.save).toHaveBeenCalledTimes(1);
         expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
         expect(bookingServiceStepService.markResourceReleasedForBookingItem).not.toHaveBeenCalled();
+        expect(bookingViolationService.recordNoShow).toHaveBeenCalledWith({
+            booking,
+            reason: 'Customer did not arrive',
+            actorId: adminUser._id,
+            noShowAt: booking.no_show_at,
+        });
         expect(result.status).toBe('NO_SHOW');
     });
 
@@ -1187,6 +1204,28 @@ describe('booking care staff capacity', () => {
             errorCode: 'BOOKING_START_TIME_IN_PAST',
         });
 
+        expect(Booking.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects customer booking while customer is temporarily blocked', async () => {
+        const blockError = Object.assign(new Error('Customer is temporarily blocked from creating bookings'), {
+            statusCode: 403,
+            errorCode: 'CUSTOMER_BOOKING_BLOCKED',
+        });
+
+        bookingViolationService.assertCustomerCanCreateBooking.mockRejectedValue(blockError);
+
+        await expect(bookingService.createCustomerBooking(customerId, {
+            garage_id: garageId,
+            vehicle_id: vehicleId,
+            service_package_id: servicePackageId,
+            start_time: '2999-01-01T08:00:00+07:00',
+        })).rejects.toMatchObject({
+            statusCode: 403,
+            errorCode: 'CUSTOMER_BOOKING_BLOCKED',
+        });
+
+        expect(Garage.findById).not.toHaveBeenCalled();
         expect(Booking.create).not.toHaveBeenCalled();
     });
 

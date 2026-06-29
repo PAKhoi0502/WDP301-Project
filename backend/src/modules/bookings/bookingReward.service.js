@@ -3,6 +3,7 @@ const loyaltyService = require('../loyalty/loyalty.service');
 const washHistoryService = require('../wash-histories/washHistory.service');
 const promotionUsageService = require('../promotion-usages/promotionUsage.service');
 const notificationService = require('../notifications/notification.service');
+const bookingViolationService = require('../booking-violations/bookingViolation.service');
 const { AppError } = require('../../shared/utils/appError');
 
 const getServicePackage = async (servicePackageId, session = null) => {
@@ -51,6 +52,11 @@ const processCompletedPaidBooking = async ({ booking, actorId, session = null })
     });
 
     const promotionUsage = await promotionUsageService.createPromotionUsageFromBooking({
+        booking,
+        actorId,
+        session,
+    });
+    await bookingViolationService.recordCompletedPaidBooking({
         booking,
         actorId,
         session,

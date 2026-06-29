@@ -14,6 +14,7 @@ const auditLogService = require('../audit-logs/auditLog.service');
 const promotionService = require('../promotions/promotion.service');
 const promotionUsageService = require('../promotion-usages/promotionUsage.service');
 const loyaltyService = require('../loyalty/loyalty.service');
+const bookingViolationService = require('../booking-violations/bookingViolation.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
 const { LOYALTY_TIERS } = require('../../shared/constants/loyalty.constant');
@@ -2541,6 +2542,8 @@ const getBookingById = async (user, bookingId) => {
 const createCustomerBooking = async (customerId, payload = {}) => {
     const now = new Date();
     const createPayload = BookingMapper.toCustomerCreatePayload(payload);
+    await bookingViolationService.assertCustomerCanCreateBooking(customerId, now);
+
     const [garage, servicePackage, vehicle, bookingRule] = await Promise.all([
         getActiveGarage(createPayload.garage_id),
         getActiveServicePackage(createPayload.service_package_id),
@@ -2881,8 +2884,10 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
         throw new AppError('Booking cannot be canceled in current status', 400, 'BOOKING_NOT_CANCELABLE');
     }
 
+    const canceledAt = new Date();
+
     booking.status = BOOKING_STATUS.CANCELED;
-    booking.canceled_at = new Date();
+    booking.canceled_at = canceledAt;
     booking.canceled_by_id = customerId;
     booking.cancel_reason = normalizeText(reason);
 
@@ -2890,6 +2895,12 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
     await loyaltyService.refundRedeemedPointsForBooking({
         booking,
         actorId: customerId,
+    });
+    await bookingViolationService.recordLateCancelIfNeeded({
+        booking,
+        reason: booking.cancel_reason,
+        actorId: customerId,
+        canceledAt,
     });
 
     const populatedBooking = await getBookingDocumentById(booking._id);
@@ -3014,6 +3025,12 @@ const markNoShow = async (user, bookingId, { reason } = {}) => {
     await loyaltyService.refundRedeemedPointsForBooking({
         booking,
         actorId: user._id,
+    });
+    await bookingViolationService.recordNoShow({
+        booking,
+        reason: booking.no_show_reason,
+        actorId: user._id,
+        noShowAt,
     });
 
     for (const bookingItemKey of releasedBookingItemKeys) {
