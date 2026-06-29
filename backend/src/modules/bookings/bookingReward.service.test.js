@@ -1,5 +1,6 @@
 jest.mock('../service-packages/servicePackage.model', () => ({
     findById: jest.fn(),
+    find: jest.fn(),
 }));
 
 jest.mock('../loyalty/loyalty.service', () => ({
@@ -31,15 +32,23 @@ const notificationService = require('../notifications/notification.service');
 const bookingViolationService = require('../booking-violations/bookingViolation.service');
 const bookingRewardService = require('./bookingReward.service');
 
-const createQueryMock = (value) => ({
-    session: jest.fn().mockReturnThis(),
-    then: (resolve, reject) => Promise.resolve(value).then(resolve, reject),
-    catch: (reject) => Promise.resolve(value).catch(reject),
-});
+const createQueryMock = (value) => {
+    const query = {
+        session: jest.fn(() => query),
+        then: (resolve, reject) => Promise.resolve(value).then(resolve, reject),
+        catch: (reject) => Promise.resolve(value).catch(reject),
+    };
+
+    return query;
+};
 
 describe('booking reward service', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        washHistoryService.createWashHistoryFromBooking.mockResolvedValue(null);
+        promotionUsageService.createPromotionUsageFromBooking.mockResolvedValue(null);
+        notificationService.emitPaymentConfirmed.mockResolvedValue(null);
+        notificationService.emitRewardEarned.mockResolvedValue(null);
     });
 
     it('records completed booking violation recovery when processing paid booking reward', async () => {
@@ -101,5 +110,46 @@ describe('booking reward service', () => {
             earned_points: 10,
             already_processed: true,
         });
+    });
+
+    it('loads booking add-ons and includes them in loyalty processing', async () => {
+        const servicePackage = { _id: 'main-service-id', points_earned: 20 };
+        const addOnServices = [
+            { _id: 'add-on-1', points_earned: 5 },
+            { _id: 'add-on-2', points_earned: 10 },
+        ];
+        const booking = {
+            _id: 'booking-id',
+            service_package_id: servicePackage._id,
+            add_on_service_ids: addOnServices.map((item) => item._id),
+            reward_processed: false,
+            earned_points: 0,
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+
+        ServicePackage.findById.mockReturnValue(createQueryMock(servicePackage));
+        ServicePackage.find.mockReturnValue(createQueryMock(addOnServices));
+        loyaltyService.processBookingLoyalty.mockResolvedValue({
+            loyalty: { id: 'loyalty-id' },
+            point_transaction: { id: 'point-transaction-id' },
+            earned_points: 35,
+        });
+
+        const result = await bookingRewardService.processCompletedPaidBooking({ booking });
+
+        expect(ServicePackage.find).toHaveBeenCalledWith({
+            _id: { $in: booking.add_on_service_ids },
+        });
+        expect(loyaltyService.processBookingLoyalty).toHaveBeenCalledWith({
+            booking,
+            servicePackage,
+            addOnServices,
+            actorId: undefined,
+            session: null,
+        });
+        expect(booking.earned_points).toBe(35);
+        expect(booking.reward_processed).toBe(true);
+        expect(booking.save).toHaveBeenCalledTimes(1);
+        expect(result.earned_points).toBe(35);
     });
 });

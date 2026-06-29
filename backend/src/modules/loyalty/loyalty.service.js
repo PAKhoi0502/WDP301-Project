@@ -524,15 +524,25 @@ const getOrCreateCustomerLoyalty = async (customerId, session = null) => {
     return documents[0];
 };
 
-const calculateEarnedPoints = async ({ booking, servicePackage, loyalty, session = null }) => {
+const calculateEarnedPoints = async ({
+    booking,
+    servicePackage,
+    addOnServices = [],
+    loyalty,
+    session = null,
+}) => {
     if (!booking.customer_id || booking.final_price <= 0 || booking.original_price <= 0) {
         return 0;
     }
 
     const pointMultiplier = await getPointMultiplier(loyalty.current_tier, session);
     const paymentRatio = booking.final_price / booking.original_price;
+    const basePoints = [servicePackage, ...addOnServices].reduce(
+        (total, currentServicePackage) => total + (Number(currentServicePackage?.points_earned) || 0),
+        0
+    );
 
-    return Math.floor(servicePackage.points_earned * pointMultiplier * paymentRatio);
+    return Math.floor(basePoints * pointMultiplier * paymentRatio);
 };
 
 const getActiveTierRules = async (session = null) => {
@@ -643,7 +653,13 @@ const reviewCustomerTier = async (loyalty, session = null) => {
     };
 };
 
-const processBookingLoyalty = async ({ booking, servicePackage, actorId, session = null }) => {
+const processBookingLoyalty = async ({
+    booking,
+    servicePackage,
+    addOnServices = [],
+    actorId,
+    session = null,
+}) => {
     if (!booking.customer_id) {
         return {
             loyalty: null,
@@ -658,6 +674,7 @@ const processBookingLoyalty = async ({ booking, servicePackage, actorId, session
     const earnedPoints = await calculateEarnedPoints({
         booking,
         servicePackage,
+        addOnServices,
         loyalty,
         session,
     });
