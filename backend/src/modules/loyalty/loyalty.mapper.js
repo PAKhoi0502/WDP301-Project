@@ -53,6 +53,7 @@ const toCustomerLoyaltyDto = (loyalty) => {
         last_visit_at: plainLoyalty.last_visit_at,
         last_tier_review_at: plainLoyalty.last_tier_review_at,
         last_tier_downgrade_at: plainLoyalty.last_tier_downgrade_at,
+        tier_recovery_started_at: plainLoyalty.tier_recovery_started_at,
         last_point_expiry_check_at: plainLoyalty.last_point_expiry_check_at,
         created_at: plainLoyalty.created_at,
         updated_at: plainLoyalty.updated_at,

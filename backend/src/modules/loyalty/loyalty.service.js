@@ -514,6 +514,7 @@ const getOrCreateCustomerLoyalty = async (customerId, session = null) => {
                 last_visit_at: null,
                 last_tier_review_at: null,
                 last_tier_downgrade_at: null,
+                tier_recovery_started_at: null,
                 last_point_expiry_check_at: null,
             },
         ],
@@ -565,28 +566,72 @@ const getTierRuleContext = async (loyalty, session = null) => {
     };
 };
 
-const getEligibleTierRule = async (loyalty, session = null) => {
-    const query = TierRule.find({ is_active: true }).sort({ priority_level: -1 });
+const getHighestEligibleTierRule = (loyalty, tierRules = []) => {
+    const orderedTierRules = [...tierRules].sort((left, right) => right.priority_level - left.priority_level);
 
-    if (session) {
-        query.session(session);
-    }
-
-    const tierRules = await query;
-
-    return tierRules.find((tierRule) => {
+    return orderedTierRules.find((tierRule) => {
         return loyalty.total_spent >= tierRule.min_total_spent
             && loyalty.total_visits >= tierRule.min_total_visits
             && loyalty.total_points >= tierRule.min_total_points;
-    }) || tierRules.find((tierRule) => tierRule.tier_name === LOYALTY_TIERS.BRONZE) || null;
+    }) || orderedTierRules.find((tierRule) => tierRule.tier_name === LOYALTY_TIERS.BRONZE) || null;
+};
+
+const getEligibleTierRule = async (loyalty, session = null) => {
+    const tierRules = await getActiveTierRules(session);
+
+    return getHighestEligibleTierRule(loyalty, tierRules);
+};
+
+const getNextHigherTierRule = (tierRules, tierName) => {
+    const orderedTierRules = [...tierRules].sort((left, right) => left.priority_level - right.priority_level);
+    const currentTierRule = orderedTierRules.find((tierRule) => tierRule.tier_name === tierName);
+
+    if (!currentTierRule) {
+        return null;
+    }
+
+    return orderedTierRules.find((tierRule) => tierRule.priority_level > currentTierRule.priority_level) || null;
+};
+
+const getRecoveringTierRule = ({ tierRules, currentTierName, eligibleTierRule }) => {
+    if (!eligibleTierRule) {
+        return null;
+    }
+
+    const currentTierRule = tierRules.find((tierRule) => tierRule.tier_name === currentTierName);
+
+    if (!currentTierRule || currentTierRule.priority_level >= eligibleTierRule.priority_level) {
+        return eligibleTierRule;
+    }
+
+    const nextHigherTierRule = getNextHigherTierRule(tierRules, currentTierName);
+
+    if (!nextHigherTierRule || nextHigherTierRule.priority_level >= eligibleTierRule.priority_level) {
+        return eligibleTierRule;
+    }
+
+    return nextHigherTierRule;
 };
 
 const reviewCustomerTier = async (loyalty, session = null) => {
     const previousTier = loyalty.current_tier;
-    const eligibleTierRule = await getEligibleTierRule(loyalty, session);
+    const tierRules = await getActiveTierRules(session);
+    const eligibleTierRule = getHighestEligibleTierRule(loyalty, tierRules);
+    const recoveryStartedAt = loyalty.tier_recovery_started_at || null;
+    const selectedTierRule = recoveryStartedAt
+        ? getRecoveringTierRule({
+            tierRules,
+            currentTierName: loyalty.current_tier,
+            eligibleTierRule,
+        })
+        : eligibleTierRule;
 
-    if (eligibleTierRule) {
-        loyalty.current_tier = eligibleTierRule.tier_name;
+    if (selectedTierRule) {
+        loyalty.current_tier = selectedTierRule.tier_name;
+    }
+
+    if (recoveryStartedAt && eligibleTierRule && loyalty.current_tier === eligibleTierRule.tier_name) {
+        loyalty.tier_recovery_started_at = null;
     }
 
     loyalty.last_tier_review_at = new Date();
@@ -745,6 +790,7 @@ const downgradeInactiveCustomerTiers = async ({ limit = 50 } = {}) => {
                 loyalty.current_tier = lowerTierRule.tier_name;
                 loyalty.last_tier_downgrade_at = now;
                 loyalty.last_tier_review_at = now;
+                loyalty.tier_recovery_started_at = loyalty.tier_recovery_started_at || now;
 
                 await loyalty.save({ session });
 
@@ -753,6 +799,7 @@ const downgradeInactiveCustomerTiers = async ({ limit = 50 } = {}) => {
                     previous_tier: previousTier,
                     current_tier: loyalty.current_tier,
                     last_tier_downgrade_at: now,
+                    tier_recovery_started_at: loyalty.tier_recovery_started_at,
                 });
             }
 

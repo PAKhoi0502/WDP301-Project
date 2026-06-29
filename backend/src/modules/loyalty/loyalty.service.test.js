@@ -86,6 +86,7 @@ const createLoyaltyDocument = (overrides = {}) => ({
     last_visit_at: null,
     last_tier_review_at: null,
     last_tier_downgrade_at: null,
+    tier_recovery_started_at: null,
     last_point_expiry_check_at: null,
     created_at: new Date('2026-01-01T00:00:00.000Z'),
     updated_at: new Date('2026-01-01T00:00:00.000Z'),
@@ -258,6 +259,145 @@ describe('loyalty service business rules', () => {
             points_discount_amount: 50000,
             discount_amount: 70000,
             final_price: 130000,
+        });
+    });
+
+    it('limits inactive tier recovery to one tier per completed paid booking', async () => {
+        const recoveryStartedAt = new Date('2026-01-01T00:00:00.000Z');
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            current_tier: 'SILVER',
+            total_points: 680,
+            available_points: 20,
+            total_spent: 2900000,
+            total_visits: 24,
+            tier_recovery_started_at: recoveryStartedAt,
+        });
+        const pointTransaction = {
+            _id: new mongoose.Types.ObjectId(),
+            customer_id: customerId,
+            booking_id: bookingId,
+            type: 'EARN',
+            points: 20,
+            remaining_points: 20,
+            balance_before: 20,
+            balance_after: 40,
+        };
+
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(loyalty));
+        TierRule.findOne.mockReturnValue(createQueryMock({
+            tier_name: 'SILVER',
+            point_multiplier: 1,
+        }));
+        TierRule.find.mockReturnValue(createQueryMock([
+            {
+                tier_name: 'BRONZE',
+                priority_level: 1,
+                min_total_spent: 0,
+                min_total_visits: 0,
+                min_total_points: 0,
+            },
+            {
+                tier_name: 'SILVER',
+                priority_level: 2,
+                min_total_spent: 500000,
+                min_total_visits: 5,
+                min_total_points: 100,
+            },
+            {
+                tier_name: 'GOLD',
+                priority_level: 3,
+                min_total_spent: 1500000,
+                min_total_visits: 12,
+                min_total_points: 300,
+            },
+            {
+                tier_name: 'PLATINUM',
+                priority_level: 4,
+                min_total_spent: 3000000,
+                min_total_visits: 25,
+                min_total_points: 700,
+            },
+        ]));
+        PointTransaction.create.mockResolvedValue([pointTransaction]);
+
+        const result = await loyaltyService.processBookingLoyalty({
+            booking: {
+                _id: bookingId,
+                customer_id: customerId,
+                original_price: 100000,
+                final_price: 100000,
+            },
+            servicePackage: {
+                points_earned: 20,
+            },
+            actorId: new mongoose.Types.ObjectId(),
+        });
+
+        expect(loyalty.total_spent).toBe(3000000);
+        expect(loyalty.total_visits).toBe(25);
+        expect(loyalty.total_points).toBe(700);
+        expect(loyalty.current_tier).toBe('GOLD');
+        expect(loyalty.tier_recovery_started_at).toBe(recoveryStartedAt);
+        expect(result).toMatchObject({
+            earned_points: 20,
+            tier_review: {
+                previous_tier: 'SILVER',
+                current_tier: 'GOLD',
+                tier_changed: true,
+            },
+        });
+    });
+
+    it('clears tier recovery once the customer reaches the highest eligible tier', async () => {
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            current_tier: 'GOLD',
+            total_points: 700,
+            total_spent: 3000000,
+            total_visits: 25,
+            tier_recovery_started_at: new Date('2026-01-01T00:00:00.000Z'),
+        });
+
+        TierRule.find.mockReturnValue(createQueryMock([
+            {
+                tier_name: 'BRONZE',
+                priority_level: 1,
+                min_total_spent: 0,
+                min_total_visits: 0,
+                min_total_points: 0,
+            },
+            {
+                tier_name: 'SILVER',
+                priority_level: 2,
+                min_total_spent: 500000,
+                min_total_visits: 5,
+                min_total_points: 100,
+            },
+            {
+                tier_name: 'GOLD',
+                priority_level: 3,
+                min_total_spent: 1500000,
+                min_total_visits: 12,
+                min_total_points: 300,
+            },
+            {
+                tier_name: 'PLATINUM',
+                priority_level: 4,
+                min_total_spent: 3000000,
+                min_total_visits: 25,
+                min_total_points: 700,
+            },
+        ]));
+
+        const result = await loyaltyService.reviewCustomerTier(loyalty);
+
+        expect(loyalty.current_tier).toBe('PLATINUM');
+        expect(loyalty.tier_recovery_started_at).toBeNull();
+        expect(result).toMatchObject({
+            previous_tier: 'GOLD',
+            current_tier: 'PLATINUM',
+            tier_changed: true,
         });
     });
 
@@ -529,6 +669,7 @@ describe('loyalty service business rules', () => {
         expect(loyalty.current_tier).toBe('SILVER');
         expect(loyalty.last_tier_downgrade_at).toBeInstanceOf(Date);
         expect(loyalty.last_tier_review_at).toBeInstanceOf(Date);
+        expect(loyalty.tier_recovery_started_at).toBeInstanceOf(Date);
         expect(loyalty.save).toHaveBeenCalledWith({ session });
         expect(result).toMatchObject({
             downgraded_customers: 1,
@@ -540,6 +681,7 @@ describe('loyalty service business rules', () => {
                     customer_id: customerId.toString(),
                     previous_tier: 'GOLD',
                     current_tier: 'SILVER',
+                    tier_recovery_started_at: expect.any(Date),
                 }),
             ],
         });
