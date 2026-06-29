@@ -892,6 +892,8 @@ const evaluateLateArrivalCandidates = async ({
                 end_time: timeline.end_time,
                 wash_bay_reserved_until: timeline.wash_bay_reserved_until,
                 care_staff_reserved_until: timeline.care_staff_reserved_until,
+                is_available: true,
+                unavailable_reasons: [],
                 available_wash_bay_capacity: availableWashBayCapacity,
                 available_care_staff_capacity: availableCareStaffCapacity,
                 booking_items: timeline.booking_items,

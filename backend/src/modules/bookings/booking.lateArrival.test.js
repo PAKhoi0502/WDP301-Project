@@ -209,6 +209,8 @@ describe('booking late arrival', () => {
         expect(result.search_start_time.toISOString()).toBe('2026-06-11T05:00:00.000Z');
         expect(result.suggested_slots[0].start_time.toISOString()).toBe('2026-06-11T05:00:00.000Z');
         expect(result.suggested_slots[0].end_time.toISOString()).toBe('2026-06-11T06:30:00.000Z');
+        expect(result.suggested_slots[0].is_available).toBe(true);
+        expect(result.suggested_slots[0].unavailable_reasons).toEqual([]);
         expect(JSON.stringify(Booking.aggregate.mock.calls)).toContain(bookingId.toString());
         expect(JSON.stringify(Booking.aggregate.mock.calls)).toContain('$ne');
     });
