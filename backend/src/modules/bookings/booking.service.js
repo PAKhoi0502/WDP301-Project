@@ -2952,6 +2952,7 @@ const cancelBooking = async (user, bookingId, { reason } = {}) => {
     } else {
         await booking.save();
     }
+
     await loyaltyService.refundRedeemedPointsForBooking({
         booking,
         actorId: user._id,
@@ -3022,10 +3023,6 @@ const markNoShow = async (user, bookingId, { reason } = {}) => {
     } else {
         await booking.save();
     }
-    await loyaltyService.refundRedeemedPointsForBooking({
-        booking,
-        actorId: user._id,
-    });
     await bookingViolationService.recordNoShow({
         booking,
         reason: booking.no_show_reason,

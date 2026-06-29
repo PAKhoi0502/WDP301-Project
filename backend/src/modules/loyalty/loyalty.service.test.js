@@ -104,7 +104,7 @@ describe('loyalty service business rules', () => {
         jest.restoreAllMocks();
     });
 
-    it('earns points, updates loyalty totals, and reviews tier after completed paid booking', async () => {
+    it('earns points from the main package and add-ons, updates totals, and reviews tier', async () => {
         const loyalty = createLoyaltyDocument({
             customer_id: customerId,
             current_tier: 'SILVER',
@@ -119,10 +119,10 @@ describe('loyalty service business rules', () => {
             customer_id: customerId,
             booking_id: bookingId,
             type: 'EARN',
-            points: 30,
-            remaining_points: 30,
+            points: 45,
+            remaining_points: 45,
             balance_before: 10,
-            balance_after: 40,
+            balance_after: 55,
         };
 
         CustomerLoyalty.findOne.mockReturnValue(createQueryMock(loyalty));
@@ -165,6 +165,10 @@ describe('loyalty service business rules', () => {
             servicePackage: {
                 points_earned: 40,
             },
+            addOnServices: [
+                { points_earned: 8 },
+                { points_earned: 12 },
+            ],
             actorId: new mongoose.Types.ObjectId(),
         });
 
@@ -174,23 +178,23 @@ describe('loyalty service business rules', () => {
                     customer_id: customerId,
                     booking_id: bookingId,
                     type: 'EARN',
-                    points: 30,
-                    remaining_points: 30,
+                    points: 45,
+                    remaining_points: 45,
                     balance_before: 10,
-                    balance_after: 40,
+                    balance_after: 55,
                 }),
             ],
             undefined
         );
         expect(loyalty.total_spent).toBe(1000000);
         expect(loyalty.total_visits).toBe(5);
-        expect(loyalty.total_points).toBe(120);
-        expect(loyalty.available_points).toBe(40);
+        expect(loyalty.total_points).toBe(135);
+        expect(loyalty.available_points).toBe(55);
         expect(loyalty.last_tier_downgrade_at).toBeNull();
         expect(loyalty.current_tier).toBe('GOLD');
         expect(loyalty.save).toHaveBeenCalledTimes(1);
         expect(result).toMatchObject({
-            earned_points: 30,
+            earned_points: 45,
             tier_review: {
                 previous_tier: 'SILVER',
                 current_tier: 'GOLD',

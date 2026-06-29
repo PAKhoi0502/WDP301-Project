@@ -802,13 +802,15 @@ describe('booking care staff capacity', () => {
         });
     });
 
-    it('marks a confirmed booking as no-show as staff or admin', async () => {
+    it('marks a confirmed booking as no-show without refunding redeemed points', async () => {
         const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
         const booking = {
             _id: '507f1f77bcf86cd799439046',
+            customer_id: customerId,
             garage_id: garageId,
             status: 'CONFIRMED',
             payment_status: 'UNPAID',
+            used_points: 20,
             is_walk_in: false,
             wash_bay_id: null,
             booking_items: [],
@@ -829,6 +831,7 @@ describe('booking care staff capacity', () => {
         expect(booking.no_show_by_id).toBe(adminUser._id);
         expect(booking.no_show_reason).toBe('Customer did not arrive');
         expect(booking.save).toHaveBeenCalledTimes(1);
+        expect(loyaltyService.refundRedeemedPointsForBooking).not.toHaveBeenCalled();
         expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
         expect(bookingServiceStepService.markResourceReleasedForBookingItem).not.toHaveBeenCalled();
         expect(bookingViolationService.recordNoShow).toHaveBeenCalledWith({

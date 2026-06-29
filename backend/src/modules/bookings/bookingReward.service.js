@@ -22,6 +22,32 @@ const getServicePackage = async (servicePackageId, session = null) => {
     return servicePackage;
 };
 
+const getAddOnServices = async (addOnServiceIds = [], session = null) => {
+    const uniqueAddOnServiceIds = [...new Set(
+        addOnServiceIds.filter(Boolean).map((servicePackageId) => servicePackageId.toString())
+    )];
+
+    if (!uniqueAddOnServiceIds.length) {
+        return [];
+    }
+
+    const query = ServicePackage.find({
+        _id: { $in: uniqueAddOnServiceIds },
+    });
+
+    if (session) {
+        query.session(session);
+    }
+
+    const addOnServices = await query;
+
+    if (addOnServices.length !== uniqueAddOnServiceIds.length) {
+        throw new AppError('Add-on service package not found', 404, 'ADD_ON_SERVICE_PACKAGE_NOT_FOUND');
+    }
+
+    return addOnServices;
+};
+
 const processCompletedPaidBooking = async ({ booking, actorId, session = null }) => {
     if (booking.reward_processed) {
         return {
@@ -36,9 +62,11 @@ const processCompletedPaidBooking = async ({ booking, actorId, session = null })
     }
 
     const servicePackage = await getServicePackage(booking.service_package_id, session);
+    const addOnServices = await getAddOnServices(booking.add_on_service_ids, session);
     const loyaltyResult = await loyaltyService.processBookingLoyalty({
         booking,
         servicePackage,
+        addOnServices,
         actorId,
         session,
     });
