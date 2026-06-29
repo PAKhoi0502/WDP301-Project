@@ -85,7 +85,10 @@ const createLoyaltyDocument = (overrides = {}) => ({
     total_visits: 0,
     last_visit_at: null,
     last_tier_review_at: null,
+    last_tier_downgrade_at: null,
     last_point_expiry_check_at: null,
+    created_at: new Date('2026-01-01T00:00:00.000Z'),
+    updated_at: new Date('2026-01-01T00:00:00.000Z'),
     save: jest.fn().mockResolvedValue(null),
     ...overrides,
 });
@@ -108,6 +111,7 @@ describe('loyalty service business rules', () => {
             available_points: 10,
             total_spent: 900000,
             total_visits: 4,
+            last_tier_downgrade_at: new Date('2026-01-01T00:00:00.000Z'),
         });
         const pointTransaction = {
             _id: new mongoose.Types.ObjectId(),
@@ -181,6 +185,7 @@ describe('loyalty service business rules', () => {
         expect(loyalty.total_visits).toBe(5);
         expect(loyalty.total_points).toBe(120);
         expect(loyalty.available_points).toBe(40);
+        expect(loyalty.last_tier_downgrade_at).toBeNull();
         expect(loyalty.current_tier).toBe('GOLD');
         expect(loyalty.save).toHaveBeenCalledTimes(1);
         expect(result).toMatchObject({
@@ -478,6 +483,65 @@ describe('loyalty service business rules', () => {
             expired_points: 30,
             customers_processed: 1,
             source_transactions_processed: 1,
+        });
+        expect(session.endSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('downgrades inactive customer tiers by one level after 90 days', async () => {
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            current_tier: 'GOLD',
+            last_visit_at: new Date(Date.now() - 91 * 24 * 60 * 60 * 1000),
+            last_tier_downgrade_at: null,
+        });
+        const session = {
+            withTransaction: jest.fn(async (callback) => callback()),
+            endSession: jest.fn().mockResolvedValue(null),
+        };
+
+        jest.spyOn(mongoose, 'startSession').mockResolvedValue(session);
+        TierRule.find.mockReturnValue(createQueryMock([
+            {
+                tier_name: 'BRONZE',
+                priority_level: 1,
+            },
+            {
+                tier_name: 'SILVER',
+                priority_level: 2,
+            },
+            {
+                tier_name: 'GOLD',
+                priority_level: 3,
+            },
+            {
+                tier_name: 'PLATINUM',
+                priority_level: 4,
+            },
+        ]));
+        CustomerLoyalty.find.mockReturnValue(createQueryMock([loyalty]));
+
+        const result = await loyaltyService.downgradeInactiveCustomerTiers();
+
+        expect(session.withTransaction).toHaveBeenCalledTimes(1);
+        expect(CustomerLoyalty.find).toHaveBeenCalledWith(expect.objectContaining({
+            current_tier: { $ne: 'BRONZE' },
+        }));
+        expect(loyalty.current_tier).toBe('SILVER');
+        expect(loyalty.last_tier_downgrade_at).toBeInstanceOf(Date);
+        expect(loyalty.last_tier_review_at).toBeInstanceOf(Date);
+        expect(loyalty.save).toHaveBeenCalledWith({ session });
+        expect(result).toMatchObject({
+            downgraded_customers: 1,
+            checked_customers: 1,
+            skipped_customers: 0,
+            downgrade_days: 90,
+            downgrades: [
+                expect.objectContaining({
+                    customer_id: customerId.toString(),
+                    previous_tier: 'GOLD',
+                    current_tier: 'SILVER',
+                }),
+            ],
         });
         expect(session.endSession).toHaveBeenCalledTimes(1);
     });

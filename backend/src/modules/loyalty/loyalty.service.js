@@ -15,8 +15,11 @@ const {
     LOYALTY_TIERS,
     POINT_TRANSACTION_TYPES,
     POINT_EXPIRY_MONTHS,
+    TIER_INACTIVITY_DOWNGRADE_DAYS,
 } = require('../../shared/constants/loyalty.constant');
 const { PROMOTION_DISCOUNT_TYPES } = require('../../shared/constants/promotion.constant');
+
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const addMonths = (date, months) => {
     const result = new Date(date);
@@ -510,6 +513,7 @@ const getOrCreateCustomerLoyalty = async (customerId, session = null) => {
                 total_visits: 0,
                 last_visit_at: null,
                 last_tier_review_at: null,
+                last_tier_downgrade_at: null,
                 last_point_expiry_check_at: null,
             },
         ],
@@ -618,6 +622,7 @@ const processBookingLoyalty = async ({ booking, servicePackage, actorId, session
     loyalty.total_spent += booking.final_price;
     loyalty.total_visits += 1;
     loyalty.last_visit_at = now;
+    loyalty.last_tier_downgrade_at = null;
 
     let pointTransaction = null;
 
@@ -659,6 +664,113 @@ const processBookingLoyalty = async ({ booking, servicePackage, actorId, session
         earned_points: earnedPoints,
         tier_review: tierReview,
     };
+};
+
+const getTierInactivityCutoff = (now) => {
+    return new Date(now.getTime() - TIER_INACTIVITY_DOWNGRADE_DAYS * MILLISECONDS_PER_DAY);
+};
+
+const normalizeDowngradeLimit = (limit) => {
+    const value = Number(limit);
+
+    if (!Number.isInteger(value) || value < 1) {
+        return 50;
+    }
+
+    return Math.min(value, 200);
+};
+
+const buildInactiveTierFilter = (cutoff) => {
+    return {
+        current_tier: { $ne: LOYALTY_TIERS.BRONZE },
+        $or: [
+            {
+                last_tier_downgrade_at: { $ne: null, $lte: cutoff },
+            },
+            {
+                last_tier_downgrade_at: null,
+                last_visit_at: { $ne: null, $lte: cutoff },
+            },
+            {
+                last_tier_downgrade_at: null,
+                last_visit_at: null,
+                created_at: { $lte: cutoff },
+            },
+        ],
+    };
+};
+
+const getLowerTierRule = (tierRules, tierName) => {
+    const orderedTierRules = [...tierRules].sort((left, right) => left.priority_level - right.priority_level);
+    const currentIndex = orderedTierRules.findIndex((tierRule) => tierRule.tier_name === tierName);
+
+    if (currentIndex <= 0) {
+        return null;
+    }
+
+    return orderedTierRules[currentIndex - 1];
+};
+
+const downgradeInactiveCustomerTiers = async ({ limit = 50 } = {}) => {
+    const session = await mongoose.startSession();
+
+    try {
+        let result = {
+            downgraded_customers: 0,
+            checked_customers: 0,
+            skipped_customers: 0,
+            downgrade_days: TIER_INACTIVITY_DOWNGRADE_DAYS,
+            downgrades: [],
+        };
+
+        await session.withTransaction(async () => {
+            const now = new Date();
+            const cutoff = getTierInactivityCutoff(now);
+            const tierRules = await getActiveTierRules(session);
+            const query = CustomerLoyalty.find(buildInactiveTierFilter(cutoff))
+                .sort({ last_tier_downgrade_at: 1, last_visit_at: 1, created_at: 1 })
+                .limit(normalizeDowngradeLimit(limit))
+                .session(session);
+            const loyalties = await query;
+            const downgrades = [];
+
+            for (const loyalty of loyalties) {
+                const previousTier = loyalty.current_tier;
+                const lowerTierRule = getLowerTierRule(tierRules, previousTier);
+
+                if (!lowerTierRule) {
+                    continue;
+                }
+
+                loyalty.current_tier = lowerTierRule.tier_name;
+                loyalty.last_tier_downgrade_at = now;
+                loyalty.last_tier_review_at = now;
+
+                await loyalty.save({ session });
+
+                downgrades.push({
+                    customer_id: loyalty.customer_id?.toString() || null,
+                    previous_tier: previousTier,
+                    current_tier: loyalty.current_tier,
+                    last_tier_downgrade_at: now,
+                });
+            }
+
+            result = {
+                downgraded_customers: downgrades.length,
+                checked_customers: loyalties.length,
+                skipped_customers: loyalties.length - downgrades.length,
+                downgrade_days: TIER_INACTIVITY_DOWNGRADE_DAYS,
+                cutoff,
+                checked_at: now,
+                downgrades,
+            };
+        });
+
+        return result;
+    } finally {
+        await session.endSession();
+    }
 };
 
 
@@ -1147,6 +1259,7 @@ module.exports = {
     refundRedeemedPointsForBooking,
     calculateRedeemPreview,
     reviewCustomerTier,
+    downgradeInactiveCustomerTiers,
     getCustomerLoyaltyOverview,
     getCustomerPointTransactions,
     getTierRules,

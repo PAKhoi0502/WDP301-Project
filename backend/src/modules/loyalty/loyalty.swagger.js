@@ -37,6 +37,7 @@ const customerLoyaltySchema = {
         total_visits: { type: 'number' },
         last_visit_at: { type: 'string', format: 'date-time', nullable: true },
         last_tier_review_at: { type: 'string', format: 'date-time', nullable: true },
+        last_tier_downgrade_at: { type: 'string', format: 'date-time', nullable: true },
         last_point_expiry_check_at: { type: 'string', format: 'date-time', nullable: true },
         created_at: { type: 'string', format: 'date-time' },
         updated_at: { type: 'string', format: 'date-time' },

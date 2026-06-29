@@ -66,6 +66,11 @@ const customerLoyaltySchema = new mongoose.Schema(
             default: null,
         },
 
+        last_tier_downgrade_at: {
+            type: Date,
+            default: null,
+        },
+
         last_point_expiry_check_at: {
             type: Date,
             default: null,
@@ -84,6 +89,8 @@ customerLoyaltySchema.index({ current_tier: 1 });
 customerLoyaltySchema.index({ available_points: -1 });
 customerLoyaltySchema.index({ total_spent: -1 });
 customerLoyaltySchema.index({ total_visits: -1 });
+customerLoyaltySchema.index({ last_tier_downgrade_at: 1 });
+customerLoyaltySchema.index({ last_visit_at: 1 });
 customerLoyaltySchema.index({ created_at: -1 });
 
 customerLoyaltySchema.methods.toJSON = function () {

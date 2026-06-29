@@ -6,12 +6,14 @@ const JOB_NAMES = Object.freeze({
     WAITLIST_EXPIRE: 'waitlist-expire',
     EMAIL_RETRY: 'email-retry',
     POINT_EXPIRATION: 'point-expiration',
+    TIER_INACTIVITY_DOWNGRADE: 'tier-inactivity-downgrade',
 });
 
 const DEFAULT_INTERVALS = Object.freeze({
     WAITLIST_EXPIRE_JOB_INTERVAL_MS: 60 * 1000,
     EMAIL_RETRY_JOB_INTERVAL_MS: 5 * 60 * 1000,
     POINT_EXPIRATION_JOB_INTERVAL_MS: 24 * 60 * 60 * 1000,
+    TIER_INACTIVITY_DOWNGRADE_JOB_INTERVAL_MS: 24 * 60 * 60 * 1000,
 });
 
 let activeJobs = [];
@@ -75,6 +77,17 @@ const buildJobDefinitions = () => [
             2147483647
         ),
         handler: () => loyaltyService.expireDuePoints(),
+    },
+    {
+        name: JOB_NAMES.TIER_INACTIVITY_DOWNGRADE,
+        intervalMs: getPositiveIntegerEnv(
+            'TIER_INACTIVITY_DOWNGRADE_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.TIER_INACTIVITY_DOWNGRADE_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => loyaltyService.downgradeInactiveCustomerTiers({
+            limit: getPositiveIntegerEnv('TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE', 50, 200),
+        }),
     },
 ];
 

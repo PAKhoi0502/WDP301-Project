@@ -8,6 +8,7 @@ jest.mock('../modules/notifications/notification.service', () => ({
 
 jest.mock('../modules/loyalty/loyalty.service', () => ({
     expireDuePoints: jest.fn(),
+    downgradeInactiveCustomerTiers: jest.fn(),
 }));
 
 const bookingWaitlistService = require('../modules/booking-waitlists/bookingWaitlist.service');
@@ -23,6 +24,7 @@ describe('scheduler service', () => {
         delete process.env.SCHEDULER_ENABLED;
         delete process.env.WAITLIST_EXPIRE_BATCH_SIZE;
         delete process.env.EMAIL_RETRY_BATCH_SIZE;
+        delete process.env.TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE;
     });
 
     afterEach(() => {
@@ -51,6 +53,7 @@ describe('scheduler service', () => {
             expect.objectContaining({ name: schedulerService.JOB_NAMES.WAITLIST_EXPIRE }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.EMAIL_RETRY }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.POINT_EXPIRATION }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.TIER_INACTIVITY_DOWNGRADE }),
         ]));
     });
 
@@ -81,5 +84,15 @@ describe('scheduler service', () => {
 
         expect(loyaltyService.expireDuePoints).toHaveBeenCalledWith();
         expect(result).toEqual({ expired_points: 10 });
+    });
+
+    it('runs tier inactivity downgrade job on demand', async () => {
+        process.env.TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE = '30';
+        loyaltyService.downgradeInactiveCustomerTiers.mockResolvedValue({ downgraded_customers: 1 });
+
+        const result = await schedulerService.runSchedulerJobNow(schedulerService.JOB_NAMES.TIER_INACTIVITY_DOWNGRADE);
+
+        expect(loyaltyService.downgradeInactiveCustomerTiers).toHaveBeenCalledWith({ limit: 30 });
+        expect(result).toEqual({ downgraded_customers: 1 });
     });
 });
