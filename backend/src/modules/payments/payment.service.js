@@ -478,6 +478,24 @@ const cancelPayosPayment = async (user, paymentId, { reason } = {}) => {
     return finishPayosPaymentCancel(user, paymentId);
 };
 
+const finishPayosPaymentCanceledAtProvider = async (user, paymentId) => {
+    await beginPayosPaymentCancel(user, paymentId);
+
+    return finishPayosPaymentCancel(user, paymentId);
+};
+
+const getCurrentBookingAfterPaymentRace = async (user, bookingId) => {
+    const booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    }
+
+    await assertStaffCanAccessBooking(user, booking);
+
+    return booking;
+};
+
 const assertPaymentCanBeExpired = (payment, now) => {
     if (payment.status === PAYMENT_TRANSACTION_STATUS.EXPIRED) {
         return;
@@ -549,6 +567,117 @@ const expirePayosPayment = async (user, paymentId) => {
         return response;
     } finally {
         await session.endSession();
+    }
+};
+
+const resolvePendingPayosPaymentForCash = async (
+    user,
+    bookingId,
+    { reason = 'Staff switched booking to cash payment' } = {}
+) => {
+    const booking = await getCurrentBookingAfterPaymentRace(user, bookingId);
+
+    if (booking.status !== BOOKING_STATUS.COMPLETED) {
+        throw new AppError(
+            'Booking cannot be marked as paid in current status',
+            400,
+            'BOOKING_MARK_PAID_NOT_ALLOWED'
+        );
+    }
+
+    if (
+        booking.payment_method !== BOOKING_PAYMENT_METHOD.PAYOS
+        || booking.payment_status !== BOOKING_PAYMENT_STATUS.PENDING
+    ) {
+        return {
+            resolution: 'NONE',
+            booking: BookingMapper.toBookingDto(booking),
+            payment: null,
+        };
+    }
+
+    const payment = await PaymentTransaction.findOne({
+        booking_id: booking._id,
+        provider: PAYMENT_PROVIDER.PAYOS,
+        status: {
+            $in: [
+                PAYMENT_TRANSACTION_STATUS.PENDING,
+                PAYMENT_TRANSACTION_STATUS.CANCELING,
+            ],
+        },
+    }).sort({ created_at: -1 });
+
+    if (!payment) {
+        const currentBooking = await getCurrentBookingAfterPaymentRace(user, booking._id);
+
+        if (currentBooking.payment_status === BOOKING_PAYMENT_STATUS.PAID) {
+            return {
+                resolution: 'PAYOS_PAID',
+                booking: BookingMapper.toBookingDto(currentBooking),
+                payment: null,
+            };
+        }
+
+        throw new AppError(
+            'Pending PayOS transaction not found for booking',
+            409,
+            'BOOKING_PENDING_PAYOS_TRANSACTION_NOT_FOUND'
+        );
+    }
+
+    try {
+        const providerPayment = await payosService.getPaymentLinkInformation(
+            payment.payment_link_id || payment.order_code
+        );
+        const providerStatus = String(providerPayment?.status || '').toUpperCase();
+
+        if (providerStatus === 'PAID') {
+            throw new AppError(
+                'PayOS payment was already paid and cannot be converted to cash',
+                409,
+                'PAYMENT_ALREADY_PAID'
+            );
+        }
+
+        if (providerStatus === 'CANCELLED' || providerStatus === 'CANCELED') {
+            const result = await finishPayosPaymentCanceledAtProvider(user, payment._id);
+
+            return {
+                resolution: 'CANCELED',
+                ...result,
+            };
+        }
+
+        if (!['PENDING', 'PROCESSING'].includes(providerStatus)) {
+            throw new AppError(
+                'PayOS payment status cannot be resolved for cash payment',
+                409,
+                'PAYOS_PAYMENT_STATUS_UNRESOLVED'
+            );
+        }
+
+        const result = await cancelPayosPayment(user, payment._id, { reason });
+
+        return {
+            resolution: 'CANCELED',
+            ...result,
+        };
+    } catch (error) {
+        if (error?.errorCode !== 'PAYMENT_ALREADY_PAID') {
+            throw error;
+        }
+
+        const currentBooking = await getCurrentBookingAfterPaymentRace(user, booking._id);
+
+        if (currentBooking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
+            throw error;
+        }
+
+        return {
+            resolution: 'PAYOS_PAID',
+            booking: BookingMapper.toBookingDto(currentBooking),
+            payment: null,
+        };
     }
 };
 
@@ -711,5 +840,6 @@ module.exports = {
     getPaymentById,
     cancelPayosPayment,
     expirePayosPayment,
+    resolvePendingPayosPaymentForCash,
     handlePayosWebhook,
 };

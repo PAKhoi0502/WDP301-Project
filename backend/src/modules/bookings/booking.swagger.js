@@ -976,7 +976,8 @@ const paths = {
     '/admin/bookings/{id}/mark-paid': {
         patch: {
             tags: ['Admin Bookings'],
-            summary: 'Mark completed booking as paid and process reward',
+            summary: 'Confirm cash payment for a completed booking',
+            description: 'If the booking has a pending PayOS payment, the server verifies its provider status and cancels or finalizes its cancellation before confirming cash payment. A PayOS payment that completes concurrently is preserved and is not overwritten as cash.',
             security: [{ bearerAuth: [] }],
             parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
             requestBody: {
@@ -985,7 +986,7 @@ const paths = {
             },
             responses: {
                 200: {
-                    description: 'Booking marked as paid',
+                    description: 'Booking payment confirmed; any pending PayOS payment was resolved by the server',
                     content: { 'application/json': { schema: markPaidResponse } },
                 },
                 ...commonErrorResponses,

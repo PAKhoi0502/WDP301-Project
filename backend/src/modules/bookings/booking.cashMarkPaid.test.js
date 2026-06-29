@@ -20,8 +20,13 @@ jest.mock('./bookingPayment.service', () => ({
     confirmBookingPaid: jest.fn(),
 }));
 
+jest.mock('../payments/payment.service', () => ({
+    resolvePendingPayosPaymentForCash: jest.fn(),
+}));
+
 const Booking = require('./booking.model');
 const bookingPaymentService = require('./bookingPayment.service');
+const paymentService = require('../payments/payment.service');
 const bookingService = require('./booking.service');
 
 describe('booking cash mark paid flow', () => {
@@ -53,6 +58,10 @@ describe('booking cash mark paid flow', () => {
         jest.clearAllMocks();
         mockSession.withTransaction.mockImplementation(async (callback) => callback());
         mockSession.endSession.mockResolvedValue(undefined);
+        paymentService.resolvePendingPayosPaymentForCash.mockResolvedValue({
+            resolution: 'NONE',
+            payment: null,
+        });
         bookingPaymentService.confirmBookingPaid.mockResolvedValue({
             wash_history: { id: 'wash-history-id' },
             loyalty: { id: 'loyalty-id' },
@@ -80,6 +89,11 @@ describe('booking cash mark paid flow', () => {
         });
 
         expect(booking.note).toBe('cash collected');
+        expect(paymentService.resolvePendingPayosPaymentForCash).toHaveBeenCalledWith(
+            adminUser,
+            bookingId,
+            { reason: 'Staff confirmed cash payment' }
+        );
         expect(bookingPaymentService.confirmBookingPaid).toHaveBeenCalledWith({
             booking,
             paymentMethod: 'CASH',
@@ -92,18 +106,49 @@ describe('booking cash mark paid flow', () => {
         expect(result.already_processed).toBe(false);
     });
 
-    it('blocks cash mark paid while a PayOS payment is pending', async () => {
+    it('resolves a pending PayOS payment before confirming cash payment', async () => {
         const booking = createBooking({
             payment_method: 'PAYOS',
             payment_status: 'PENDING',
         });
 
-        Booking.findById.mockReturnValueOnce(createFindByIdSessionQuery(booking));
+        paymentService.resolvePendingPayosPaymentForCash.mockImplementationOnce(async () => {
+            booking.payment_method = 'CASH';
+            booking.payment_status = 'UNPAID';
 
-        await expect(bookingService.markPaid(adminUser, bookingId)).rejects.toMatchObject({
-            statusCode: 409,
-            errorCode: 'BOOKING_PENDING_PAYOS_PAYMENT',
+            return {
+                resolution: 'CANCELED',
+                payment: { id: 'payment-id', status: 'CANCELED' },
+            };
         });
+        Booking.findById
+            .mockReturnValueOnce(createFindByIdSessionQuery(booking))
+            .mockReturnValueOnce(createFindByIdSessionQuery({
+                ...booking,
+                payment_method: 'CASH',
+                payment_status: 'PAID',
+                paid_at: new Date('2026-06-07T03:05:00.000Z'),
+            }));
+
+        const result = await bookingService.markPaid(adminUser, bookingId);
+
+        expect(paymentService.resolvePendingPayosPaymentForCash).toHaveBeenCalledTimes(1);
+        expect(bookingPaymentService.confirmBookingPaid).toHaveBeenCalledTimes(1);
+        expect(result.booking.payment_method).toBe('CASH');
+        expect(result.booking.payment_status).toBe('PAID');
+    });
+
+    it('does not confirm cash payment when PayOS cancellation fails', async () => {
+        const error = Object.assign(new Error('PayOS cancel unavailable'), {
+            statusCode: 502,
+            errorCode: 'PAYOS_CANCEL_PAYMENT_LINK_FAILED',
+        });
+
+        paymentService.resolvePendingPayosPaymentForCash.mockRejectedValueOnce(error);
+
+        await expect(bookingService.markPaid(adminUser, bookingId)).rejects.toBe(error);
+
+        expect(Booking.findById).not.toHaveBeenCalled();
         expect(bookingPaymentService.confirmBookingPaid).not.toHaveBeenCalled();
     });
 });

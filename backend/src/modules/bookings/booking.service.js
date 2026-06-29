@@ -10,6 +10,7 @@ const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const bookingPaymentService = require('./bookingPayment.service');
+const paymentService = require('../payments/payment.service');
 const auditLogService = require('../audit-logs/auditLog.service');
 const promotionService = require('../promotions/promotion.service');
 const promotionUsageService = require('../promotion-usages/promotionUsage.service');
@@ -3477,6 +3478,10 @@ const markBookingServiceStepDone = async (user, bookingId, stepId, { note } = {}
 
 
 const markPaid = async (user, bookingId, { note } = {}) => {
+    await paymentService.resolvePendingPayosPaymentForCash(user, bookingId, {
+        reason: 'Staff confirmed cash payment',
+    });
+
     const session = await mongoose.startSession();
 
     try {
@@ -3497,7 +3502,7 @@ const markPaid = async (user, bookingId, { note } = {}) => {
                 && booking.payment_status === BOOKING_PAYMENT_STATUS.PENDING
             ) {
                 throw new AppError(
-                    'Pending PayOS payment must be canceled before cash payment',
+                    'Pending PayOS payment could not be resolved for cash payment',
                     409,
                     'BOOKING_PENDING_PAYOS_PAYMENT'
                 );
