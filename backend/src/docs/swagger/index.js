@@ -22,8 +22,9 @@ const auditLogSwagger = require('../../modules/audit-logs/auditLog.swagger');
 const surveySwagger = require('../../modules/surveys/survey.swagger');
 const analyticsSwagger = require('../../modules/analytics/analytics.swagger');
 const researchSwagger = require('../../modules/research/research.swagger');
+const { enrichOpenApiRoles } = require('./roleMetadata');
 
-const openApiSpec = {
+const openApiSpec = enrichOpenApiRoles({
     openapi: '3.0.0',
     info: {
         title: 'AutoWash Pro API',
@@ -89,6 +90,6 @@ const openApiSpec = {
             ...researchSwagger.schemas,
         },
     },
-};
+});
 
 module.exports = openApiSpec;

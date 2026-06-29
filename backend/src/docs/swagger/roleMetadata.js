@@ -1,0 +1,597 @@
+const HTTP_METHODS = Object.freeze(['get', 'post', 'put', 'patch', 'delete']);
+
+const ROLE_DETAILS = Object.freeze({
+    PUBLIC: {
+        label: 'PUBLIC',
+        auth: 'No access token required.',
+    },
+    OPTIONAL_AUTH: {
+        label: 'OPTIONAL AUTH',
+        auth: 'Bearer JWT is optional. The endpoint also accepts anonymous requests.',
+    },
+    AUTHENTICATED: {
+        label: 'AUTHENTICATED',
+        auth: 'Bearer JWT required. Any active user role can call this endpoint.',
+    },
+    CUSTOMER: {
+        label: 'CUSTOMER',
+        auth: 'Bearer JWT required. User role must be CUSTOMER.',
+    },
+    STAFF: {
+        label: 'STAFF',
+        auth: 'Bearer JWT required. User role must be STAFF.',
+    },
+    ADMIN: {
+        label: 'ADMIN',
+        auth: 'Bearer JWT required. User role must be ADMIN.',
+    },
+});
+
+const STAFF_GARAGE_SCOPE = 'STAFF access is limited by assigned garage where the service enforces garage scope. ADMIN access is system-wide unless a request filter is provided.';
+
+const ROUTE_GROUPS = Object.freeze([
+    {
+        roles: ['OPTIONAL_AUTH'],
+        feature: 'Auth phone verification',
+        operations: [
+            'POST /auth/phone-verifications/request',
+            'POST /auth/phone-verifications/verify',
+        ],
+    },
+    {
+        roles: ['PUBLIC'],
+        feature: 'Auth and session',
+        operations: [
+            'POST /auth/register',
+            'POST /auth/login',
+            'POST /auth/refresh',
+            'POST /auth/logout',
+            'POST /auth/forgot-password',
+            'POST /auth/reset-password',
+        ],
+    },
+    {
+        roles: ['AUTHENTICATED'],
+        feature: 'Auth and session',
+        operations: [
+            'POST /auth/logout-all',
+            'GET /auth/me',
+            'POST /auth/change-password',
+        ],
+    },
+    {
+        roles: ['AUTHENTICATED'],
+        feature: 'User profile',
+        operations: [
+            'GET /users/me',
+            'PATCH /users/me',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'User management',
+        operations: [
+            'GET /users',
+            'GET /users/{id}',
+            'PATCH /users/{id}',
+            'DELETE /users/{id}',
+            'PATCH /users/{id}/status',
+            'PATCH /users/{id}/role',
+        ],
+    },
+    {
+        roles: ['STAFF'],
+        feature: 'Staff profile',
+        operations: [
+            'GET /staff-profiles/me',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Staff profile management',
+        operations: [
+            'GET /staff-profiles',
+            'POST /staff-profiles',
+            'GET /staff-profiles/{id}',
+            'PATCH /staff-profiles/{id}',
+            'DELETE /staff-profiles/{id}',
+            'PATCH /staff-profiles/{id}/status',
+        ],
+    },
+    {
+        roles: ['PUBLIC'],
+        feature: 'Garage browsing',
+        operations: [
+            'GET /garages',
+            'GET /garages/{id}',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Garage management',
+        operations: [
+            'GET /admin/garages',
+            'POST /admin/garages',
+            'GET /admin/garages/{id}',
+            'PATCH /admin/garages/{id}',
+            'DELETE /admin/garages/{id}',
+            'PATCH /admin/garages/{id}/status',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Wash bay management',
+        operations: [
+            'GET /admin/wash-bays',
+            'POST /admin/wash-bays',
+            'GET /admin/wash-bays/{id}',
+            'PATCH /admin/wash-bays/{id}',
+            'DELETE /admin/wash-bays/{id}',
+            'PATCH /admin/wash-bays/{id}/status',
+            'GET /admin/garages/{garageId}/wash-bays',
+            'GET /admin/garages/{garageId}/available-wash-bays',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'My vehicles',
+        operations: [
+            'GET /vehicles',
+            'POST /vehicles',
+            'GET /vehicles/{id}',
+            'PATCH /vehicles/{id}',
+            'DELETE /vehicles/{id}',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Vehicle management',
+        operations: [
+            'GET /admin/vehicles',
+            'POST /admin/vehicles',
+            'GET /admin/vehicles/{id}',
+            'PATCH /admin/vehicles/{id}',
+            'DELETE /admin/vehicles/{id}',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Customer search',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/customers',
+        ],
+    },
+    {
+        roles: ['PUBLIC'],
+        feature: 'Service package browsing',
+        operations: [
+            'GET /service-packages',
+            'GET /service-packages/{id}',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Service package management',
+        operations: [
+            'GET /admin/service-packages',
+            'POST /admin/service-packages',
+            'GET /admin/service-packages/{id}',
+            'PATCH /admin/service-packages/{id}',
+            'DELETE /admin/service-packages/{id}',
+            'PATCH /admin/service-packages/{id}/activate',
+            'PATCH /admin/service-packages/{id}/deactivate',
+            'PATCH /admin/service-packages/{id}/steps-template',
+            'PATCH /admin/service-packages/{id}/included-services',
+        ],
+    },
+    {
+        roles: ['OPTIONAL_AUTH'],
+        feature: 'Booking availability',
+        operations: [
+            'GET /bookings/available-slots',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'My bookings',
+        operations: [
+            'GET /bookings',
+            'POST /bookings',
+            'GET /bookings/{id}',
+            'PATCH /bookings/{id}/cancel',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'My booking inspections',
+        operations: [
+            'GET /bookings/{id}/inspections',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Booking operations',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/bookings',
+            'GET /admin/bookings/{id}',
+            'POST /admin/bookings/walk-in',
+            'PATCH /admin/bookings/{id}/cancel',
+            'PATCH /admin/bookings/{id}/mark-no-show',
+            'PATCH /admin/bookings/{id}/check-in',
+            'GET /admin/bookings/{id}/late-arrival-options',
+            'PATCH /admin/bookings/{id}/resolve-late-arrival',
+            'PATCH /admin/bookings/{id}/assign-wash-bay',
+            'PATCH /admin/bookings/{id}/start-service',
+            'PATCH /admin/bookings/{id}/complete-service',
+            'PATCH /admin/bookings/{id}/mark-paid',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Booking service steps',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/bookings/{id}/service-steps',
+            'PATCH /admin/bookings/{id}/service-steps/{stepId}/done',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Booking operations',
+        operations: [
+            'PATCH /admin/bookings/{id}/reopen-service',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Booking inspections',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/bookings/{id}/inspections',
+            'POST /admin/bookings/{id}/inspections',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'My waitlists',
+        operations: [
+            'GET /waitlists',
+            'POST /waitlists',
+            'GET /waitlists/{id}',
+            'PATCH /waitlists/{id}/cancel',
+            'PATCH /waitlists/{id}/accept',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Waitlist operations',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/waitlists',
+            'PATCH /admin/waitlists/{id}/cancel',
+            'PATCH /admin/waitlists/{id}/offer',
+            'PATCH /admin/waitlists/{id}/expire',
+        ],
+    },
+    {
+        roles: ['PUBLIC'],
+        feature: 'Promotion browsing',
+        operations: [
+            'GET /promotions',
+            'GET /promotions/{id}',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'Promotion validation',
+        operations: [
+            'POST /promotions/validate',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Promotion management',
+        operations: [
+            'GET /admin/promotions',
+            'POST /admin/promotions',
+            'GET /admin/promotions/{id}',
+            'PATCH /admin/promotions/{id}',
+            'DELETE /admin/promotions/{id}',
+            'PATCH /admin/promotions/{id}/activate',
+            'PATCH /admin/promotions/{id}/deactivate',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'My loyalty',
+        operations: [
+            'GET /loyalty/me',
+            'GET /loyalty/me/transactions',
+            'POST /loyalty/redeem-preview',
+            'GET /loyalty/tier-rules',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Loyalty expiry',
+        operations: [
+            'GET /admin/loyalty/expiring-points',
+            'POST /admin/loyalty/expire-points',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Customer loyalty management',
+        operations: [
+            'GET /admin/loyalty/customers',
+            'GET /admin/loyalty/customers/{customerId}',
+            'GET /admin/loyalty/customers/{customerId}/transactions',
+            'GET /admin/loyalty/transactions',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Tier rule management',
+        operations: [
+            'GET /admin/loyalty/tier-rules',
+            'POST /admin/loyalty/tier-rules',
+            'GET /admin/loyalty/tier-rules/{tierRuleId}',
+            'PATCH /admin/loyalty/tier-rules/{tierRuleId}',
+            'DELETE /admin/loyalty/tier-rules/{tierRuleId}',
+            'PATCH /admin/loyalty/tier-rules/{tierRuleId}/activate',
+            'PATCH /admin/loyalty/tier-rules/{tierRuleId}/deactivate',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'My notifications',
+        operations: [
+            'GET /notifications',
+            'DELETE /notifications',
+            'GET /notifications/unread-count',
+            'PATCH /notifications/mark-all-read',
+            'PATCH /notifications/{id}/read',
+            'DELETE /notifications/{id}',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'My wash histories',
+        operations: [
+            'GET /wash-histories',
+            'GET /wash-histories/{id}',
+            'POST /wash-histories/claim',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Wash history operations',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/wash-histories',
+            'GET /admin/wash-histories/{id}',
+        ],
+    },
+    {
+        roles: ['PUBLIC'],
+        feature: 'PayOS webhook',
+        operations: [
+            'POST /payments/payos/webhook',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'PayOS payment operations',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'POST /admin/payments/bookings/{bookingId}/payos',
+            'GET /admin/payments/{paymentId}',
+            'PATCH /admin/payments/{paymentId}/cancel',
+            'PATCH /admin/payments/{paymentId}/expire',
+        ],
+    },
+    {
+        roles: ['AUTHENTICATED'],
+        feature: 'Owned uploads',
+        operations: [
+            'POST /uploads',
+            'DELETE /uploads/{id}',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Upload management',
+        operations: [
+            'GET /admin/uploads',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'Customer surveys',
+        operations: [
+            'GET /surveys/available',
+            'POST /surveys/{id}/responses',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Survey management',
+        operations: [
+            'GET /admin/surveys',
+            'POST /admin/surveys',
+            'GET /admin/surveys/{id}',
+            'PATCH /admin/surveys/{id}',
+            'DELETE /admin/surveys/{id}',
+            'PATCH /admin/surveys/{id}/publish',
+            'PATCH /admin/surveys/{id}/close',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Survey responses',
+        operations: [
+            'GET /admin/surveys/{id}/responses',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Analytics',
+        operations: [
+            'GET /admin/analytics/overview',
+            'GET /admin/analytics/bookings',
+            'GET /admin/analytics/revenue',
+            'GET /admin/analytics/garages',
+            'GET /admin/analytics/services',
+            'GET /admin/analytics/promotions',
+            'GET /admin/analytics/wash-bays',
+            'GET /admin/analytics/surveys/{surveyId}',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Research reports',
+        operations: [
+            'GET /admin/research',
+            'POST /admin/research',
+            'GET /admin/research/{id}',
+            'PATCH /admin/research/{id}',
+            'DELETE /admin/research/{id}',
+            'POST /admin/research/{id}/run',
+            'POST /admin/research/{id}/retry',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Audit logs',
+        operations: [
+            'GET /admin/audit-logs',
+        ],
+    },
+]);
+
+const toOperationKey = (operation) => operation.trim().replace(/\s+/, ' ');
+
+const getRoleLabels = (roles) => roles.map((role) => ROLE_DETAILS[role].label);
+
+const getAuthText = (roles) => {
+    if (roles.length === 1) {
+        return ROLE_DETAILS[roles[0]].auth;
+    }
+
+    return 'Bearer JWT required. User role must be one of: ' + getRoleLabels(roles).join(', ') + '.';
+};
+
+const createMetadataByOperation = () => {
+    const metadata = new Map();
+
+    ROUTE_GROUPS.forEach((group) => {
+        group.operations.forEach((operation) => {
+            const key = toOperationKey(operation);
+
+            if (metadata.has(key)) {
+                throw new Error(`Duplicate OpenAPI role metadata for ${key}`);
+            }
+
+            metadata.set(key, {
+                roles: group.roles,
+                feature: group.feature,
+                scope: group.scope,
+                auth: getAuthText(group.roles),
+            });
+        });
+    });
+
+    return metadata;
+};
+
+const metadataByOperation = createMetadataByOperation();
+
+const createRoleTagName = (role, feature) => `${ROLE_DETAILS[role].label} / ${feature}`;
+
+const createRoleTags = () => {
+    const tags = new Map();
+
+    ROUTE_GROUPS.forEach((group) => {
+        group.roles.forEach((role) => {
+            const name = createRoleTagName(role, group.feature);
+
+            if (!tags.has(name)) {
+                tags.set(name, {
+                    name,
+                    description: `${ROLE_DETAILS[role].label} role APIs for ${group.feature}. ${getAuthText([role])}`,
+                });
+            }
+        });
+    });
+
+    return Array.from(tags.values());
+};
+
+const buildDescription = (baseDescription, metadata) => {
+    const lines = [
+        `**Roles:** ${getRoleLabels(metadata.roles).join(', ')}`,
+        `**Function:** ${metadata.feature}`,
+        `**Auth:** ${metadata.auth}`,
+    ];
+
+    if (metadata.scope) {
+        lines.push(`**Scope:** ${metadata.scope}`);
+    }
+
+    if (baseDescription) {
+        lines.push(baseDescription);
+    }
+
+    return lines.join('\n\n');
+};
+
+const enrichOperation = (operation, metadata) => {
+    const originalSummary = operation['x-original-summary'] || operation.summary || '';
+    const originalDescription = operation['x-original-description'] || operation.description || '';
+    const originalTags = operation['x-original-tags'] || operation.tags || [];
+
+    operation['x-original-summary'] = originalSummary;
+    operation['x-original-description'] = originalDescription;
+    operation['x-original-tags'] = originalTags;
+    operation['x-roles'] = metadata.roles;
+    operation['x-feature'] = metadata.feature;
+    operation['x-auth'] = metadata.auth;
+    operation.tags = metadata.roles.map((role) => createRoleTagName(role, metadata.feature));
+    operation.summary = `[${getRoleLabels(metadata.roles).join(', ')}] ${metadata.feature} - ${originalSummary}`;
+    operation.description = buildDescription(originalDescription, metadata);
+};
+
+const enrichOpenApiRoles = (openApiSpec) => {
+    Object.entries(openApiSpec.paths || {}).forEach(([path, pathItem]) => {
+        HTTP_METHODS.forEach((method) => {
+            const operation = pathItem[method];
+
+            if (!operation) {
+                return;
+            }
+
+            const key = `${method.toUpperCase()} ${path}`;
+            const metadata = metadataByOperation.get(key);
+
+            if (!metadata) {
+                return;
+            }
+
+            enrichOperation(operation, metadata);
+        });
+    });
+
+    openApiSpec.tags = createRoleTags();
+
+    return openApiSpec;
+};
+
+module.exports = {
+    HTTP_METHODS,
+    ROLE_DETAILS,
+    ROUTE_GROUPS,
+    enrichOpenApiRoles,
+    metadataByOperation,
+};
