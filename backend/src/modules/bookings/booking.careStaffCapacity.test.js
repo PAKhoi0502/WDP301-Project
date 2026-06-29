@@ -709,11 +709,53 @@ describe('booking care staff capacity', () => {
         expect(booking.canceled_by_id).toBe(adminUser._id);
         expect(booking.cancel_reason).toBe('Customer asked staff to cancel');
         expect(booking.save).toHaveBeenCalledTimes(1);
+        expect(loyaltyService.refundRedeemedPointsForBooking).toHaveBeenCalledWith({
+            booking,
+            actorId: adminUser._id,
+        });
         expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
         expect(bookingServiceStepService.markResourceReleasedForBookingItem).not.toHaveBeenCalled();
         expect(bookingViolationService.recordLateCancelIfNeeded).not.toHaveBeenCalled();
         expect(bookingViolationService.recordNoShow).not.toHaveBeenCalled();
         expect(result.status).toBe('CANCELED');
+    });
+
+    it('cancels a late-arrival booking without refunding redeemed points', async () => {
+        const adminUser = { _id: '507f1f77bcf86cd799439041', role: 'ADMIN' };
+        const arrivedAt = new Date('2026-06-29T10:35:00.000Z');
+        const booking = {
+            _id: '507f1f77bcf86cd799439040',
+            customer_id: customerId,
+            garage_id: garageId,
+            status: 'CONFIRMED',
+            payment_status: 'UNPAID',
+            arrival_status: 'LATE',
+            arrived_at: arrivedAt,
+            late_minutes: 335,
+            used_points: 20,
+            wash_bay_id: null,
+            booking_items: [],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+
+        const result = await bookingService.cancelBooking(adminUser, booking._id, {
+            reason: 'Customer arrived late and declined rescheduling',
+        });
+
+        expect(booking.status).toBe('CANCELED');
+        expect(booking.arrival_status).toBe('LATE');
+        expect(booking.late_minutes).toBe(335);
+        expect(booking.arrived_at).toBe(arrivedAt);
+        expect(booking.cancel_reason).toBe('Customer arrived late and declined rescheduling');
+        expect(loyaltyService.refundRedeemedPointsForBooking).not.toHaveBeenCalled();
+        expect(result.status).toBe('CANCELED');
+        expect(result.arrival_status).toBe('LATE');
+        expect(result.late_minutes).toBe(335);
     });
 
     it('cancels an in-progress booking and releases assigned resources', async () => {

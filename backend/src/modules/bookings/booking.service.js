@@ -2956,10 +2956,12 @@ const cancelBooking = async (user, bookingId, { reason } = {}) => {
         await booking.save();
     }
 
-    await loyaltyService.refundRedeemedPointsForBooking({
-        booking,
-        actorId: user._id,
-    });
+    if (booking.arrival_status !== BOOKING_ARRIVAL_STATUS.LATE) {
+        await loyaltyService.refundRedeemedPointsForBooking({
+            booking,
+            actorId: user._id,
+        });
+    }
 
     for (const bookingItemKey of releasedBookingItemKeys) {
         await bookingServiceStepService.markResourceReleasedForBookingItem(

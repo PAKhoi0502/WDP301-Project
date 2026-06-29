@@ -757,6 +757,7 @@ const paths = {
         patch: {
             tags: ['Admin Bookings'],
             summary: 'Cancel booking as staff or admin',
+            description: 'Redeemed loyalty points are refunded for normal staff cancellations. If the booking has already recorded arrival_status=LATE, the booking is canceled without refunding redeemed points.',
             security: [{ bearerAuth: [] }],
             parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
             requestBody: {
