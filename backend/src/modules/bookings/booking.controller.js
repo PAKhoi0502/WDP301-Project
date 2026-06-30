@@ -8,6 +8,11 @@ const offerNextWaitlistForReleasedBooking = async (booking) => {
     try {
         return await bookingWaitlistService.offerNextForReleasedBooking(booking);
     } catch (error) {
+        console.warn('[bookings] waitlist auto-offer failed', {
+            booking_id: booking?.id || booking?._id || null,
+            error: error.message,
+        });
+
         return null;
     }
 };
@@ -93,8 +98,6 @@ const markNoShow = asyncHandler(async (req, res) => {
     const { body } = req.validated;
 
     const result = await bookingService.markNoShow(req.user, id, body || {});
-
-    await offerNextWaitlistForReleasedBooking(result);
 
     return sendSuccess(res, {
         message: 'Mark booking no-show successfully',

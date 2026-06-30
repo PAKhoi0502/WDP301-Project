@@ -128,6 +128,17 @@ describe('booking waitlist service', () => {
         });
     };
 
+    const setupOfferSlotAvailability = ({ slotAvailable = true, startTime = desiredStartTime } = {}) => {
+        bookingService.getAvailableSlots.mockResolvedValue({
+            slots: [
+                {
+                    start_time: startTime,
+                    is_available: slotAvailable,
+                },
+            ],
+        });
+    };
+
     beforeEach(() => {
         jest.clearAllMocks();
     });
@@ -190,6 +201,7 @@ describe('booking waitlist service', () => {
 
         BookingWaitlist.find.mockReturnValue(createQuery([waitlist]));
         BookingWaitlist.findById.mockReturnValue(createQuery(waitlist));
+        setupOfferSlotAvailability();
 
         const result = await bookingWaitlistService.offerNextForReleasedBooking({
             id: bookingId,
@@ -201,6 +213,13 @@ describe('booking waitlist service', () => {
             start_time: desiredStartTime,
         });
 
+        expect(bookingService.getAvailableSlots).toHaveBeenCalledWith(expect.objectContaining({
+            customer_id: otherCustomerId,
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            add_on_service_ids: [addOnServiceId],
+            date: '2099-06-10',
+        }));
         expect(waitlist.status).toBe(WAITLIST_STATUS.OFFERED);
         expect(waitlist.offered_at).toBeInstanceOf(Date);
         expect(waitlist.offer_expires_at).toBeInstanceOf(Date);
@@ -223,6 +242,7 @@ describe('booking waitlist service', () => {
 
         BookingWaitlist.find.mockReturnValue(createQuery([waitlist]));
         BookingWaitlist.findById.mockReturnValue(createQuery(waitlist));
+        setupOfferSlotAvailability();
 
         const result = await bookingWaitlistService.offerNextForReleasedBooking({
             id: bookingId,
@@ -240,6 +260,48 @@ describe('booking waitlist service', () => {
             id: waitlistId,
             status: WAITLIST_STATUS.OFFERED,
         });
+    });
+
+    it('does not auto-offer when the released slot is inside the waitlist cutoff', async () => {
+        const nearStartTime = new Date(Date.now() + 11 * 60 * 60 * 1000);
+
+        const result = await bookingWaitlistService.offerNextForReleasedBooking({
+            id: bookingId,
+            customer_id: customerId,
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            add_on_service_ids: [],
+            vehicle_type: 'CAR',
+            start_time: nearStartTime,
+        });
+
+        expect(result).toBeNull();
+        expect(BookingWaitlist.find).not.toHaveBeenCalled();
+        expect(notificationService.createInAppNotification).not.toHaveBeenCalled();
+    });
+
+    it('rejects auto-offer when the released slot is no longer available', async () => {
+        const waitlist = makeWaitlist({
+            customer_id: otherCustomerId,
+        });
+
+        BookingWaitlist.find.mockReturnValue(createQuery([waitlist]));
+        setupOfferSlotAvailability({ slotAvailable: false });
+
+        await expect(bookingWaitlistService.offerNextForReleasedBooking({
+            id: bookingId,
+            customer_id: customerId,
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            add_on_service_ids: [],
+            vehicle_type: 'CAR',
+            start_time: desiredStartTime,
+        })).rejects.toMatchObject({
+            errorCode: 'WAITLIST_SLOT_NOT_AVAILABLE_FOR_OFFER',
+        });
+
+        expect(waitlist.save).not.toHaveBeenCalled();
+        expect(notificationService.createInAppNotification).not.toHaveBeenCalled();
     });
 
     it('allows admin to manually offer a waiting waitlist when the slot is available', async () => {
@@ -350,8 +412,16 @@ describe('booking waitlist service', () => {
         const result = await bookingWaitlistService.expireExpiredOffers({ limit: 10 });
 
         expect(BookingWaitlist.find).toHaveBeenCalledWith({
-            status: WAITLIST_STATUS.OFFERED,
-            offer_expires_at: { $lte: expect.any(Date) },
+            $or: expect.arrayContaining([
+                expect.objectContaining({
+                    status: WAITLIST_STATUS.OFFERED,
+                    offer_expires_at: { $lte: expect.any(Date) },
+                }),
+                expect.objectContaining({
+                    status: { $in: [WAITLIST_STATUS.WAITING, WAITLIST_STATUS.OFFERED] },
+                    desired_start_time: { $lte: expect.any(Date) },
+                }),
+            ]),
         });
         expect(waitlist.status).toBe(WAITLIST_STATUS.EXPIRED);
         expect(waitlist.expired_at).toBeInstanceOf(Date);
@@ -359,6 +429,38 @@ describe('booking waitlist service', () => {
         expect(notificationService.createInAppNotification).toHaveBeenCalledWith(expect.objectContaining({
             userId: customerId,
             type: NOTIFICATION_TYPES.WAITLIST_OFFER_EXPIRED,
+        }));
+        expect(result).toMatchObject({
+            attempted: 1,
+            expired: 1,
+            data: [
+                {
+                    id: waitlistId,
+                    status: WAITLIST_STATUS.EXPIRED,
+                },
+            ],
+        });
+    });
+
+    it('expires waiting waitlists when the cutoff is reached', async () => {
+        const waitlist = makeWaitlist({
+            status: WAITLIST_STATUS.WAITING,
+            desired_start_time: new Date(Date.now() + 11 * 60 * 60 * 1000),
+        });
+
+        BookingWaitlist.find.mockReturnValue(createQuery([waitlist]));
+
+        const result = await bookingWaitlistService.expireExpiredOffers({ limit: 10 });
+
+        expect(waitlist.status).toBe(WAITLIST_STATUS.EXPIRED);
+        expect(waitlist.expired_at).toBeInstanceOf(Date);
+        expect(waitlist.save).toHaveBeenCalledTimes(1);
+        expect(notificationService.createInAppNotification).toHaveBeenCalledWith(expect.objectContaining({
+            userId: customerId,
+            type: NOTIFICATION_TYPES.WAITLIST_EXPIRED,
+            metadata: expect.objectContaining({
+                cutoff_hours: 12,
+            }),
         }));
         expect(result).toMatchObject({
             attempted: 1,

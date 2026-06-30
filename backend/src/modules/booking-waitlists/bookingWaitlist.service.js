@@ -16,7 +16,14 @@ const {
     NOTIFICATION_RELATED_TYPES,
 } = require('../../shared/constants/notification.constant');
 
-const DEFAULT_OFFER_EXPIRE_MINUTES = Number(process.env.WAITLIST_OFFER_EXPIRE_MINUTES) || 15;
+const getPositiveNumberEnv = (name, fallback) => {
+    const value = Number(process.env[name]);
+
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+const DEFAULT_OFFER_EXPIRE_MINUTES = getPositiveNumberEnv('WAITLIST_OFFER_EXPIRE_MINUTES', 15);
+const WAITLIST_CUTOFF_HOURS = getPositiveNumberEnv('WAITLIST_CUTOFF_HOURS', 12);
 const DEFAULT_TIMEZONE_OFFSET = process.env.APP_TIMEZONE_OFFSET || '+07:00';
 
 const normalizeText = (value) => {
@@ -71,6 +78,27 @@ const areSameAddOnSet = (left = [], right = []) => {
 
 const addMinutes = (date, minutes) => {
     return new Date(date.getTime() + minutes * 60 * 1000);
+};
+
+const getWaitlistCutoffTime = (desiredStartTime) => {
+    return addMinutes(parseDateTime(desiredStartTime, 'desired_start_time'), -WAITLIST_CUTOFF_HOURS * 60);
+};
+
+const isWaitlistCutoffReached = (desiredStartTime, now = new Date()) => {
+    return now >= getWaitlistCutoffTime(desiredStartTime);
+};
+
+const assertWaitlistCutoffNotReached = (desiredStartTime) => {
+    if (isWaitlistCutoffReached(desiredStartTime)) {
+        throw new AppError('Waitlist cutoff has passed', 409, 'WAITLIST_CUTOFF_PASSED');
+    }
+};
+
+const getOfferExpiresAt = ({ desiredStartTime, offeredAt, offerExpireMinutes }) => {
+    const requestedExpiresAt = addMinutes(offeredAt, offerExpireMinutes);
+    const cutoffTime = getWaitlistCutoffTime(desiredStartTime);
+
+    return requestedExpiresAt < cutoffTime ? requestedExpiresAt : cutoffTime;
 };
 
 const normalizeOfferExpireMinutes = (value) => {
@@ -409,48 +437,92 @@ const assertStaffCanAccessWaitlist = async (user, waitlist) => {
     }
 };
 
-const expireOfferIfNeeded = async (waitlist) => {
-    if (
-        waitlist.status !== WAITLIST_STATUS.OFFERED
-        || !waitlist.offer_expires_at
-        || waitlist.offer_expires_at > new Date()
-    ) {
-        return false;
-    }
-
+const expireWaitlistDocument = async ({
+    waitlist,
+    now = new Date(),
+    type,
+    title,
+    message,
+    metadata = {},
+}) => {
     waitlist.status = WAITLIST_STATUS.EXPIRED;
-    waitlist.expired_at = new Date();
+    waitlist.expired_at = now;
     await waitlist.save();
     await emitWaitlistNotification({
         userId: waitlist.customer_id,
-        type: NOTIFICATION_TYPES.WAITLIST_OFFER_EXPIRED,
-        title: 'Waitlist offer expired',
-        message: 'Your waitlist offer has expired.',
+        type,
+        title,
+        message,
         waitlist,
+        metadata,
     });
 
     return true;
 };
 
+const expireWaitlistIfNeeded = async (waitlist, now = new Date()) => {
+    const offerExpired = waitlist.status === WAITLIST_STATUS.OFFERED
+        && waitlist.offer_expires_at
+        && waitlist.offer_expires_at <= now;
+    const cutoffReached = [WAITLIST_STATUS.WAITING, WAITLIST_STATUS.OFFERED].includes(waitlist.status)
+        && isWaitlistCutoffReached(waitlist.desired_start_time, now);
+
+    if (!offerExpired && !cutoffReached) {
+        return false;
+    }
+
+    if (waitlist.status === WAITLIST_STATUS.OFFERED) {
+        return expireWaitlistDocument({
+            waitlist,
+            now,
+            type: NOTIFICATION_TYPES.WAITLIST_OFFER_EXPIRED,
+            title: 'Waitlist offer expired',
+            message: 'Your waitlist offer has expired.',
+            metadata: cutoffReached ? { cutoff_hours: WAITLIST_CUTOFF_HOURS } : {},
+        });
+    }
+
+    return expireWaitlistDocument({
+        waitlist,
+        now,
+        type: NOTIFICATION_TYPES.WAITLIST_EXPIRED,
+        title: 'Waitlist expired',
+        message: 'Your waitlist entry has expired because the booking time is too close.',
+        metadata: {
+            cutoff_hours: WAITLIST_CUTOFF_HOURS,
+        },
+    });
+};
+
 const expireExpiredOffers = async ({ limit = 50 } = {}) => {
     const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
     const now = new Date();
+    const cutoffBoundary = addMinutes(now, WAITLIST_CUTOFF_HOURS * 60);
     const waitlists = await BookingWaitlist.find({
-        status: WAITLIST_STATUS.OFFERED,
-        offer_expires_at: { $lte: now },
+        $or: [
+            {
+                status: WAITLIST_STATUS.OFFERED,
+                offer_expires_at: { $lte: now },
+            },
+            {
+                status: { $in: [WAITLIST_STATUS.WAITING, WAITLIST_STATUS.OFFERED] },
+                desired_start_time: { $lte: cutoffBoundary },
+            },
+        ],
     })
-        .sort({ offer_expires_at: 1, created_at: 1 })
+        .sort({ desired_start_time: 1, offer_expires_at: 1, created_at: 1 })
         .limit(safeLimit);
     const expiredWaitlists = [];
 
     for (const waitlist of waitlists) {
-        if (await expireOfferIfNeeded(waitlist)) {
+        if (await expireWaitlistIfNeeded(waitlist, now)) {
             expiredWaitlists.push(waitlist);
         }
     }
 
     return {
         checked_at: now,
+        cutoff_hours: WAITLIST_CUTOFF_HOURS,
         attempted: waitlists.length,
         expired: expiredWaitlists.length,
         data: BookingWaitlistMapper.toBookingWaitlistDtoList(expiredWaitlists),
@@ -465,6 +537,7 @@ const createMyWaitlist = async (customerId, payload = {}) => {
     const addOnServiceIds = normalizeAddOnServiceIds(payload.add_on_service_ids || []);
 
     assertDesiredStartTimeIsFuture(desiredStartTime);
+    assertWaitlistCutoffNotReached(desiredStartTime);
     assertServiceMatchesVehicle(servicePackage, vehicle.vehicle_type);
     await getActiveAddOnServices(addOnServiceIds, vehicle.vehicle_type);
     await assertDesiredSlotCanUseWaitlist({
@@ -590,7 +663,7 @@ const getAllWaitlists = async (user, query = {}) => {
 };
 
 const cancelWaitlistDocument = async ({ waitlist, actorId, reason }) => {
-    await expireOfferIfNeeded(waitlist);
+    await expireWaitlistIfNeeded(waitlist);
 
     if (!WAITLIST_ACTIVE_STATUSES.includes(waitlist.status)) {
         throw new AppError('Waitlist cannot be canceled in current status', 400, 'WAITLIST_CANCEL_NOT_ALLOWED');
@@ -650,7 +723,7 @@ const offerWaitlist = async (user, waitlistId, { offer_expires_in_minutes } = {}
     const waitlist = await getRawWaitlistDocumentById(waitlistId);
 
     await assertStaffCanAccessWaitlist(user, waitlist);
-    await expireOfferIfNeeded(waitlist);
+    await expireWaitlistIfNeeded(waitlist);
 
     if (waitlist.status !== WAITLIST_STATUS.WAITING) {
         throw new AppError('Waitlist cannot be offered in current status', 400, 'WAITLIST_OFFER_NOT_ALLOWED');
@@ -659,6 +732,7 @@ const offerWaitlist = async (user, waitlistId, { offer_expires_in_minutes } = {}
     const desiredStartTime = parseDateTime(waitlist.desired_start_time, 'desired_start_time');
 
     assertDesiredStartTimeIsFuture(desiredStartTime);
+    assertWaitlistCutoffNotReached(desiredStartTime);
     await assertDesiredSlotIsAvailableForOffer({
         customerId: waitlist.customer_id,
         vehicleId: waitlist.vehicle_id,
@@ -670,10 +744,15 @@ const offerWaitlist = async (user, waitlistId, { offer_expires_in_minutes } = {}
 
     const now = new Date();
     const offerExpireMinutes = normalizeOfferExpireMinutes(offer_expires_in_minutes);
+    const offerExpiresAt = getOfferExpiresAt({
+        desiredStartTime,
+        offeredAt: now,
+        offerExpireMinutes,
+    });
 
     waitlist.status = WAITLIST_STATUS.OFFERED;
     waitlist.offered_at = now;
-    waitlist.offer_expires_at = addMinutes(now, offerExpireMinutes);
+    waitlist.offer_expires_at = offerExpiresAt;
     waitlist.source_booking_id = null;
 
     await waitlist.save();
@@ -731,6 +810,12 @@ const offerNextForReleasedBooking = async (booking) => {
     const sourceBookingId = booking._id || booking.id;
     const releasedCustomerId = toObjectIdString(booking.customer_id);
     const desiredStartTime = parseDateTime(booking.start_time, 'booking.start_time');
+    const now = new Date();
+
+    if (isWaitlistCutoffReached(desiredStartTime, now)) {
+        return null;
+    }
+
     const candidates = await BookingWaitlist.find({
         garage_id: booking.garage_id,
         service_package_id: booking.service_package_id,
@@ -748,11 +833,22 @@ const offerNextForReleasedBooking = async (booking) => {
         return null;
     }
 
-    const now = new Date();
+    await assertDesiredSlotIsAvailableForOffer({
+        customerId: waitlist.customer_id,
+        vehicleId: waitlist.vehicle_id,
+        garageId: waitlist.garage_id,
+        servicePackageId: waitlist.service_package_id,
+        addOnServiceIds: waitlist.add_on_service_ids,
+        desiredStartTime,
+    });
 
     waitlist.status = WAITLIST_STATUS.OFFERED;
     waitlist.offered_at = now;
-    waitlist.offer_expires_at = addMinutes(now, DEFAULT_OFFER_EXPIRE_MINUTES);
+    waitlist.offer_expires_at = getOfferExpiresAt({
+        desiredStartTime,
+        offeredAt: now,
+        offerExpireMinutes: DEFAULT_OFFER_EXPIRE_MINUTES,
+    });
     waitlist.source_booking_id = sourceBookingId;
 
     await waitlist.save();
@@ -783,7 +879,7 @@ const acceptMyWaitlist = async (customerId, waitlistId) => {
         throw new AppError('Waitlist entry not found', 404, 'WAITLIST_NOT_FOUND');
     }
 
-    if (await expireOfferIfNeeded(waitlist)) {
+    if (await expireWaitlistIfNeeded(waitlist)) {
         throw new AppError('Waitlist offer has expired', 409, 'WAITLIST_OFFER_EXPIRED');
     }
 

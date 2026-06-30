@@ -23,6 +23,7 @@ const notificationSchema = {
                 'WAITLIST_OFFERED',
                 'WAITLIST_OFFER_ACCEPTED',
                 'WAITLIST_OFFER_EXPIRED',
+                'WAITLIST_EXPIRED',
                 'WAITLIST_CANCELED',
                 'CHECKED_IN',
                 'SERVICE_STARTED',
