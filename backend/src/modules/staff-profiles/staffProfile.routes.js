@@ -5,6 +5,7 @@ const {
     idParamSchema,
     getStaffProfilesSchema,
     createStaffProfileSchema,
+    inviteStaffSchema,
     updateStaffProfileSchema,
     updateStaffProfileStatusSchema,
 } = require('./staffProfile.validator');
@@ -35,6 +36,22 @@ router.post(
     authorize(USER_ROLES.ADMIN),
     validate(createStaffProfileSchema),
     staffProfileController.createStaffProfile
+);
+
+router.post(
+    '/invitations',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    validate(inviteStaffSchema),
+    staffProfileController.inviteStaff
+);
+
+router.post(
+    '/:id/invitations/resend',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    validate(idParamSchema),
+    staffProfileController.resendStaffInvitation
 );
 
 router.get(

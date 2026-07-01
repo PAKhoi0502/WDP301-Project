@@ -74,6 +74,37 @@ const schemas = {
             },
         },
     },
+    StaffInvitationCreateRequest: {
+        type: 'object',
+        required: ['full_name', 'email', 'phone', 'staff_code', 'staff_type', 'garage_id'],
+        properties: {
+            full_name: {
+                type: 'string',
+                example: 'Nguyen Van Staff',
+            },
+            email: {
+                type: 'string',
+                example: 'staff@example.com',
+            },
+            phone: {
+                type: 'string',
+                example: '0901234567',
+            },
+            staff_code: {
+                type: 'string',
+                example: 'STF100',
+            },
+            staff_type: {
+                type: 'string',
+                enum: staffTypeValues,
+                example: 'CUSTOMER_SERVICE_STAFF',
+            },
+            garage_id: {
+                type: 'string',
+                example: '665f1b7b2a5f9d0012a54321',
+            },
+        },
+    },
     StaffProfilePublic: {
         type: 'object',
         properties: {
@@ -174,6 +205,47 @@ const schemas = {
                     total_pages: {
                         type: 'integer',
                         example: 5,
+                    },
+                },
+            },
+        },
+    },
+    StaffInvitationResponse: {
+        type: 'object',
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Invite staff successfully',
+            },
+            data: {
+                type: 'object',
+                properties: {
+                    staff_profile: {
+                        $ref: '#/components/schemas/StaffProfilePublic',
+                    },
+                    invite: {
+                        type: 'object',
+                        properties: {
+                            expires_at: {
+                                type: 'string',
+                                format: 'date-time',
+                            },
+                            email_status: {
+                                type: 'string',
+                                nullable: true,
+                                example: 'SENT',
+                            },
+                            invite_token: {
+                                type: 'string',
+                                nullable: true,
+                                description: 'Only returned outside production',
+                                example: 'staff-invitation-token',
+                            },
+                        },
                     },
                 },
             },
@@ -387,6 +459,72 @@ const paths = {
                 401: unauthorizedResponse,
                 403: forbiddenResponse,
                 409: conflictResponse,
+            },
+        },
+    },
+    '/staff-profiles/invitations': {
+        post: {
+            tags: ['Staff Profiles'],
+            summary: 'Invite a new staff account',
+            description: 'Creates a STAFF user with pending onboarding, creates an inactive staff profile, and emails a 24-hour password setup invitation.',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            $ref: '#/components/schemas/StaffInvitationCreateRequest',
+                        },
+                    },
+                },
+            },
+            responses: {
+                201: {
+                    description: 'Invite staff successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffInvitationResponse',
+                            },
+                        },
+                    },
+                },
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                409: conflictResponse,
+            },
+        },
+    },
+    '/staff-profiles/{id}/invitations/resend': {
+        post: {
+            tags: ['Staff Profiles'],
+            summary: 'Resend staff invitation',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            parameters: [staffProfileIdParameter],
+            responses: {
+                200: {
+                    description: 'Resend staff invitation successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffInvitationResponse',
+                            },
+                        },
+                    },
+                },
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: notFoundResponse,
             },
         },
     },

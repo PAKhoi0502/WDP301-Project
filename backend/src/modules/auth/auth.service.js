@@ -24,6 +24,8 @@ const forgotPassword = (...args) => coreService.forgotPassword(...args);
 
 const resetPassword = (...args) => coreService.resetPassword(...args);
 
+const acceptStaffInvitation = (...args) => coreService.acceptStaffInvitation(...args);
+
 const getCurrentUser = async (userId) => {
     const user = await User.findById(userId);
 
@@ -57,5 +59,6 @@ module.exports = {
     changePassword,
     forgotPassword,
     resetPassword,
+    acceptStaffInvitation,
     getCurrentUser,
 };

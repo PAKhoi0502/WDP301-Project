@@ -12,6 +12,7 @@ const toUserDto = (user) => {
         phone: plainUser.phone,
         phone_verified_at: plainUser.phone_verified_at || null,
         role: plainUser.role,
+        onboarding_status: plainUser.onboarding_status || 'ACTIVE',
         avatar_url: plainUser.avatar_url || '',
         is_active: plainUser.is_active,
         last_login_at: plainUser.last_login_at || null,

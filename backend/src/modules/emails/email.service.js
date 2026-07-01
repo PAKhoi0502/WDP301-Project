@@ -226,6 +226,40 @@ const buildPasswordResetEmail = ({ resetToken, expiresInMinutes, fullName }) => 
     };
 };
 
+const buildStaffInviteEmail = ({
+    inviteToken,
+    expiresInHours,
+    fullName,
+    phone,
+}) => {
+    const inviteUrl = normalizeText(process.env.STAFF_INVITE_URL);
+    const greetingName = normalizeText(fullName) || 'staff member';
+    const title = 'Activate your AutoWash Pro staff account';
+    const message = [
+        `Hello ${greetingName},`,
+        'An administrator created an AutoWash Pro staff account for you.',
+        `Your login phone is: ${phone}`,
+        `Use this invitation token to set your password: ${inviteToken}`,
+        `This invitation expires in ${expiresInHours} hours.`,
+        'After setting your password, sign in and verify your phone number with OTP to activate staff access.',
+    ].join('\n\n');
+    const actionUrl = inviteUrl
+        ? `${inviteUrl}${inviteUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(inviteToken)}&phone=${encodeURIComponent(phone)}`
+        : null;
+
+    return {
+        subject: title,
+        text: message,
+        html: buildDefaultHtml({
+            title,
+            message,
+            actionUrl,
+            actionLabel: actionUrl ? 'Set staff password' : null,
+            footer: 'AutoWash Pro staff invitation',
+        }),
+    };
+};
+
 const resetTransporterCache = () => {
     cachedTransporter = null;
     cachedConfigKey = null;
@@ -235,5 +269,6 @@ module.exports = {
     sendEmail,
     buildDefaultHtml,
     buildPasswordResetEmail,
+    buildStaffInviteEmail,
     resetTransporterCache,
 };

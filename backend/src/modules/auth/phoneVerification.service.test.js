@@ -24,6 +24,10 @@ const phoneVerificationService = require('./services/phoneVerification.service')
 const {
     PHONE_VERIFICATION_PURPOSES,
 } = require('./phoneVerification.constant');
+const { USER_ROLES } = require('../../shared/constants/roles.constant');
+const {
+    USER_ONBOARDING_STATUSES,
+} = require('../../shared/constants/userOnboarding.constant');
 
 describe('phone verification service', () => {
     const originalEnv = process.env;
@@ -179,5 +183,75 @@ describe('phone verification service', () => {
         });
 
         expect(smsService.sendOtp).not.toHaveBeenCalled();
+    });
+
+    it('requests a staff activation OTP for the authenticated pending staff phone', async () => {
+        User.findById.mockResolvedValue({
+            _id: '665f1b7b2a5f9d0012a99999',
+            phone: '+84901234567',
+            role: USER_ROLES.STAFF,
+            phone_verified_at: null,
+            onboarding_status: USER_ONBOARDING_STATUSES.PENDING_PHONE_VERIFICATION,
+        });
+
+        const requestResult = await phoneVerificationService.requestVerification({
+            phone: '0901234567',
+            purpose: PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION,
+            userId: '665f1b7b2a5f9d0012a99999',
+            requestIp: '127.0.0.1',
+        });
+        const createdChallenge = PhoneVerification.create.mock.calls[0][0];
+
+        expect(requestResult.purpose).toBe(PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION);
+        expect(createdChallenge.user_id).toBe('665f1b7b2a5f9d0012a99999');
+        expect(smsService.sendOtp).toHaveBeenCalled();
+    });
+
+    it('rejects staff activation OTP when the phone does not match the account', async () => {
+        User.findById.mockResolvedValue({
+            _id: '665f1b7b2a5f9d0012a99999',
+            phone: '+84901234567',
+            role: USER_ROLES.STAFF,
+            phone_verified_at: null,
+            onboarding_status: USER_ONBOARDING_STATUSES.PENDING_PHONE_VERIFICATION,
+        });
+
+        await expect(
+            phoneVerificationService.requestVerification({
+                phone: '0912345678',
+                purpose: PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION,
+                userId: '665f1b7b2a5f9d0012a99999',
+                requestIp: '127.0.0.1',
+            })
+        ).rejects.toMatchObject({
+            errorCode: 'STAFF_ACTIVATION_PHONE_MISMATCH',
+        });
+
+        expect(smsService.sendOtp).not.toHaveBeenCalled();
+    });
+
+    it('does not expose debug OTP in production unless explicitly enabled', async () => {
+        process.env.NODE_ENV = 'production';
+
+        const requestResult = await phoneVerificationService.requestVerification({
+            phone: '+84901234567',
+            purpose: PHONE_VERIFICATION_PURPOSES.REGISTER,
+            requestIp: '127.0.0.1',
+        });
+
+        expect(requestResult.debug_otp).toBeUndefined();
+    });
+
+    it('exposes debug OTP in production when explicitly enabled', async () => {
+        process.env.NODE_ENV = 'production';
+        process.env.SHOW_DEBUG_OTP = 'true';
+
+        const requestResult = await phoneVerificationService.requestVerification({
+            phone: '+84901234567',
+            purpose: PHONE_VERIFICATION_PURPOSES.REGISTER,
+            requestIp: '127.0.0.1',
+        });
+
+        expect(requestResult.debug_otp).toMatch(/^[0-9]{6}$/);
     });
 });

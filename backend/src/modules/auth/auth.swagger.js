@@ -48,6 +48,11 @@ const schemas = {
                 type: 'boolean',
                 example: true,
             },
+            onboarding_status: {
+                type: 'string',
+                enum: ['ACTIVE', 'PENDING_PASSWORD_SETUP', 'PENDING_PHONE_VERIFICATION'],
+                example: 'ACTIVE',
+            },
             last_login_at: {
                 type: 'string',
                 format: 'date-time',
@@ -102,7 +107,7 @@ const schemas = {
             },
             purpose: {
                 type: 'string',
-                enum: ['REGISTER', 'CHANGE_PHONE'],
+                enum: ['REGISTER', 'CHANGE_PHONE', 'STAFF_ACTIVATION'],
                 example: 'REGISTER',
             },
         },
@@ -145,7 +150,7 @@ const schemas = {
                     },
                     purpose: {
                         type: 'string',
-                        enum: ['REGISTER', 'CHANGE_PHONE'],
+                        enum: ['REGISTER', 'CHANGE_PHONE', 'STAFF_ACTIVATION'],
                     },
                     expires_at: {
                         type: 'string',
@@ -158,7 +163,7 @@ const schemas = {
                     debug_otp: {
                         type: 'string',
                         nullable: true,
-                        description: 'Only returned by the mock provider outside production',
+                        description: 'Returned by the mock provider outside production, or in production when SHOW_DEBUG_OTP=true',
                         example: '123456',
                     },
                 },
@@ -189,7 +194,7 @@ const schemas = {
                     },
                     purpose: {
                         type: 'string',
-                        enum: ['REGISTER', 'CHANGE_PHONE'],
+                        enum: ['REGISTER', 'CHANGE_PHONE', 'STAFF_ACTIVATION'],
                     },
                     expires_at: {
                         type: 'string',
@@ -341,7 +346,7 @@ const paths = {
         post: {
             tags: ['Auth'],
             summary: 'Request phone verification OTP',
-            description: 'CHANGE_PHONE requires a bearer access token. REGISTER is public.',
+            description: 'CHANGE_PHONE and STAFF_ACTIVATION require a bearer access token. REGISTER is public.',
             requestBody: {
                 required: true,
                 content: {
@@ -374,7 +379,7 @@ const paths = {
                     },
                 },
                 401: {
-                    description: 'Authentication is required for CHANGE_PHONE',
+                    description: 'Authentication is required for CHANGE_PHONE or STAFF_ACTIVATION',
                     content: {
                         'application/json': {
                             schema: {
@@ -406,11 +411,50 @@ const paths = {
             },
         },
     },
+    StaffInvitationAcceptRequest: {
+        type: 'object',
+        required: ['phone', 'invite_token', 'new_password'],
+        properties: {
+            phone: {
+                type: 'string',
+                example: '0901234567',
+            },
+            invite_token: {
+                type: 'string',
+                example: 'staff-invitation-token',
+            },
+            new_password: {
+                type: 'string',
+                example: 'Staff@123',
+            },
+        },
+    },
+    StaffInvitationAcceptResponse: {
+        type: 'object',
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Staff password setup successfully',
+            },
+            data: {
+                type: 'object',
+                properties: {
+                    user: {
+                        $ref: '#/components/schemas/UserPublic',
+                    },
+                },
+            },
+        },
+    },
     '/auth/phone-verifications/verify': {
         post: {
             tags: ['Auth'],
             summary: 'Verify phone OTP',
-            description: 'CHANGE_PHONE requires the same authenticated user that requested the OTP.',
+            description: 'CHANGE_PHONE and STAFF_ACTIVATION require the same authenticated user that requested the OTP.',
             requestBody: {
                 required: true,
                 content: {
@@ -807,6 +851,44 @@ const paths = {
                 },
                 400: {
                     description: 'Validation failed or invalid reset token',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/ErrorResponse',
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+    '/auth/staff-invitations/accept': {
+        post: {
+            tags: ['Auth'],
+            summary: 'Accept staff invitation and set initial password',
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            $ref: '#/components/schemas/StaffInvitationAcceptRequest',
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'Staff password setup successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffInvitationAcceptResponse',
+                            },
+                        },
+                    },
+                },
+                400: {
+                    description: 'Validation failed or invalid invitation',
                     content: {
                         'application/json': {
                             schema: {

@@ -1,7 +1,10 @@
 const User = require('../../modules/users/user.model');
 const { AppError } = require('../utils/appError');
 const { verifyAccessToken } = require('../utils/jwt');
-const { USER_ROLE_VALUES } = require('../constants/roles.constant');
+const { USER_ROLES, USER_ROLE_VALUES } = require('../constants/roles.constant');
+const {
+    USER_ONBOARDING_STATUSES,
+} = require('../constants/userOnboarding.constant');
 
 const extractBearerToken = (req) => {
     const authorization = req.headers.authorization;
@@ -126,6 +129,26 @@ const authorize = (...roles) => {
                     'You do not have permission to access this resource',
                     403,
                     'FORBIDDEN'
+                )
+            );
+        }
+
+        const onboardingStatus = req.user.onboarding_status
+            || USER_ONBOARDING_STATUSES.ACTIVE;
+
+        if (
+            req.user.role === USER_ROLES.STAFF
+            && roles.includes(USER_ROLES.STAFF)
+            && (
+                onboardingStatus !== USER_ONBOARDING_STATUSES.ACTIVE
+                || !req.user.phone_verified_at
+            )
+        ) {
+            return next(
+                new AppError(
+                    'Staff account must complete onboarding before accessing this resource',
+                    403,
+                    'STAFF_ONBOARDING_INCOMPLETE'
                 )
             );
         }

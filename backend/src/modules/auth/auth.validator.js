@@ -134,6 +134,16 @@ const resetPasswordSchema = z.object({
         .strict(),
 });
 
+const acceptStaffInvitationSchema = z.object({
+    body: z
+        .object({
+            phone: phoneField,
+            invite_token: resetTokenField,
+            new_password: passwordField,
+        })
+        .strict(),
+});
+
 module.exports = {
     registerSchema,
     requestPhoneVerificationSchema,
@@ -142,4 +152,5 @@ module.exports = {
     changePasswordSchema,
     forgotPasswordSchema,
     resetPasswordSchema,
+    acceptStaffInvitationSchema,
 };

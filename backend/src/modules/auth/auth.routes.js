@@ -9,6 +9,7 @@ const {
     changePasswordSchema,
     forgotPasswordSchema,
     resetPasswordSchema,
+    acceptStaffInvitationSchema,
 } = require('./auth.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
 const {
@@ -83,6 +84,12 @@ router.post(
     '/reset-password',
     validate(resetPasswordSchema),
     authController.resetPassword
+);
+
+router.post(
+    '/staff-invitations/accept',
+    validate(acceptStaffInvitationSchema),
+    authController.acceptStaffInvitation
 );
 
 module.exports = router;

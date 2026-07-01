@@ -1,6 +1,7 @@
 const { z } = require('zod');
 
 const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
+const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 
 const emptyToUndefined = (value) => {
     if (typeof value === 'string' && value.trim() === '') {
@@ -49,6 +50,27 @@ const staffCodeField = z
 
 const optionalStaffCodeField = z.preprocess(emptyToUndefined, staffCodeField.optional());
 
+const fullNameField = z
+    .string()
+    .trim()
+    .min(2, 'Full name must have at least 2 characters')
+    .max(100, 'Full name must have at most 100 characters');
+
+const emailField = z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email('Email is invalid')
+    .max(120, 'Email must have at most 120 characters');
+
+const phoneField = z
+    .string()
+    .trim()
+    .min(9, 'Phone must have at least 9 characters')
+    .max(30, 'Phone must have at most 30 characters')
+    .transform(normalizePhone)
+    .refine(isValidPhone, 'Phone is invalid');
+
 const atLeastOneField = (data) => Object.values(data).some((value) => value !== undefined);
 
 const idParamSchema = z.object({
@@ -84,6 +106,19 @@ const createStaffProfileSchema = z.object({
             staff_type: z.enum(STAFF_TYPE_VALUES),
             garage_id: optionalObjectIdField,
             is_active: z.boolean().optional(),
+        })
+        .strict(),
+});
+
+const inviteStaffSchema = z.object({
+    body: z
+        .object({
+            full_name: fullNameField,
+            email: emailField,
+            phone: phoneField,
+            staff_code: staffCodeField,
+            staff_type: z.enum(STAFF_TYPE_VALUES),
+            garage_id: objectIdField,
         })
         .strict(),
 });
@@ -124,6 +159,7 @@ module.exports = {
     idParamSchema,
     getStaffProfilesSchema,
     createStaffProfileSchema,
+    inviteStaffSchema,
     updateStaffProfileSchema,
     updateStaffProfileStatusSchema,
 };

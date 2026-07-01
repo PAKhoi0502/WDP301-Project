@@ -48,6 +48,7 @@ const ROUTE_GROUPS = Object.freeze([
             'POST /auth/logout',
             'POST /auth/forgot-password',
             'POST /auth/reset-password',
+            'POST /auth/staff-invitations/accept',
         ],
     },
     {
@@ -92,6 +93,8 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'GET /staff-profiles',
             'POST /staff-profiles',
+            'POST /staff-profiles/invitations',
+            'POST /staff-profiles/{id}/invitations/resend',
             'GET /staff-profiles/{id}',
             'PATCH /staff-profiles/{id}',
             'DELETE /staff-profiles/{id}',

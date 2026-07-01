@@ -193,6 +193,17 @@ const resetPassword = asyncHandler(async (req, res) => {
     });
 });
 
+const acceptStaffInvitation = asyncHandler(async (req, res) => {
+    const result = await authService.acceptStaffInvitation(req.validated.body);
+
+    return sendSuccess(res, {
+        message: result.message,
+        data: {
+            user: result.user,
+        },
+    });
+});
+
 module.exports = {
     register,
     requestPhoneVerification,
@@ -205,4 +216,5 @@ module.exports = {
     changePassword,
     forgotPassword,
     resetPassword,
+    acceptStaffInvitation,
 };

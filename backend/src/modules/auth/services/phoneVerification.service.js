@@ -6,6 +6,10 @@ const PhoneVerification = require('../models/phoneVerification.model');
 const smsService = require('../../sms/sms.service');
 const { hashToken } = require('../security/token.hash');
 const { AppError } = require('../../../shared/utils/appError');
+const { USER_ROLES } = require('../../../shared/constants/roles.constant');
+const {
+    USER_ONBOARDING_STATUSES,
+} = require('../../../shared/constants/userOnboarding.constant');
 const { normalizePhone } = require('../../../shared/utils/phone');
 const {
     PHONE_VERIFICATION_PURPOSES,
@@ -24,6 +28,20 @@ const getPositiveNumber = (name, fallback) => {
     const value = Number(process.env[name]);
 
     return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+const isEnvEnabled = (name) => {
+    return ['true', '1', 'yes', 'on'].includes(
+        String(process.env[name] || '').trim().toLowerCase()
+    );
+};
+
+const shouldExposeDebugOtp = (smsResult) => {
+    return smsResult.provider === 'mock'
+        && (
+            process.env.NODE_ENV !== 'production'
+            || isEnvEnabled('SHOW_DEBUG_OTP')
+        );
 };
 
 const getOtpSecret = () => {
@@ -167,7 +185,7 @@ const assertTargetPhoneAllowed = async ({ phone, purpose, userId }) => {
 
     if (!userId) {
         throw new AppError(
-            'Authentication is required to change phone',
+            'Authentication is required',
             401,
             'AUTHENTICATION_REQUIRED'
         );
@@ -177,6 +195,37 @@ const assertTargetPhoneAllowed = async ({ phone, purpose, userId }) => {
 
     if (!user) {
         throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+
+    if (purpose === PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION) {
+        if (user.role !== USER_ROLES.STAFF) {
+            throw new AppError(
+                'Only staff accounts can use staff activation OTP',
+                400,
+                'STAFF_ACTIVATION_NOT_ALLOWED'
+            );
+        }
+
+        if (normalizePhone(user.phone) !== phone) {
+            throw new AppError(
+                'Staff activation phone must match current account phone',
+                400,
+                'STAFF_ACTIVATION_PHONE_MISMATCH'
+            );
+        }
+
+        if (
+            user.onboarding_status !== USER_ONBOARDING_STATUSES.PENDING_PHONE_VERIFICATION
+            || user.phone_verified_at
+        ) {
+            throw new AppError(
+                'Staff account is not pending phone verification',
+                400,
+                'STAFF_ACTIVATION_NOT_PENDING'
+            );
+        }
+
+        return;
     }
 
     if (normalizePhone(user.phone) === phone) {
@@ -211,9 +260,10 @@ const requestVerification = async ({
     assertPurpose(purpose);
 
     const phone = normalizePhone(rawPhone);
-    const effectiveUserId = purpose === PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE
-        ? userId
-        : null;
+    const effectiveUserId = [
+        PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
+        PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION,
+    ].includes(purpose) ? userId : null;
 
     await assertTargetPhoneAllowed({
         phone,
@@ -296,11 +346,9 @@ const requestVerification = async ({
             'OTP_REQUEST_COOLDOWN_SECONDS',
             DEFAULT_COOLDOWN_SECONDS
         ),
-        debug_otp:
-            process.env.NODE_ENV !== 'production'
-            && smsResult.provider === 'mock'
-                ? smsResult.debug_otp
-                : undefined,
+        debug_otp: shouldExposeDebugOtp(smsResult)
+            ? smsResult.debug_otp
+            : undefined,
     };
 };
 
@@ -324,7 +372,10 @@ const verifyOtp = async ({
     }
 
     if (
-        challenge.purpose === PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE
+        [
+            PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
+            PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION,
+        ].includes(challenge.purpose)
         && (!userId || challenge.user_id?.toString() !== userId.toString())
     ) {
         throw new AppError(
@@ -476,7 +527,10 @@ const getVerifiedChallenge = async ({
     }
 
     if (
-        purpose === PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE
+        [
+            PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
+            PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION,
+        ].includes(purpose)
         && (!userId || challenge.user_id?.toString() !== userId.toString())
     ) {
         throw new AppError(

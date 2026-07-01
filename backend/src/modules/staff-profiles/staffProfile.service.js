@@ -1,10 +1,33 @@
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
+
 const StaffProfile = require('./staffProfile.model');
 const StaffProfileMapper = require('./staffProfile.mapper');
 const User = require('../users/user.model');
 const Garage = require('../garages/garage.model');
+const PasswordReset = require('../auth/models/passwordResetToken.model');
+const emailService = require('../emails/email.service');
+const notificationService = require('../notifications/notification.service');
+const { hashToken } = require('../auth/security/token.hash');
+const {
+    PASSWORD_RESET_PURPOSES,
+} = require('../auth/passwordResetPurpose.constant');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
+const {
+    USER_ONBOARDING_STATUSES,
+} = require('../../shared/constants/userOnboarding.constant');
 const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
+const { normalizePhone } = require('../../shared/utils/phone');
+const {
+    NOTIFICATION_TYPES,
+    NOTIFICATION_RELATED_TYPES,
+} = require('../../shared/constants/notification.constant');
+
+const DEFAULT_STAFF_INVITE_HOURS = 24;
+const DEFAULT_SALT_ROUNDS = 10;
+const USER_POPULATE_FIELDS = 'full_name email phone role avatar_url is_active phone_verified_at onboarding_status last_login_at created_at updated_at';
 
 const normalizeText = (value) => {
     if (typeof value !== 'string') {
@@ -38,6 +61,44 @@ const normalizeObjectIdOrNull = (value) => {
     }
 
     return value;
+};
+
+const normalizeEmail = (value) => {
+    if (!value) {
+        return value;
+    }
+
+    return value.trim().toLowerCase();
+};
+
+const normalizeStaffInvitationPayload = (payload = {}) => {
+    const invitePayload = {};
+
+    if (payload.full_name !== undefined) {
+        invitePayload.full_name = normalizeText(payload.full_name);
+    }
+
+    if (payload.email !== undefined) {
+        invitePayload.email = normalizeEmail(payload.email);
+    }
+
+    if (payload.phone !== undefined) {
+        invitePayload.phone = normalizePhone(payload.phone);
+    }
+
+    if (payload.staff_code !== undefined) {
+        invitePayload.staff_code = normalizeStaffCode(payload.staff_code);
+    }
+
+    if (payload.staff_type !== undefined) {
+        invitePayload.staff_type = normalizeText(payload.staff_type);
+    }
+
+    if (payload.garage_id !== undefined) {
+        invitePayload.garage_id = normalizeObjectIdOrNull(payload.garage_id);
+    }
+
+    return invitePayload;
 };
 
 const normalizeCreatePayload = (payload = {}) => {
@@ -132,6 +193,131 @@ const assertStaffTypeValid = (staffType) => {
     }
 };
 
+const assertStaffInviteUserAvailable = async ({ phone, email }) => {
+    const existingPhone = await User.exists({ phone });
+
+    if (existingPhone) {
+        throw new AppError(
+            'Phone already exists',
+            409,
+            'PHONE_ALREADY_EXISTS'
+        );
+    }
+
+    const existingEmail = await User.exists({ email });
+
+    if (existingEmail) {
+        throw new AppError(
+            'Email already exists',
+            409,
+            'EMAIL_ALREADY_EXISTS'
+        );
+    }
+};
+
+const getSaltRounds = () => {
+    return Number(process.env.BCRYPT_SALT_ROUNDS) || DEFAULT_SALT_ROUNDS;
+};
+
+const getStaffInviteExpiresInHours = () => {
+    return Number(process.env.STAFF_INVITE_EXPIRES_IN_HOURS)
+        || DEFAULT_STAFF_INVITE_HOURS;
+};
+
+const getStaffInviteExpiresAt = () => {
+    return new Date(
+        Date.now() + getStaffInviteExpiresInHours() * 60 * 60 * 1000
+    );
+};
+
+const generateInviteToken = () => {
+    return crypto.randomBytes(64).toString('hex');
+};
+
+const createPlaceholderPasswordHash = async () => {
+    return bcrypt.hash(generateInviteToken(), getSaltRounds());
+};
+
+const shouldExposeInviteToken = () => {
+    return process.env.NODE_ENV !== 'production';
+};
+
+const createStaffInviteToken = async ({ user, session = null }) => {
+    const inviteToken = generateInviteToken();
+    const expiresAt = getStaffInviteExpiresAt();
+
+    await PasswordReset.updateMany(
+        {
+            user_id: user._id,
+            purpose: PASSWORD_RESET_PURPOSES.STAFF_INVITE,
+            is_used: false,
+        },
+        {
+            $set: {
+                is_used: true,
+                used_at: new Date(),
+            },
+        },
+        session ? { session } : undefined
+    );
+
+    await PasswordReset.create(
+        [
+            {
+                user_id: user._id,
+                phone: user.phone,
+                reset_token_hash: hashToken(inviteToken),
+                purpose: PASSWORD_RESET_PURPOSES.STAFF_INVITE,
+                expires_at: expiresAt,
+            },
+        ],
+        session ? { session } : undefined
+    );
+
+    return {
+        inviteToken,
+        expiresAt,
+        expiresInHours: getStaffInviteExpiresInHours(),
+    };
+};
+
+const sendStaffInviteEmail = async ({ user, invitation }) => {
+    const emailPayload = emailService.buildStaffInviteEmail({
+        inviteToken: invitation.inviteToken,
+        expiresInHours: invitation.expiresInHours,
+        fullName: user.full_name,
+        phone: user.phone,
+    });
+
+    return notificationService.createEmailNotification({
+        userId: user._id,
+        recipientEmail: user.email,
+        type: NOTIFICATION_TYPES.AUTH_STAFF_INVITED,
+        title: emailPayload.subject,
+        message: emailPayload.text,
+        relatedType: NOTIFICATION_RELATED_TYPES.AUTH,
+        relatedId: user._id,
+        metadata: {
+            phone: user.phone,
+            expires_in_hours: invitation.expiresInHours,
+        },
+        html: emailPayload.html,
+        text: emailPayload.text,
+        throwOnFailure: false,
+    });
+};
+
+const toInviteResponse = ({ staffProfile, invitation, emailNotification }) => ({
+    staff_profile: StaffProfileMapper.toStaffProfileDto(staffProfile),
+    invite: {
+        expires_at: invitation.expiresAt,
+        email_status: emailNotification?.email_status || null,
+        invite_token: shouldExposeInviteToken()
+            ? invitation.inviteToken
+            : undefined,
+    },
+});
+
 const getGarageDocument = async (garageId) => {
     if (!garageId) {
         return null;
@@ -171,7 +357,7 @@ const getStaffUserDocument = async (userId) => {
 const getStaffProfileDocumentById = async (staffProfileId) => {
     const staffProfile = await StaffProfile.findById(staffProfileId).populate(
         'user_id',
-        'full_name email phone role avatar_url is_active last_login_at created_at updated_at'
+        USER_POPULATE_FIELDS
     );
 
     if (!staffProfile) {
@@ -222,7 +408,7 @@ const assertStaffCodeAvailable = async (staffCode, ignoredStaffProfileId = null)
 const getMyStaffProfile = async (userId) => {
     const staffProfile = await StaffProfile.findOne({ user_id: userId }).populate(
         'user_id',
-        'full_name email phone role avatar_url is_active last_login_at created_at updated_at'
+        USER_POPULATE_FIELDS
     );
 
     if (!staffProfile) {
@@ -250,7 +436,7 @@ const getAllStaffProfiles = async ({ page = 1, limit = 20, search, staff_type, g
         StaffProfile.find(filter)
             .populate(
                 'user_id',
-                'full_name email phone role avatar_url is_active last_login_at created_at updated_at'
+                USER_POPULATE_FIELDS
             )
             .sort({ created_at: -1 })
             .skip(skip)
@@ -305,7 +491,7 @@ const updateStaffProfile = async (staffProfileId, payload = {}) => {
         { new: true, runValidators: true }
     ).populate(
         'user_id',
-        'full_name email phone role avatar_url is_active last_login_at created_at updated_at'
+        USER_POPULATE_FIELDS
     );
 
     return StaffProfileMapper.toStaffProfileDto(updatedStaffProfile);
@@ -324,16 +510,120 @@ const updateStaffProfileStatus = async (staffProfileId, isActive) => {
         { new: true, runValidators: true }
     ).populate(
         'user_id',
-        'full_name email phone role avatar_url is_active last_login_at created_at updated_at'
+        USER_POPULATE_FIELDS
     );
 
     return StaffProfileMapper.toStaffProfileDto(updatedStaffProfile);
+};
+
+const inviteStaff = async (payload = {}) => {
+    const invitePayload = normalizeStaffInvitationPayload(payload);
+
+    assertStaffTypeValid(invitePayload.staff_type);
+    await getGarageDocument(invitePayload.garage_id);
+    await assertStaffCodeAvailable(invitePayload.staff_code);
+    await assertStaffInviteUserAvailable({
+        phone: invitePayload.phone,
+        email: invitePayload.email,
+    });
+
+    const passwordHash = await createPlaceholderPasswordHash();
+    const session = await mongoose.startSession();
+    let createdUser;
+    let createdStaffProfile;
+    let invitation;
+
+    try {
+        await session.withTransaction(async () => {
+            [createdUser] = await User.create(
+                [
+                    {
+                        full_name: invitePayload.full_name,
+                        email: invitePayload.email,
+                        phone: invitePayload.phone,
+                        password_hash: passwordHash,
+                        role: USER_ROLES.STAFF,
+                        is_active: true,
+                        phone_verified_at: null,
+                        onboarding_status: USER_ONBOARDING_STATUSES.PENDING_PASSWORD_SETUP,
+                    },
+                ],
+                { session }
+            );
+
+            [createdStaffProfile] = await StaffProfile.create(
+                [
+                    {
+                        user_id: createdUser._id,
+                        staff_code: invitePayload.staff_code,
+                        staff_type: invitePayload.staff_type,
+                        garage_id: invitePayload.garage_id,
+                        is_active: false,
+                    },
+                ],
+                { session }
+            );
+
+            invitation = await createStaffInviteToken({
+                user: createdUser,
+                session,
+            });
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    const staffProfile = await getStaffProfileDocumentById(createdStaffProfile._id);
+    const emailNotification = await sendStaffInviteEmail({
+        user: createdUser,
+        invitation,
+    });
+
+    return toInviteResponse({
+        staffProfile,
+        invitation,
+        emailNotification,
+    });
+};
+
+const resendStaffInvitation = async (staffProfileId) => {
+    const staffProfile = await getStaffProfileDocumentById(staffProfileId);
+    const user = staffProfile.user_id;
+
+    if (!user || typeof user !== 'object') {
+        throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+    }
+
+    if (
+        user.role !== USER_ROLES.STAFF
+        || user.onboarding_status !== USER_ONBOARDING_STATUSES.PENDING_PASSWORD_SETUP
+    ) {
+        throw new AppError(
+            'Staff invitation is not pending password setup',
+            400,
+            'STAFF_INVITATION_NOT_PENDING'
+        );
+    }
+
+    const invitation = await createStaffInviteToken({ user });
+    const emailNotification = await sendStaffInviteEmail({
+        user,
+        invitation,
+    });
+
+    return toInviteResponse({
+        staffProfile,
+        invitation,
+        emailNotification,
+    });
 };
 
 module.exports = {
     getMyStaffProfile,
     getStaffProfileById,
     getAllStaffProfiles,
+    inviteStaff,
+    resendStaffInvitation,
     createStaffProfile,
     updateStaffProfile,
     updateStaffProfileStatus,

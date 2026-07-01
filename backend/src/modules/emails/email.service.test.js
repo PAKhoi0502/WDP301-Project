@@ -21,6 +21,7 @@ describe('email service', () => {
             SMTP_FROM_EMAIL: 'noreply@example.com',
             SMTP_FROM_NAME: 'AutoWash Pro',
             PASSWORD_RESET_URL: 'https://app.example.com/reset-password',
+            STAFF_INVITE_URL: 'https://app.example.com/staff-invite',
         };
         emailService.resetTransporterCache();
         nodemailer.createTransport.mockReturnValue({ sendMail });
@@ -69,6 +70,22 @@ describe('email service', () => {
         expect(result.text).toContain('reset-token-123');
         expect(result.text).toContain('15 minutes');
         expect(result.html).toContain('token=reset-token-123');
+    });
+
+    it('builds staff invitation email with invite token and phone link', () => {
+        const result = emailService.buildStaffInviteEmail({
+            inviteToken: 'invite-token-123',
+            expiresInHours: 24,
+            fullName: 'Staff A',
+            phone: '+84901234567',
+        });
+
+        expect(result.subject).toBe('Activate your AutoWash Pro staff account');
+        expect(result.text).toContain('invite-token-123');
+        expect(result.text).toContain('+84901234567');
+        expect(result.text).toContain('24 hours');
+        expect(result.html).toContain('token=invite-token-123');
+        expect(result.html).toContain('phone=%2B84901234567');
     });
 
     it('rejects missing SMTP config', async () => {

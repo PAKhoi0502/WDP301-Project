@@ -16,6 +16,7 @@ const notificationSchema = {
             enum: [
                 'AUTH_REGISTER_SUCCESS',
                 'AUTH_PASSWORD_RESET_REQUESTED',
+                'AUTH_STAFF_INVITED',
                 'BOOKING_CONFIRMED',
                 'BOOKING_REMINDER',
                 'BOOKING_CANCELED',
