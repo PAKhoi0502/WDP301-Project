@@ -4,6 +4,10 @@ const {
     USER_ROLES,
     USER_ROLE_VALUES,
 } = require('../../shared/constants/roles.constant');
+const {
+    USER_ONBOARDING_STATUSES,
+    USER_ONBOARDING_STATUS_VALUES,
+} = require('../../shared/constants/userOnboarding.constant');
 
 const userSchema = new mongoose.Schema(
     {
@@ -58,6 +62,13 @@ const userSchema = new mongoose.Schema(
             default: true,
         },
 
+        onboarding_status: {
+            type: String,
+            enum: USER_ONBOARDING_STATUS_VALUES,
+            default: USER_ONBOARDING_STATUSES.ACTIVE,
+            required: true,
+        },
+
         last_login_at: {
             type: Date,
             default: null,
@@ -90,6 +101,7 @@ userSchema.index(
 userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ role: 1 });
 userSchema.index({ is_active: 1 });
+userSchema.index({ onboarding_status: 1 });
 
 userSchema.methods.toJSON = function () {
     const user = this.toObject();

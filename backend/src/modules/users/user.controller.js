@@ -49,7 +49,7 @@ const updateUser = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
     const { body } = req.validated;
 
-    const result = await userService.updateUser(id, body);
+    const result = await userService.updateUser(id, body, req.user._id);
 
     return sendSuccess(res, {
         message: 'Update user successfully',

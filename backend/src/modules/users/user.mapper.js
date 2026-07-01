@@ -14,6 +14,7 @@ const toUserDto = (user) => {
         role: plainUser.role,
         avatar_url: plainUser.avatar_url || '',
         is_active: plainUser.is_active,
+        onboarding_status: plainUser.onboarding_status || 'ACTIVE',
         last_login_at: plainUser.last_login_at || null,
         password_changed_at: plainUser.password_changed_at || null,
         created_at: plainUser.created_at,

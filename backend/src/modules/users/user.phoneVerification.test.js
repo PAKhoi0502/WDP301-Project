@@ -124,4 +124,76 @@ describe('user phone verification', () => {
             errorCode: 'CURRENT_PASSWORD_REQUIRED',
         });
     });
+
+    it('changes a user phone by admin after OTP verification and revokes sessions', async () => {
+        const adminId = '665f1b7b2a5f9d0012a99999';
+
+        User.findById.mockResolvedValue({
+            _id: userId,
+            phone: '+84901234567',
+            role: 'CUSTOMER',
+            is_active: true,
+        });
+
+        await userService.updateUser(
+            userId,
+            {
+                phone: '+84912345678',
+                phone_verification_token: 'c'.repeat(96),
+            },
+            adminId
+        );
+
+        expect(phoneVerificationService.getVerifiedChallenge).toHaveBeenCalledWith({
+            phone: '+84912345678',
+            purpose: PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
+            verificationToken: 'c'.repeat(96),
+            userId: adminId,
+            session,
+        });
+        expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+            userId,
+            {
+                $set: expect.objectContaining({
+                    phone: '+84912345678',
+                    phone_verified_at: expect.any(Date),
+                }),
+            },
+            {
+                new: true,
+                runValidators: true,
+                session,
+            }
+        );
+        expect(TokenService.revokeAllByUser).toHaveBeenCalledWith(
+            userId,
+            'phone_changed_by_admin',
+            session
+        );
+        expect(phoneVerificationService.consumeVerifiedChallenge).toHaveBeenCalledWith(
+            '665f1b7b2a5f9d0012a54321',
+            session
+        );
+    });
+
+    it('rejects an admin phone change without OTP verification', async () => {
+        User.findById.mockResolvedValue({
+            _id: userId,
+            phone: '+84901234567',
+            role: 'CUSTOMER',
+            is_active: true,
+        });
+
+        await expect(
+            userService.updateUser(
+                userId,
+                {
+                    phone: '+84912345678',
+                },
+                '665f1b7b2a5f9d0012a99999'
+            )
+        ).rejects.toMatchObject({
+            errorCode: 'PHONE_VERIFICATION_TOKEN_REQUIRED',
+        });
+    });
 });

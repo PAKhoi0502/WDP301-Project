@@ -340,36 +340,89 @@ const updateMe = async (userId, payload = {}) => {
     return UserMapper.toUserDto(updatedUser);
 };
 
-const updateUser = async (userId, payload = {}) => {
+const updateUser = async (userId, payload = {}, actorUserId = null) => {
     const update = normalizeUpdatePayload(UserMapper.toAdminUpdatePayload(payload));
 
     assertUpdatePayloadNotEmpty(update);
     assertRoleValid(update.role);
 
-    await getUserDocumentById(userId);
+    const currentUser = await getUserDocumentById(userId);
     await assertLastAdminSafe(userId, update);
     await assertEmailAvailable(update.email, userId);
     await assertPhoneAvailable(update.phone, userId);
 
-    let phoneChanged = false;
-
-    if (update.phone !== undefined) {
-        const currentUser = await getUserDocumentById(userId);
-
-        if (normalizePhone(currentUser.phone) !== update.phone) {
-            phoneChanged = true;
-            update.phone_verified_at = null;
-        }
-    }
-
-    const updatedUser = await User.findByIdAndUpdate(
-        userId,
-        { $set: update },
-        { new: true, runValidators: true }
-    );
+    const phoneChanged = update.phone !== undefined
+        && normalizePhone(currentUser.phone) !== update.phone;
 
     if (phoneChanged) {
-        await TokenService.revokeAllByUser(userId, 'phone_changed_by_admin');
+        if (!actorUserId) {
+            throw new AppError(
+                'Authentication is required to change phone',
+                401,
+                'AUTHENTICATION_REQUIRED'
+            );
+        }
+
+        if (!payload.phone_verification_token) {
+            throw new AppError(
+                'Phone verification token is required',
+                400,
+                'PHONE_VERIFICATION_TOKEN_REQUIRED'
+            );
+        }
+
+        update.phone_verified_at = new Date();
+    }
+
+    if (!phoneChanged) {
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { $set: update },
+            { new: true, runValidators: true }
+        );
+
+        return UserMapper.toUserDto(updatedUser);
+    }
+
+    const session = await mongoose.startSession();
+    let updatedUser;
+
+    try {
+        await session.withTransaction(async () => {
+            const phoneVerification = await phoneVerificationService.getVerifiedChallenge({
+                phone: update.phone,
+                purpose: PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
+                verificationToken: payload.phone_verification_token,
+                userId: actorUserId,
+                session,
+            });
+
+            updatedUser = await User.findByIdAndUpdate(
+                userId,
+                { $set: update },
+                {
+                    new: true,
+                    runValidators: true,
+                    session,
+                }
+            );
+
+            if (!updatedUser) {
+                throw new AppError('User not found', 404, 'USER_NOT_FOUND');
+            }
+
+            await phoneVerificationService.consumeVerifiedChallenge(
+                phoneVerification._id,
+                session
+            );
+            await TokenService.revokeAllByUser(
+                userId,
+                'phone_changed_by_admin',
+                session
+            );
+        });
+    } finally {
+        await session.endSession();
     }
 
     return UserMapper.toUserDto(updatedUser);

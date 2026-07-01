@@ -134,6 +134,7 @@ const updateUserSchema = z.object({
             full_name: optionalFullNameField,
             email: optionalEmailField,
             phone: optionalPhoneField,
+            phone_verification_token: optionalVerificationTokenField,
             avatar_url: optionalAvatarUrlField,
             role: z.enum(USER_ROLE_VALUES).optional(),
             is_active: z.boolean().optional(),

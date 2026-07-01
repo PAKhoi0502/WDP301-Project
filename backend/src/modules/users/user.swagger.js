@@ -56,6 +56,11 @@ const schemas = {
                 type: 'string',
                 example: '0901234567',
             },
+            phone_verification_token: {
+                type: 'string',
+                description: 'Required when admin changes a user phone',
+                example: '96-character-verification-token',
+            },
             avatar_url: {
                 type: 'string',
                 nullable: true,
