@@ -17,6 +17,11 @@ jest.mock('./user.model', () => ({
     findByIdAndUpdate: jest.fn(),
 }));
 
+jest.mock('../staff-profiles/staffProfile.model', () => ({
+    findOne: jest.fn(),
+    findByIdAndUpdate: jest.fn(),
+}));
+
 jest.mock('../auth/services/token.service', () => ({
     revokeAllByUser: jest.fn(),
 }));
@@ -29,9 +34,12 @@ jest.mock('../auth/services/phoneVerification.service', () => ({
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const User = require('./user.model');
+const StaffProfile = require('../staff-profiles/staffProfile.model');
 const TokenService = require('../auth/services/token.service');
 const phoneVerificationService = require('../auth/services/phoneVerification.service');
 const userService = require('./user.service');
+const { USER_ROLES } = require('../../shared/constants/roles.constant');
+const { STAFF_EMPLOYMENT_STATUS } = require('../../shared/constants/staff.constant');
 const {
     PHONE_VERIFICATION_PURPOSES,
 } = require('../auth/phoneVerification.constant');
@@ -61,6 +69,8 @@ describe('user phone verification', () => {
             phone_verified_at: new Date(),
             is_active: true,
         });
+        StaffProfile.findOne.mockResolvedValue(null);
+        StaffProfile.findByIdAndUpdate.mockResolvedValue({});
         bcrypt.compare.mockResolvedValue(true);
         phoneVerificationService.getVerifiedChallenge.mockResolvedValue({
             _id: '665f1b7b2a5f9d0012a54321',
@@ -195,5 +205,54 @@ describe('user phone verification', () => {
         ).rejects.toMatchObject({
             errorCode: 'PHONE_VERIFICATION_TOKEN_REQUIRED',
         });
+    });
+
+    it('syncs staff profile and revokes sessions when disabling a staff user', async () => {
+        const staffProfileId = '665f1b7b2a5f9d0012a22222';
+        const staffUser = {
+            _id: userId,
+            role: USER_ROLES.STAFF,
+            is_active: true,
+            phone_verified_at: new Date(),
+        };
+
+        User.findById.mockResolvedValue(staffUser);
+        StaffProfile.findOne.mockResolvedValue({
+            _id: staffProfileId,
+            user_id: userId,
+            is_active: true,
+            employment_status: STAFF_EMPLOYMENT_STATUS.ACTIVE,
+        });
+        User.findByIdAndUpdate.mockResolvedValue({
+            ...staffUser,
+            is_active: false,
+        });
+
+        const result = await userService.updateUserStatus(userId, false);
+
+        expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+            userId,
+            { $set: { is_active: false } },
+            { new: true, runValidators: true, session }
+        );
+        expect(StaffProfile.findByIdAndUpdate).toHaveBeenCalledWith(
+            staffProfileId,
+            {
+                $set: expect.objectContaining({
+                    is_active: false,
+                    employment_status: STAFF_EMPLOYMENT_STATUS.SUSPENDED,
+                    status_reason: 'User status disabled by admin',
+                    suspended_at: expect.any(Date),
+                    status_changed_at: expect.any(Date),
+                }),
+            },
+            { new: true, runValidators: true, session }
+        );
+        expect(TokenService.revokeAllByUser).toHaveBeenCalledWith(
+            userId,
+            'staff_suspended',
+            session
+        );
+        expect(result.is_active).toBe(false);
     });
 });

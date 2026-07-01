@@ -6,9 +6,12 @@ const StaffProfile = require('./staffProfile.model');
 const StaffProfileMapper = require('./staffProfile.mapper');
 const User = require('../users/user.model');
 const Garage = require('../garages/garage.model');
+const Booking = require('../bookings/booking.model');
 const PasswordReset = require('../auth/models/passwordResetToken.model');
+const TokenService = require('../auth/services/token.service');
 const emailService = require('../emails/email.service');
 const notificationService = require('../notifications/notification.service');
+const auditLogService = require('../audit-logs/auditLog.service');
 const { hashToken } = require('../auth/security/token.hash');
 const {
     PASSWORD_RESET_PURPOSES,
@@ -18,7 +21,15 @@ const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const {
     USER_ONBOARDING_STATUSES,
 } = require('../../shared/constants/userOnboarding.constant');
-const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
+const {
+    STAFF_EMPLOYMENT_STATUS,
+    STAFF_EMPLOYMENT_STATUS_VALUES,
+    STAFF_TYPE_VALUES,
+} = require('../../shared/constants/staff.constant');
+const {
+    BOOKING_HOLD_SLOT_STATUSES,
+} = require('../../shared/constants/booking.constant');
+const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
 const { normalizePhone } = require('../../shared/utils/phone');
 const {
     NOTIFICATION_TYPES,
@@ -28,6 +39,7 @@ const {
 const DEFAULT_STAFF_INVITE_HOURS = 24;
 const DEFAULT_SALT_ROUNDS = 10;
 const USER_POPULATE_FIELDS = 'full_name email phone role avatar_url is_active phone_verified_at onboarding_status last_login_at created_at updated_at';
+const STAFF_ASSIGNMENT_BLOCKING_ITEM_STATUSES = ['PENDING', 'IN_PROGRESS'];
 
 const normalizeText = (value) => {
     if (typeof value !== 'string') {
@@ -69,6 +81,38 @@ const normalizeEmail = (value) => {
     }
 
     return value.trim().toLowerCase();
+};
+
+const normalizeReason = (value) => {
+    if (value === null || value === undefined) {
+        return null;
+    }
+
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    return value.trim() || null;
+};
+
+const getStaffProfileEmploymentStatus = (staffProfile) => {
+    if (STAFF_EMPLOYMENT_STATUS_VALUES.includes(staffProfile?.employment_status)) {
+        return staffProfile.employment_status;
+    }
+
+    return staffProfile?.is_active
+        ? STAFF_EMPLOYMENT_STATUS.ACTIVE
+        : STAFF_EMPLOYMENT_STATUS.SUSPENDED;
+};
+
+const getStaffUserId = (staffProfile) => {
+    const user = staffProfile?.user_id;
+
+    if (user && typeof user === 'object' && user._id) {
+        return user._id;
+    }
+
+    return user || null;
 };
 
 const normalizeStaffInvitationPayload = (payload = {}) => {
@@ -346,7 +390,7 @@ const getStaffUserDocument = async (userId) => {
     return user;
 };
 
-const assertStaffUserCanBeActivated = (user) => {
+const assertStaffUserCanBeActivated = (user, { allowInactiveUser = false } = {}) => {
     const onboardingStatus = user?.onboarding_status
         || USER_ONBOARDING_STATUSES.ACTIVE;
 
@@ -354,7 +398,7 @@ const assertStaffUserCanBeActivated = (user) => {
         !user
         || typeof user !== 'object'
         || user.role !== USER_ROLES.STAFF
-        || !user.is_active
+        || (!allowInactiveUser && !user.is_active)
         || onboardingStatus !== USER_ONBOARDING_STATUSES.ACTIVE
         || !user.phone_verified_at
     ) {
@@ -362,6 +406,62 @@ const assertStaffUserCanBeActivated = (user) => {
             'Staff must complete password setup and phone verification before activation',
             409,
             'STAFF_PROFILE_ACTIVATION_REQUIRES_COMPLETED_ONBOARDING'
+        );
+    }
+};
+
+const assertStaffProfileCanBeReactivated = (staffProfile) => {
+    if (
+        getStaffProfileEmploymentStatus(staffProfile)
+        === STAFF_EMPLOYMENT_STATUS.TERMINATED
+    ) {
+        throw new AppError(
+            'Terminated staff profile cannot be activated',
+            409,
+            'STAFF_PROFILE_TERMINATED'
+        );
+    }
+
+    assertStaffUserCanBeActivated(staffProfile.user_id, {
+        allowInactiveUser: true,
+    });
+};
+
+const applySessionToQuery = (query, session) => {
+    if (session && query && typeof query.session === 'function') {
+        return query.session(session);
+    }
+
+    return query;
+};
+
+const assertNoActiveStaffAssignments = async (staffProfileId, session = null) => {
+    const query = Booking.findOne({
+        status: { $in: BOOKING_HOLD_SLOT_STATUSES },
+        $or: [
+            { assigned_care_staff_ids: staffProfileId },
+            {
+                booking_items: {
+                    $elemMatch: {
+                        status: { $in: STAFF_ASSIGNMENT_BLOCKING_ITEM_STATUSES },
+                        assigned_care_staff: {
+                            $elemMatch: {
+                                staff_profile_id: staffProfileId,
+                                released_at: null,
+                            },
+                        },
+                    },
+                },
+            },
+        ],
+    });
+    const activeAssignment = await applySessionToQuery(query, session);
+
+    if (activeAssignment) {
+        throw new AppError(
+            'Staff has active assignments',
+            409,
+            'STAFF_HAS_ACTIVE_ASSIGNMENTS'
         );
     }
 };
@@ -511,27 +611,138 @@ const updateStaffProfile = async (staffProfileId, payload = {}) => {
     return StaffProfileMapper.toStaffProfileDto(updatedStaffProfile);
 };
 
-const updateStaffProfileStatus = async (staffProfileId, isActive) => {
-    const staffProfile = await getStaffProfileDocumentById(staffProfileId);
+const updateStaffEmploymentStatus = async (
+    staffProfileId,
+    employmentStatus,
+    { reason = null, actorId = null, auditContext = {} } = {}
+) => {
+    if (!STAFF_EMPLOYMENT_STATUS_VALUES.includes(employmentStatus)) {
+        throw new AppError(
+            'Invalid staff employment status',
+            400,
+            'INVALID_STAFF_EMPLOYMENT_STATUS'
+        );
+    }
 
-    if (staffProfile.is_active === isActive) {
+    const staffProfile = await getStaffProfileDocumentById(staffProfileId);
+    const currentEmploymentStatus = getStaffProfileEmploymentStatus(staffProfile);
+    const staffUserId = getStaffUserId(staffProfile);
+    const normalizedReason = normalizeReason(reason);
+
+    if (
+        currentEmploymentStatus === employmentStatus
+        && staffProfile.is_active === (employmentStatus === STAFF_EMPLOYMENT_STATUS.ACTIVE)
+        && staffProfile.user_id?.is_active === (employmentStatus === STAFF_EMPLOYMENT_STATUS.ACTIVE)
+    ) {
         throw new AppError('Staff profile status is unchanged', 400, 'NO_CHANGE');
     }
 
-    if (isActive) {
-        assertStaffUserCanBeActivated(staffProfile.user_id);
+    if (
+        currentEmploymentStatus === STAFF_EMPLOYMENT_STATUS.TERMINATED
+        && employmentStatus !== STAFF_EMPLOYMENT_STATUS.TERMINATED
+    ) {
+        throw new AppError(
+            'Terminated staff profile cannot change status',
+            409,
+            'STAFF_PROFILE_TERMINATED'
+        );
     }
 
-    const updatedStaffProfile = await StaffProfile.findByIdAndUpdate(
-        staffProfileId,
-        { $set: { is_active: isActive } },
-        { new: true, runValidators: true }
-    ).populate(
-        'user_id',
-        USER_POPULATE_FIELDS
-    );
+    if (employmentStatus === STAFF_EMPLOYMENT_STATUS.ACTIVE) {
+        assertStaffProfileCanBeReactivated(staffProfile);
+    }
+
+    const session = await mongoose.startSession();
+    let updatedStaffProfile;
+
+    try {
+        await session.withTransaction(async () => {
+            if (employmentStatus === STAFF_EMPLOYMENT_STATUS.TERMINATED) {
+                await assertNoActiveStaffAssignments(staffProfile._id, session);
+            }
+
+            const now = new Date();
+            const isActive = employmentStatus === STAFF_EMPLOYMENT_STATUS.ACTIVE;
+            const staffProfileUpdate = {
+                is_active: isActive,
+                employment_status: employmentStatus,
+                status_reason: normalizedReason,
+                status_changed_at: now,
+                status_changed_by: actorId,
+            };
+
+            if (employmentStatus === STAFF_EMPLOYMENT_STATUS.SUSPENDED) {
+                staffProfileUpdate.suspended_at = now;
+            }
+
+            if (employmentStatus === STAFF_EMPLOYMENT_STATUS.TERMINATED) {
+                staffProfileUpdate.terminated_at = now;
+            }
+
+            updatedStaffProfile = await StaffProfile.findByIdAndUpdate(
+                staffProfileId,
+                { $set: staffProfileUpdate },
+                { new: true, runValidators: true, session }
+            ).populate(
+                'user_id',
+                USER_POPULATE_FIELDS
+            );
+
+            await User.findByIdAndUpdate(
+                staffUserId,
+                { $set: { is_active: isActive } },
+                { new: true, runValidators: true, session }
+            );
+
+            if (!isActive) {
+                const revokedReason = employmentStatus === STAFF_EMPLOYMENT_STATUS.TERMINATED
+                    ? 'staff_terminated'
+                    : 'staff_suspended';
+                await TokenService.revokeAllByUser(staffUserId, revokedReason, session);
+            }
+
+            await auditLogService.recordAuditEvent({
+                actorId,
+                action: employmentStatus === STAFF_EMPLOYMENT_STATUS.TERMINATED
+                    ? AUDIT_ACTIONS.DELETE
+                    : AUDIT_ACTIONS.UPDATE,
+                resourceType: AUDIT_RESOURCE_TYPES.STAFF_PROFILE,
+                resourceId: staffProfileId,
+                before: staffProfile,
+                after: updatedStaffProfile,
+                ip: auditContext.ip,
+                userAgent: auditContext.userAgent,
+                metadata: {
+                    employment_status: employmentStatus,
+                    reason: normalizedReason,
+                    user_id: staffUserId?.toString(),
+                },
+                session,
+            });
+        });
+    } finally {
+        await session.endSession();
+    }
 
     return StaffProfileMapper.toStaffProfileDto(updatedStaffProfile);
+};
+
+const updateStaffProfileStatus = async (staffProfileId, isActive, options = {}) => {
+    return updateStaffEmploymentStatus(
+        staffProfileId,
+        isActive
+            ? STAFF_EMPLOYMENT_STATUS.ACTIVE
+            : STAFF_EMPLOYMENT_STATUS.SUSPENDED,
+        options
+    );
+};
+
+const terminateStaffProfile = async (staffProfileId, options = {}) => {
+    return updateStaffEmploymentStatus(
+        staffProfileId,
+        STAFF_EMPLOYMENT_STATUS.TERMINATED,
+        options
+    );
 };
 
 const inviteStaff = async (payload = {}) => {
@@ -645,4 +856,6 @@ module.exports = {
     createStaffProfile,
     updateStaffProfile,
     updateStaffProfileStatus,
+    updateStaffEmploymentStatus,
+    terminateStaffProfile,
 };

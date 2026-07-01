@@ -8,6 +8,7 @@ const {
     inviteStaffSchema,
     updateStaffProfileSchema,
     updateStaffProfileStatusSchema,
+    updateStaffEmploymentStatusSchema,
 } = require('./staffProfile.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
 const { authenticate, authorize } = require('../../shared/middlewares/auth.middleware');
@@ -68,6 +69,14 @@ router.patch(
     authorize(USER_ROLES.ADMIN),
     validate(updateStaffProfileStatusSchema),
     staffProfileController.updateStaffProfileStatus
+);
+
+router.patch(
+    '/:id/employment-status',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    validate(updateStaffEmploymentStatusSchema),
+    staffProfileController.updateStaffEmploymentStatus
 );
 
 router.patch(

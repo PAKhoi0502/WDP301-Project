@@ -1,5 +1,6 @@
 const {
     createStaffProfileSchema,
+    updateStaffEmploymentStatusSchema,
     updateStaffProfileSchema,
 } = require('./staffProfile.validator');
 
@@ -23,6 +24,29 @@ describe('staff profile status validation', () => {
                 staff_type: 'CUSTOMER_SERVICE_STAFF',
                 garage_id: '665f1b7b2a5f9d0012a33333',
                 is_active: false,
+            },
+        });
+
+        expect(result.success).toBe(false);
+    });
+
+    it('allows employment status changes through the dedicated API', () => {
+        const result = updateStaffEmploymentStatusSchema.safeParse({
+            params: { id: staffProfileId },
+            body: {
+                status: 'TERMINATED',
+                reason: 'Nhan vien nghi viec',
+            },
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    it('does not allow invalid employment status values', () => {
+        const result = updateStaffEmploymentStatusSchema.safeParse({
+            params: { id: staffProfileId },
+            body: {
+                status: 'DELETED',
             },
         });
 

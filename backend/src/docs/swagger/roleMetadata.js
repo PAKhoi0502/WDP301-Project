@@ -99,6 +99,7 @@ const ROUTE_GROUPS = Object.freeze([
             'PATCH /staff-profiles/{id}',
             'DELETE /staff-profiles/{id}',
             'PATCH /staff-profiles/{id}/status',
+            'PATCH /staff-profiles/{id}/employment-status',
         ],
     },
     {

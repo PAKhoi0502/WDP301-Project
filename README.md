@@ -111,6 +111,8 @@ REFRESH_TOKEN_EXPIRES_IN_DAYS
 BCRYPT_SALT_ROUNDS
 
 SMS_PROVIDER
+ALLOW_MOCK_SMS
+SHOW_DEBUG_OTP
 OTP_SECRET
 OTP_EXPIRES_IN_MINUTES
 OTP_MAX_ATTEMPTS
@@ -124,6 +126,9 @@ PASSWORD_RESET_EXPIRES_IN_MINUTES
 PASSWORD_RESET_RATE_LIMIT_WINDOW_MINUTES
 PASSWORD_RESET_RATE_LIMIT_MAX_REQUESTS
 PASSWORD_RESET_RATE_LIMIT_COOLDOWN_SECONDS
+PASSWORD_RESET_URL
+STAFF_INVITE_URL
+STAFF_INVITE_EXPIRES_IN_HOURS
 
 PAYOS_CLIENT_ID
 PAYOS_API_KEY
@@ -150,7 +155,6 @@ SMTP_USER
 SMTP_PASS
 SMTP_FROM_EMAIL
 SMTP_FROM_NAME
-PASSWORD_RESET_URL
 ```
 
 Seed scripts also support:
@@ -235,7 +239,18 @@ Phone identity is stored in E.164 format. Inputs such as `0901234567`, `84901234
 
 Use `purpose=REGISTER` before registration. To change the current user's phone, use `purpose=CHANGE_PHONE` with a bearer token, verify the OTP with the same user, then send `phone`, `current_password`, and `phone_verification_token` to `PATCH /api/v1/users/me`.
 
-Development defaults to `SMS_PROVIDER=mock`. The request response includes `debug_otp` outside production. Production startup rejects the mock provider and requires `OTP_SECRET`.
+Staff account invitation uses a separate onboarding flow:
+
+```txt
+POST /api/v1/staff-profiles/invitations
+POST /api/v1/auth/staff-invitations/accept
+POST /api/v1/auth/phone-verifications/request  purpose=STAFF_ACTIVATION
+POST /api/v1/auth/phone-verifications/verify
+```
+
+Admin invites staff with `full_name`, `email`, `phone`, `staff_code`, `staff_type`, and `garage_id`. The backend creates a `STAFF` user with `onboarding_status=PENDING_PASSWORD_SETUP`, creates an inactive staff profile, and emails a 24-hour password setup invitation. After password setup, staff can sign in but staff-protected APIs remain blocked until `STAFF_ACTIVATION` OTP is verified; verification sets `phone_verified_at`, changes `onboarding_status=ACTIVE`, and activates the staff profile.
+
+Development defaults to `SMS_PROVIDER=mock`. The request response includes `debug_otp` outside production. Production startup rejects the mock provider unless `ALLOW_MOCK_SMS=true`; production only returns `debug_otp` when `SHOW_DEBUG_OTP=true`. Production always requires `OTP_SECRET`.
 
 Run `npm run migrate:phone-e164` once before deploying this normalization change to a database that already contains local-format user phones. The migration stops on normalization collisions instead of merging accounts.
 

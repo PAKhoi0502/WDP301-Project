@@ -13,6 +13,7 @@ jest.mock('bcryptjs', () => ({
 
 jest.mock('./staffProfile.model', () => ({
     findById: jest.fn(),
+    findOne: jest.fn(),
     find: jest.fn(),
     countDocuments: jest.fn(),
     exists: jest.fn(),
@@ -24,6 +25,11 @@ jest.mock('../users/user.model', () => ({
     exists: jest.fn(),
     findById: jest.fn(),
     create: jest.fn(),
+    findByIdAndUpdate: jest.fn(),
+}));
+
+jest.mock('../bookings/booking.model', () => ({
+    findOne: jest.fn(),
 }));
 
 jest.mock('../garages/garage.model', () => ({
@@ -39,15 +45,27 @@ jest.mock('../notifications/notification.service', () => ({
     createEmailNotification: jest.fn(),
 }));
 
+jest.mock('../auth/services/token.service', () => ({
+    revokeAllByUser: jest.fn(),
+}));
+
+jest.mock('../audit-logs/auditLog.service', () => ({
+    recordAuditEvent: jest.fn(),
+}));
+
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const StaffProfile = require('./staffProfile.model');
 const User = require('../users/user.model');
+const Booking = require('../bookings/booking.model');
 const Garage = require('../garages/garage.model');
 const PasswordReset = require('../auth/models/passwordResetToken.model');
 const notificationService = require('../notifications/notification.service');
+const TokenService = require('../auth/services/token.service');
+const auditLogService = require('../audit-logs/auditLog.service');
 const staffProfileService = require('./staffProfile.service');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
+const { STAFF_EMPLOYMENT_STATUS } = require('../../shared/constants/staff.constant');
 const {
     USER_ONBOARDING_STATUSES,
 } = require('../../shared/constants/userOnboarding.constant');
@@ -80,7 +98,9 @@ describe('staff invitation service', () => {
         session.withTransaction.mockImplementation(async (callback) => callback());
         bcrypt.hash.mockResolvedValue('placeholder-password-hash');
         User.exists.mockResolvedValue(false);
+        User.findByIdAndUpdate.mockResolvedValue({});
         StaffProfile.exists.mockResolvedValue(false);
+        Booking.findOne.mockResolvedValue(null);
         Garage.findById.mockResolvedValue({
             _id: garageId,
             is_active: true,
@@ -90,6 +110,8 @@ describe('staff invitation service', () => {
         notificationService.createEmailNotification.mockResolvedValue({
             email_status: 'SENT',
         });
+        TokenService.revokeAllByUser.mockResolvedValue({ modifiedCount: 0 });
+        auditLogService.recordAuditEvent.mockResolvedValue(null);
     });
 
     afterAll(() => {
@@ -295,13 +317,27 @@ describe('staff invitation service', () => {
 
         expect(StaffProfile.findByIdAndUpdate).toHaveBeenCalledWith(
             staffProfileId,
+            {
+                $set: expect.objectContaining({
+                    is_active: true,
+                    employment_status: STAFF_EMPLOYMENT_STATUS.ACTIVE,
+                    status_reason: null,
+                    status_changed_at: expect.any(Date),
+                    status_changed_by: null,
+                }),
+            },
+            { new: true, runValidators: true, session }
+        );
+        expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+            userId,
             { $set: { is_active: true } },
-            { new: true, runValidators: true }
+            { new: true, runValidators: true, session }
         );
         expect(result.is_active).toBe(true);
+        expect(result.employment_status).toBe(STAFF_EMPLOYMENT_STATUS.ACTIVE);
     });
 
-    it('always allows deactivating a staff profile', async () => {
+    it('suspends staff profile, disables user, and revokes refresh tokens', async () => {
         const pendingUser = {
             _id: userId,
             role: USER_ROLES.STAFF,
@@ -328,10 +364,68 @@ describe('staff invitation service', () => {
 
         const result = await staffProfileService.updateStaffProfileStatus(
             staffProfileId,
-            false
+            false,
+            { reason: 'Violation' }
         );
 
+        expect(StaffProfile.findByIdAndUpdate).toHaveBeenCalledWith(
+            staffProfileId,
+            {
+                $set: expect.objectContaining({
+                    is_active: false,
+                    employment_status: STAFF_EMPLOYMENT_STATUS.SUSPENDED,
+                    status_reason: 'Violation',
+                    suspended_at: expect.any(Date),
+                    status_changed_at: expect.any(Date),
+                    status_changed_by: null,
+                }),
+            },
+            { new: true, runValidators: true, session }
+        );
+        expect(User.findByIdAndUpdate).toHaveBeenCalledWith(
+            userId,
+            { $set: { is_active: false } },
+            { new: true, runValidators: true, session }
+        );
+        expect(TokenService.revokeAllByUser).toHaveBeenCalledWith(
+            userId,
+            'staff_suspended',
+            session
+        );
         expect(result.is_active).toBe(false);
+        expect(result.employment_status).toBe(STAFF_EMPLOYMENT_STATUS.SUSPENDED);
+    });
+
+    it('rejects terminating staff profile with active assignments', async () => {
+        const activeUser = {
+            _id: userId,
+            role: USER_ROLES.STAFF,
+            is_active: true,
+            phone_verified_at: new Date(),
+            onboarding_status: USER_ONBOARDING_STATUSES.ACTIVE,
+        };
+        const staffProfile = {
+            _id: staffProfileId,
+            user_id: activeUser,
+            is_active: true,
+            employment_status: STAFF_EMPLOYMENT_STATUS.ACTIVE,
+        };
+
+        StaffProfile.findById.mockReturnValue({
+            populate: jest.fn().mockResolvedValue(staffProfile),
+        });
+        Booking.findOne.mockResolvedValue({ _id: '665f1b7b2a5f9d0012a44444' });
+
+        await expect(
+            staffProfileService.terminateStaffProfile(staffProfileId)
+        ).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'STAFF_HAS_ACTIVE_ASSIGNMENTS',
+        });
+
+        expect(StaffProfile.findByIdAndUpdate).not.toHaveBeenCalled();
+        expect(User.findByIdAndUpdate).not.toHaveBeenCalled();
+        expect(TokenService.revokeAllByUser).not.toHaveBeenCalled();
     });
 
     it('prevents the legacy create API from activating a pending staff user', async () => {

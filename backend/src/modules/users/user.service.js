@@ -3,10 +3,15 @@ const mongoose = require('mongoose');
 
 const User = require('./user.model');
 const UserMapper = require('./user.mapper');
+const StaffProfile = require('../staff-profiles/staffProfile.model');
 const TokenService = require('../auth/services/token.service');
 const phoneVerificationService = require('../auth/services/phoneVerification.service');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES, USER_ROLE_VALUES } = require('../../shared/constants/roles.constant');
+const { STAFF_EMPLOYMENT_STATUS } = require('../../shared/constants/staff.constant');
+const {
+    USER_ONBOARDING_STATUSES,
+} = require('../../shared/constants/userOnboarding.constant');
 const { normalizePhone } = require('../../shared/utils/phone');
 const {
     PHONE_VERIFICATION_PURPOSES,
@@ -80,6 +85,41 @@ const buildSearchFilter = ({ search, role, is_active } = {}) => {
     }
 
     return filter;
+};
+
+const getStaffEmploymentStatus = (staffProfile) => {
+    if (staffProfile?.employment_status) {
+        return staffProfile.employment_status;
+    }
+
+    return staffProfile?.is_active
+        ? STAFF_EMPLOYMENT_STATUS.ACTIVE
+        : STAFF_EMPLOYMENT_STATUS.SUSPENDED;
+};
+
+const assertStaffCanBeActivated = (user, staffProfile) => {
+    if (getStaffEmploymentStatus(staffProfile) === STAFF_EMPLOYMENT_STATUS.TERMINATED) {
+        throw new AppError(
+            'Terminated staff profile cannot be activated',
+            409,
+            'STAFF_PROFILE_TERMINATED'
+        );
+    }
+
+    const onboardingStatus = user?.onboarding_status
+        || USER_ONBOARDING_STATUSES.ACTIVE;
+
+    if (
+        user.role !== USER_ROLES.STAFF
+        || onboardingStatus !== USER_ONBOARDING_STATUSES.ACTIVE
+        || !user.phone_verified_at
+    ) {
+        throw new AppError(
+            'Staff must complete password setup and phone verification before activation',
+            409,
+            'STAFF_PROFILE_ACTIVATION_REQUIRES_COMPLETED_ONBOARDING'
+        );
+    }
 };
 
 const assertUpdatePayloadNotEmpty = (payload) => {
@@ -431,18 +471,75 @@ const updateUser = async (userId, payload = {}, actorUserId = null) => {
 const updateUserStatus = async (userId, isActive) => {
     const update = { is_active: isActive };
     const user = await getUserDocumentById(userId);
+    const staffProfile = user.role === USER_ROLES.STAFF
+        ? await StaffProfile.findOne({ user_id: userId })
+        : null;
+    const targetEmploymentStatus = isActive
+        ? STAFF_EMPLOYMENT_STATUS.ACTIVE
+        : STAFF_EMPLOYMENT_STATUS.SUSPENDED;
+    const isStaffProfileAlreadySynced = !staffProfile
+        || (
+            staffProfile.is_active === isActive
+            && getStaffEmploymentStatus(staffProfile) === targetEmploymentStatus
+        );
 
-    if (user.is_active === isActive) {
+    if (user.is_active === isActive && isStaffProfileAlreadySynced) {
         throw new AppError('User status is unchanged', 400, 'NO_CHANGE');
     }
 
     await assertLastAdminSafe(userId, update);
 
-    const updatedUser = await User.findByIdAndUpdate(
-        userId,
-        { $set: update },
-        { new: true, runValidators: true }
-    );
+    if (!staffProfile) {
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { $set: update },
+            { new: true, runValidators: true }
+        );
+
+        return UserMapper.toUserDto(updatedUser);
+    }
+
+    if (isActive) {
+        assertStaffCanBeActivated(user, staffProfile);
+    }
+
+    const session = await mongoose.startSession();
+    let updatedUser;
+
+    try {
+        await session.withTransaction(async () => {
+            const now = new Date();
+
+            updatedUser = await User.findByIdAndUpdate(
+                userId,
+                { $set: update },
+                { new: true, runValidators: true, session }
+            );
+
+            const staffProfileUpdate = {
+                is_active: isActive,
+                employment_status: targetEmploymentStatus,
+                status_changed_at: now,
+            };
+
+            if (!isActive) {
+                staffProfileUpdate.status_reason = 'User status disabled by admin';
+                staffProfileUpdate.suspended_at = now;
+            }
+
+            await StaffProfile.findByIdAndUpdate(
+                staffProfile._id,
+                { $set: staffProfileUpdate },
+                { new: true, runValidators: true, session }
+            );
+
+            if (!isActive) {
+                await TokenService.revokeAllByUser(userId, 'staff_suspended', session);
+            }
+        });
+    } finally {
+        await session.endSession();
+    }
 
     return UserMapper.toUserDto(updatedUser);
 };

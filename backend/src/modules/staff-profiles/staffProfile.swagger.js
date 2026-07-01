@@ -12,6 +12,8 @@ const staffTypeValues = [
     'VEHICLE_CARE_STAFF',
 ];
 
+const employmentStatusValues = ['ACTIVE', 'SUSPENDED', 'TERMINATED'];
+
 const schemas = {
     StaffProfileCreateRequest: {
         type: 'object',
@@ -63,6 +65,27 @@ const schemas = {
             is_active: {
                 type: 'boolean',
                 example: false,
+            },
+            reason: {
+                type: 'string',
+                maxLength: 500,
+                example: 'Nhan vien bi dinh chi',
+            },
+        },
+    },
+    StaffEmploymentStatusUpdateRequest: {
+        type: 'object',
+        required: ['status'],
+        properties: {
+            status: {
+                type: 'string',
+                enum: employmentStatusValues,
+                example: 'TERMINATED',
+            },
+            reason: {
+                type: 'string',
+                maxLength: 500,
+                example: 'Nhan vien nghi viec',
             },
         },
     },
@@ -133,6 +156,36 @@ const schemas = {
             is_active: {
                 type: 'boolean',
                 example: true,
+            },
+            employment_status: {
+                type: 'string',
+                enum: employmentStatusValues,
+                example: 'ACTIVE',
+            },
+            status_reason: {
+                type: 'string',
+                nullable: true,
+                example: 'Nhan vien bi dinh chi',
+            },
+            suspended_at: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+            },
+            terminated_at: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+            },
+            status_changed_at: {
+                type: 'string',
+                format: 'date-time',
+                nullable: true,
+            },
+            status_changed_by: {
+                type: 'string',
+                nullable: true,
+                example: '665f1b7b2a5f9d0012a99999',
             },
             created_at: {
                 type: 'string',
@@ -587,8 +640,8 @@ const paths = {
         },
         delete: {
             tags: ['Staff Profiles'],
-            summary: 'Deactivate staff profile',
-            description: 'This endpoint does not hard delete the staff profile. It sets is_active to false.',
+            summary: 'Terminate staff profile',
+            description: 'This endpoint does not hard delete the staff profile. It marks employment_status as TERMINATED, disables the linked user and revokes refresh tokens.',
             security: [
                 {
                     bearerAuth: [],
@@ -597,7 +650,7 @@ const paths = {
             parameters: [staffProfileIdParameter],
             responses: {
                 200: {
-                    description: 'Deactivate staff profile successfully',
+                    description: 'Terminate staff profile successfully',
                     content: {
                         'application/json': {
                             schema: {
@@ -610,6 +663,47 @@ const paths = {
                 401: unauthorizedResponse,
                 403: forbiddenResponse,
                 404: notFoundResponse,
+                409: conflictResponse,
+            },
+        },
+    },
+    '/staff-profiles/{id}/employment-status': {
+        patch: {
+            tags: ['Staff Profiles'],
+            summary: 'Update staff employment status',
+            description: 'Use ACTIVE to reactivate a suspended staff profile, SUSPENDED to temporarily block work access, and TERMINATED when the staff member leaves. TERMINATED cannot be activated by the legacy status API.',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            parameters: [staffProfileIdParameter],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            $ref: '#/components/schemas/StaffEmploymentStatusUpdateRequest',
+                        },
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'Update staff employment status successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffProfileResponse',
+                            },
+                        },
+                    },
+                },
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: notFoundResponse,
+                409: conflictResponse,
             },
         },
     },
@@ -617,7 +711,7 @@ const paths = {
         patch: {
             tags: ['Staff Profiles'],
             summary: 'Update staff profile active status',
-            description: 'Deactivation is always allowed. Activation requires an active STAFF user with onboarding_status ACTIVE and a verified phone.',
+            description: 'Compatibility endpoint. false maps to SUSPENDED, true maps to ACTIVE. Activation requires onboarding_status ACTIVE and a verified phone, and cannot reactivate TERMINATED staff.',
             security: [
                 {
                     bearerAuth: [],
@@ -649,6 +743,7 @@ const paths = {
                 401: unauthorizedResponse,
                 403: forbiddenResponse,
                 404: notFoundResponse,
+                409: conflictResponse,
             },
         },
     },

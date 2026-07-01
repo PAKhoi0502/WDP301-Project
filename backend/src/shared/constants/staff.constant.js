@@ -7,10 +7,22 @@ const STAFF_TYPES = Object.freeze({
 
 const STAFF_TYPE_VALUES = Object.freeze(Object.values(STAFF_TYPES));
 
+const STAFF_EMPLOYMENT_STATUS = Object.freeze({
+    ACTIVE: 'ACTIVE',
+    SUSPENDED: 'SUSPENDED',
+    TERMINATED: 'TERMINATED',
+});
+
+const STAFF_EMPLOYMENT_STATUS_VALUES = Object.freeze(
+    Object.values(STAFF_EMPLOYMENT_STATUS)
+);
+
 const isValidStaffType = (staffType) => STAFF_TYPE_VALUES.includes(staffType);
 
 module.exports = {
     STAFF_TYPES,
     STAFF_TYPE_VALUES,
+    STAFF_EMPLOYMENT_STATUS,
+    STAFF_EMPLOYMENT_STATUS_VALUES,
     isValidStaffType,
 };

@@ -1,6 +1,9 @@
 const { z } = require('zod');
 
-const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
+const {
+    STAFF_EMPLOYMENT_STATUS_VALUES,
+    STAFF_TYPE_VALUES,
+} = require('../../shared/constants/staff.constant');
 const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 
 const emptyToUndefined = (value) => {
@@ -70,6 +73,11 @@ const phoneField = z
     .max(30, 'Phone must have at most 30 characters')
     .transform(normalizePhone)
     .refine(isValidPhone, 'Phone is invalid');
+
+const statusReasonField = z.preprocess(
+    emptyToUndefined,
+    z.string().trim().min(2).max(500).optional()
+);
 
 const atLeastOneField = (data) => Object.values(data).some((value) => value !== undefined);
 
@@ -149,6 +157,21 @@ const updateStaffProfileStatusSchema = z.object({
     body: z
         .object({
             is_active: z.boolean(),
+            reason: statusReasonField,
+        })
+        .strict(),
+});
+
+const updateStaffEmploymentStatusSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object({
+            status: z.enum(STAFF_EMPLOYMENT_STATUS_VALUES),
+            reason: statusReasonField,
         })
         .strict(),
 });
@@ -160,4 +183,5 @@ module.exports = {
     inviteStaffSchema,
     updateStaffProfileSchema,
     updateStaffProfileStatusSchema,
+    updateStaffEmploymentStatusSchema,
 };
