@@ -6,12 +6,20 @@ const getProviderName = () => {
     return (process.env.SMS_PROVIDER || 'mock').trim().toLowerCase();
 };
 
+const isEnvEnabled = (name) => {
+    return ['true', '1', 'yes', 'on'].includes(
+        String(process.env[name] || '').trim().toLowerCase()
+    );
+};
+
 const getProvider = () => {
     const providerName = getProviderName();
+    const mockAllowed = process.env.NODE_ENV !== 'production'
+        || isEnvEnabled('ALLOW_MOCK_SMS');
 
-    if (process.env.NODE_ENV === 'production' && providerName === 'mock') {
+    if (providerName === 'mock' && !mockAllowed) {
         throw new AppError(
-            'Mock SMS provider cannot be used in production',
+            'Mock SMS provider cannot be used in production without ALLOW_MOCK_SMS=true',
             500,
             'SMS_PROVIDER_NOT_ALLOWED'
         );

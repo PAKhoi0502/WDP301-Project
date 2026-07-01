@@ -40,11 +40,28 @@ describe('sms service', () => {
         });
     });
 
-    it('rejects the mock provider in production', () => {
+    it('rejects the mock provider in production without explicit opt-in', () => {
         process.env.NODE_ENV = 'production';
 
         expect(() => smsService.validateConfiguration()).toThrow(
-            'Mock SMS provider cannot be used in production'
+            'Mock SMS provider cannot be used in production without ALLOW_MOCK_SMS=true'
         );
+    });
+
+    it('allows the mock provider in production when explicitly enabled', async () => {
+        process.env.NODE_ENV = 'production';
+        process.env.ALLOW_MOCK_SMS = 'true';
+
+        await smsService.sendOtp({
+            phone: '0901234567',
+            otp: '123456',
+            expiresInMinutes: 5,
+        });
+
+        expect(mockSmsProvider.sendOtp).toHaveBeenCalledWith({
+            phone: '+84901234567',
+            otp: '123456',
+            expiresInMinutes: 5,
+        });
     });
 });
