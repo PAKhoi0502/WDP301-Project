@@ -203,7 +203,12 @@ const startService = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
     const { body } = req.validated;
 
-    const result = await bookingService.startService(req.user, id, body || {});
+    const result = await bookingService.startService(
+        req.user,
+        id,
+        body || {},
+        getAuditRequestContext(req)
+    );
 
     return sendSuccess(res, {
         message: 'Start service successfully',

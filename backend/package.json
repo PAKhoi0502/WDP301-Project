@@ -13,6 +13,8 @@
     "seed:analytics-demo": "node src/scripts/seedAnalyticsDemo.js",
     "seed:analytics-demo:dry-run": "node src/scripts/seedAnalyticsDemo.js --dry-run",
     "migrate:phone-e164": "node src/scripts/migrateUserPhonesToE164.js",
+    "migrate:legacy-onboarding": "node src/scripts/migrateLegacyUserOnboarding.js",
+    "migrate:legacy-onboarding:dry-run": "node src/scripts/migrateLegacyUserOnboarding.js --dry-run",
     "migrate:walk-in-promotions": "node src/scripts/migrateWalkInPromotionClaims.js"
   },
   "keywords": [],

@@ -2,6 +2,9 @@ const bcrypt = require('bcryptjs');
 
 const User = require('../modules/users/user.model');
 const { USER_ROLES } = require('../shared/constants/roles.constant');
+const {
+    USER_ONBOARDING_STATUSES,
+} = require('../shared/constants/userOnboarding.constant');
 const { normalizePhone } = require('../shared/utils/phone');
 
 const BCRYPT_SALT_ROUNDS = Number(process.env.BCRYPT_SALT_ROUNDS || 10);
@@ -213,6 +216,7 @@ const seedUser = async () => {
             avatar_url: user.avatar_url,
             is_active: user.is_active,
             phone_verified_at: new Date(),
+            onboarding_status: USER_ONBOARDING_STATUSES.ACTIVE,
         };
 
         const existingUser = await User.findOne({

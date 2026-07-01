@@ -105,7 +105,6 @@ const createStaffProfileSchema = z.object({
             staff_code: staffCodeField,
             staff_type: z.enum(STAFF_TYPE_VALUES),
             garage_id: optionalObjectIdField,
-            is_active: z.boolean().optional(),
         })
         .strict(),
 });
@@ -134,7 +133,6 @@ const updateStaffProfileSchema = z.object({
             staff_code: optionalStaffCodeField,
             staff_type: z.enum(STAFF_TYPE_VALUES).optional(),
             garage_id: optionalObjectIdField,
-            is_active: z.boolean().optional(),
         })
         .strict()
         .refine(atLeastOneField, {

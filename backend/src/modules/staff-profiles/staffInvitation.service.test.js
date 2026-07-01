@@ -234,4 +234,125 @@ describe('staff invitation service', () => {
         );
         expect(result.invite.invite_token).toBeTruthy();
     });
+
+    it('rejects activating a staff profile before onboarding is complete', async () => {
+        const pendingUser = {
+            _id: userId,
+            role: USER_ROLES.STAFF,
+            is_active: true,
+            phone_verified_at: null,
+            onboarding_status: USER_ONBOARDING_STATUSES.PENDING_PHONE_VERIFICATION,
+        };
+        const staffProfile = {
+            _id: staffProfileId,
+            user_id: pendingUser,
+            is_active: false,
+        };
+
+        StaffProfile.findById.mockReturnValue({
+            populate: jest.fn().mockResolvedValue(staffProfile),
+        });
+
+        await expect(
+            staffProfileService.updateStaffProfileStatus(staffProfileId, true)
+        ).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'STAFF_PROFILE_ACTIVATION_REQUIRES_COMPLETED_ONBOARDING',
+        });
+
+        expect(StaffProfile.findByIdAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('allows activating a verified staff profile after onboarding', async () => {
+        const activeUser = {
+            _id: userId,
+            role: USER_ROLES.STAFF,
+            is_active: true,
+            phone_verified_at: new Date(),
+            onboarding_status: USER_ONBOARDING_STATUSES.ACTIVE,
+        };
+        const staffProfile = {
+            _id: staffProfileId,
+            user_id: activeUser,
+            is_active: false,
+        };
+        const updatedStaffProfile = {
+            ...staffProfile,
+            is_active: true,
+        };
+
+        StaffProfile.findById.mockReturnValue({
+            populate: jest.fn().mockResolvedValue(staffProfile),
+        });
+        StaffProfile.findByIdAndUpdate.mockReturnValue({
+            populate: jest.fn().mockResolvedValue(updatedStaffProfile),
+        });
+
+        const result = await staffProfileService.updateStaffProfileStatus(
+            staffProfileId,
+            true
+        );
+
+        expect(StaffProfile.findByIdAndUpdate).toHaveBeenCalledWith(
+            staffProfileId,
+            { $set: { is_active: true } },
+            { new: true, runValidators: true }
+        );
+        expect(result.is_active).toBe(true);
+    });
+
+    it('always allows deactivating a staff profile', async () => {
+        const pendingUser = {
+            _id: userId,
+            role: USER_ROLES.STAFF,
+            is_active: true,
+            phone_verified_at: null,
+            onboarding_status: USER_ONBOARDING_STATUSES.PENDING_PHONE_VERIFICATION,
+        };
+        const staffProfile = {
+            _id: staffProfileId,
+            user_id: pendingUser,
+            is_active: true,
+        };
+        const updatedStaffProfile = {
+            ...staffProfile,
+            is_active: false,
+        };
+
+        StaffProfile.findById.mockReturnValue({
+            populate: jest.fn().mockResolvedValue(staffProfile),
+        });
+        StaffProfile.findByIdAndUpdate.mockReturnValue({
+            populate: jest.fn().mockResolvedValue(updatedStaffProfile),
+        });
+
+        const result = await staffProfileService.updateStaffProfileStatus(
+            staffProfileId,
+            false
+        );
+
+        expect(result.is_active).toBe(false);
+    });
+
+    it('prevents the legacy create API from activating a pending staff user', async () => {
+        User.findById.mockResolvedValue({
+            _id: userId,
+            role: USER_ROLES.STAFF,
+            is_active: true,
+            phone_verified_at: null,
+            onboarding_status: USER_ONBOARDING_STATUSES.PENDING_PASSWORD_SETUP,
+        });
+
+        await expect(staffProfileService.createStaffProfile({
+            user_id: userId,
+            staff_code: 'STF200',
+            staff_type: 'CUSTOMER_SERVICE_STAFF',
+            garage_id: garageId,
+        })).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'STAFF_PROFILE_ACTIVATION_REQUIRES_COMPLETED_ONBOARDING',
+        });
+
+        expect(StaffProfile.create).not.toHaveBeenCalled();
+    });
 });

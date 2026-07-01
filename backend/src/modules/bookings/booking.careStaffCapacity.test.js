@@ -35,6 +35,9 @@ jest.mock('../service-packages/servicePackage.model', () => ({
 }));
 jest.mock('../booking-service-steps/bookingServiceStep.service', () => ({}));
 jest.mock('./bookingPayment.service', () => ({}));
+jest.mock('../audit-logs/auditLog.service', () => ({
+    recordAuditEvent: jest.fn(),
+}));
 jest.mock('../promotions/promotion.service', () => ({
     validatePromotionForBooking: jest.fn(),
 }));
@@ -62,6 +65,7 @@ const WashBay = require('../wash-bays/washBay.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
+const auditLogService = require('../audit-logs/auditLog.service');
 const washBayService = require('../wash-bays/washBay.service');
 const promotionService = require('../promotions/promotion.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
@@ -222,6 +226,7 @@ describe('booking care staff capacity', () => {
         bookingServiceStepService.markResourceReleasedForBookingItem = jest.fn();
         bookingServiceStepService.clearResourceReleasedForBookingItem = jest.fn();
         bookingServiceStepService.assertAllRequiredStepsDone = jest.fn();
+        auditLogService.recordAuditEvent.mockResolvedValue(null);
         Vehicle.findOne.mockResolvedValue({
             _id: vehicleId,
             customer_id: customerId,
@@ -463,14 +468,145 @@ describe('booking care staff capacity', () => {
         );
     });
 
+    it('shifts a delayed start to the actual time and records STAFF_DELAY', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2999-01-01T06:15:00.000Z'));
+
+        const booking = {
+            _id: '507f1f77bcf86cd799439036',
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            vehicle_id: vehicleId,
+            vehicle_type: 'CAR',
+            status: 'CHECKED_IN',
+            arrival_status: 'ON_TIME',
+            start_time: new Date('2999-01-01T06:00:00.000Z'),
+            end_time: new Date('2999-01-01T06:30:00.000Z'),
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    sequence: 1,
+                    item_start_time: new Date('2999-01-01T06:00:00.000Z'),
+                    item_end_time: new Date('2999-01-01T06:30:00.000Z'),
+                    requires_wash_bay: false,
+                    requires_care_staff: false,
+                    status: 'PENDING',
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+        bookingServiceStepService.createStepsForBooking.mockResolvedValue([]);
+
+        await bookingService.startService(
+            { _id: '507f1f77bcf86cd799439035', role: 'ADMIN' },
+            booking._id,
+            {},
+            { ip: '127.0.0.1', userAgent: 'jest' }
+        );
+
+        expect(booking.original_start_time.toISOString()).toBe('2999-01-01T06:00:00.000Z');
+        expect(booking.start_time.toISOString()).toBe('2999-01-01T06:15:00.000Z');
+        expect(booking.end_time.toISOString()).toBe('2999-01-01T06:45:00.000Z');
+        expect(booking.reschedule_reason).toBe('STAFF_DELAY');
+        expect(booking.status).toBe('IN_PROGRESS');
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'BOOKING_SERVICE_START_DELAYED',
+            metadata: expect.objectContaining({ reason: 'STAFF_DELAY' }),
+            ip: '127.0.0.1',
+            userAgent: 'jest',
+        }));
+    });
+
+    it('reuses care staff for sequential work even when rounded reservations overlap', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2999-01-01T06:10:00.000Z'));
+
+        const staffProfileId = '507f1f77bcf86cd799439031';
+        const staffUserId = '507f1f77bcf86cd799439032';
+        const createCareItem = (sequence, start, end, reservedUntil) => ({
+            item_key: `ITEM_${sequence}_507F1F77BCF86CD799439016`,
+            sequence,
+            item_start_time: new Date(start),
+            item_end_time: new Date(end),
+            requires_wash_bay: false,
+            requires_care_staff: true,
+            care_staff_type: 'VEHICLE_CARE_STAFF',
+            care_staff_required_count: 1,
+            care_staff_start_time: new Date(start),
+            care_staff_end_time: new Date(end),
+            care_staff_work_end_time: new Date(end),
+            care_staff_reserved_until: new Date(reservedUntil),
+            assigned_care_staff: [],
+            status: 'PENDING',
+        });
+        const booking = {
+            _id: '507f1f77bcf86cd799439037',
+            garage_id: garageId,
+            service_package_id: servicePackageId,
+            vehicle_id: vehicleId,
+            vehicle_type: 'CAR',
+            status: 'CHECKED_IN',
+            start_time: new Date('2999-01-01T06:00:00.000Z'),
+            end_time: new Date('2999-01-01T07:00:00.000Z'),
+            requires_care_staff: true,
+            booking_items: [
+                createCareItem(1, '2999-01-01T06:00:00.000Z', '2999-01-01T06:20:00.000Z', '2999-01-01T06:30:00.000Z'),
+                createCareItem(2, '2999-01-01T06:20:00.000Z', '2999-01-01T06:40:00.000Z', '2999-01-01T07:00:00.000Z'),
+                createCareItem(3, '2999-01-01T06:40:00.000Z', '2999-01-01T07:00:00.000Z', '2999-01-01T07:00:00.000Z'),
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(booking)
+            .mockReturnValueOnce(createPopulateQuery(booking));
+        Booking.aggregate.mockResolvedValue([]);
+        StaffProfile.countDocuments.mockResolvedValue(1);
+        StaffProfile.find.mockReturnValue(createFindSortLeanQuery([
+            {
+                _id: staffProfileId,
+                user_id: staffUserId,
+                staff_code: 'CARE001',
+                staff_type: 'VEHICLE_CARE_STAFF',
+                garage_id: garageId,
+                is_active: true,
+            },
+        ]));
+        bookingServiceStepService.createStepsForBooking.mockResolvedValue([]);
+
+        await bookingService.startService(
+            { _id: '507f1f77bcf86cd799439035', role: 'ADMIN' },
+            booking._id,
+            {}
+        );
+
+        expect(booking.booking_items).toHaveLength(3);
+        for (const item of booking.booking_items) {
+            expect(item.assigned_care_staff).toEqual([
+                expect.objectContaining({
+                    staff_profile_id: staffProfileId,
+                    user_id: staffUserId,
+                }),
+            ]);
+        }
+        expect(booking.status).toBe('IN_PROGRESS');
+    });
+
     it('rechecks resource capacity before starting a checked-in booking', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2999-01-01T06:15:00.000Z'));
+
         const booking = {
             _id: '507f1f77bcf86cd799439096',
             garage_id: garageId,
             service_package_id: servicePackageId,
             vehicle_type: 'CAR',
             status: 'CHECKED_IN',
-            start_time: new Date('2000-01-01T00:00:00.000Z'),
+            start_time: new Date('2999-01-01T06:00:00.000Z'),
+            end_time: new Date('2999-01-01T06:30:00.000Z'),
             booking_items: [
                 {
                     item_key: 'ITEM_1_507F1F77BCF86CD799439016',
@@ -478,9 +614,12 @@ describe('booking care staff capacity', () => {
                     requires_care_staff: true,
                     care_staff_type: 'VEHICLE_CARE_STAFF',
                     care_staff_required_count: 1,
-                    care_staff_start_time: new Date('2000-01-01T00:00:00.000Z'),
-                    care_staff_end_time: new Date('2000-01-01T01:30:00.000Z'),
-                    care_staff_reserved_until: new Date('2000-01-01T01:30:00.000Z'),
+                    item_start_time: new Date('2999-01-01T06:00:00.000Z'),
+                    item_end_time: new Date('2999-01-01T06:30:00.000Z'),
+                    care_staff_start_time: new Date('2999-01-01T06:00:00.000Z'),
+                    care_staff_end_time: new Date('2999-01-01T06:30:00.000Z'),
+                    care_staff_work_end_time: new Date('2999-01-01T06:30:00.000Z'),
+                    care_staff_reserved_until: new Date('2999-01-01T06:30:00.000Z'),
                     status: 'PENDING',
                 },
             ],
@@ -490,8 +629,8 @@ describe('booking care staff capacity', () => {
         Booking.aggregate.mockResolvedValueOnce([
             {
                 booking_id: '507f1f77bcf86cd799439097',
-                start_time: new Date('2000-01-01T00:00:00.000Z'),
-                reserved_until: new Date('2000-01-01T01:30:00.000Z'),
+                start_time: new Date('2999-01-01T06:15:00.000Z'),
+                reserved_until: new Date('2999-01-01T06:45:00.000Z'),
                 required_count: 1,
             },
         ]);
@@ -502,11 +641,25 @@ describe('booking care staff capacity', () => {
             {}
         )).rejects.toMatchObject({
             statusCode: 409,
-            errorCode: 'CARE_STAFF_CAPACITY_FULL',
+            errorCode: 'BOOKING_LATE_START_RESOURCE_CONFLICT',
+            errors: [expect.objectContaining({
+                reason: 'STAFF_DELAY',
+                conflict_code: 'CARE_STAFF_CAPACITY_FULL',
+                options: ['REASSIGN_RESOURCES', 'RESCHEDULE'],
+            })],
         });
 
         expect(StaffProfile.find).not.toHaveBeenCalled();
         expect(bookingServiceStepService.createStepsForBooking).not.toHaveBeenCalled();
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'BOOKING_SERVICE_START_DELAYED',
+            metadata: expect.objectContaining({
+                reason: 'STAFF_DELAY',
+                outcome: 'BLOCKED',
+                conflict_code: 'CARE_STAFF_CAPACITY_FULL',
+                options: ['REASSIGN_RESOURCES', 'RESCHEDULE'],
+            }),
+        }));
     });
 
     it('keeps a released wash bay reservation unavailable until reserved time ends', async () => {
@@ -589,13 +742,16 @@ describe('booking care staff capacity', () => {
     });
 
     it('does not start a delayed booking while its wash bay is still occupied', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2999-01-01T06:15:00.000Z'));
+
         const booking = {
             _id: '507f1f77bcf86cd799439090',
             garage_id: garageId,
             service_package_id: washServiceId,
             vehicle_type: 'CAR',
             status: 'CHECKED_IN',
-            start_time: new Date('2000-01-01T00:00:00.000Z'),
+            start_time: new Date('2999-01-01T06:00:00.000Z'),
+            end_time: new Date('2999-01-01T06:30:00.000Z'),
             requires_wash_bay: true,
             requires_care_staff: false,
             wash_bay_id: null,
@@ -614,7 +770,11 @@ describe('booking care staff capacity', () => {
             {}
         )).rejects.toMatchObject({
             statusCode: 409,
-            errorCode: 'NO_AVAILABLE_WASH_BAY',
+            errorCode: 'BOOKING_LATE_START_RESOURCE_CONFLICT',
+            errors: [expect.objectContaining({
+                conflict_code: 'NO_AVAILABLE_WASH_BAY',
+                options: ['REASSIGN_RESOURCES', 'RESCHEDULE'],
+            })],
         });
 
         expect(booking.status).toBe('CHECKED_IN');
@@ -623,6 +783,8 @@ describe('booking care staff capacity', () => {
     });
 
     it('does not start a delayed booking while care staff remains assigned elsewhere', async () => {
+        jest.useFakeTimers().setSystemTime(new Date('2999-01-01T06:15:00.000Z'));
+
         const busyStaffProfileId = '507f1f77bcf86cd799439092';
         const booking = {
             _id: '507f1f77bcf86cd799439093',
@@ -630,7 +792,8 @@ describe('booking care staff capacity', () => {
             service_package_id: servicePackageId,
             vehicle_type: 'CAR',
             status: 'CHECKED_IN',
-            start_time: new Date('2000-01-01T00:00:00.000Z'),
+            start_time: new Date('2999-01-01T06:00:00.000Z'),
+            end_time: new Date('2999-01-01T06:30:00.000Z'),
             requires_wash_bay: false,
             requires_care_staff: true,
             booking_items: [
@@ -641,9 +804,12 @@ describe('booking care staff capacity', () => {
                     requires_care_staff: true,
                     care_staff_type: 'VEHICLE_CARE_STAFF',
                     care_staff_required_count: 1,
-                    care_staff_start_time: new Date('2000-01-01T00:00:00.000Z'),
-                    care_staff_end_time: new Date('2000-01-01T01:30:00.000Z'),
-                    care_staff_reserved_until: new Date('2000-01-01T01:30:00.000Z'),
+                    item_start_time: new Date('2999-01-01T06:00:00.000Z'),
+                    item_end_time: new Date('2999-01-01T06:30:00.000Z'),
+                    care_staff_start_time: new Date('2999-01-01T06:00:00.000Z'),
+                    care_staff_end_time: new Date('2999-01-01T06:30:00.000Z'),
+                    care_staff_work_end_time: new Date('2999-01-01T06:30:00.000Z'),
+                    care_staff_reserved_until: new Date('2999-01-01T06:30:00.000Z'),
                     assigned_care_staff: [],
                     status: 'PENDING',
                 },
@@ -675,7 +841,11 @@ describe('booking care staff capacity', () => {
             {}
         )).rejects.toMatchObject({
             statusCode: 409,
-            errorCode: 'CARE_STAFF_CAPACITY_FULL',
+            errorCode: 'BOOKING_LATE_START_RESOURCE_CONFLICT',
+            errors: [expect.objectContaining({
+                conflict_code: 'CARE_STAFF_CAPACITY_FULL',
+                options: ['REASSIGN_RESOURCES', 'RESCHEDULE'],
+            })],
         });
 
         expect(booking.status).toBe('CHECKED_IN');

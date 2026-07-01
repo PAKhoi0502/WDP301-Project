@@ -120,10 +120,6 @@ const normalizeCreatePayload = (payload = {}) => {
         createPayload.garage_id = normalizeObjectIdOrNull(payload.garage_id);
     }
 
-    if (payload.is_active !== undefined) {
-        createPayload.is_active = payload.is_active;
-    }
-
     return createPayload;
 };
 
@@ -140,10 +136,6 @@ const normalizeUpdatePayload = (payload = {}) => {
 
     if (payload.garage_id !== undefined) {
         updatePayload.garage_id = normalizeObjectIdOrNull(payload.garage_id);
-    }
-
-    if (payload.is_active !== undefined) {
-        updatePayload.is_active = payload.is_active;
     }
 
     return updatePayload;
@@ -354,6 +346,26 @@ const getStaffUserDocument = async (userId) => {
     return user;
 };
 
+const assertStaffUserCanBeActivated = (user) => {
+    const onboardingStatus = user?.onboarding_status
+        || USER_ONBOARDING_STATUSES.ACTIVE;
+
+    if (
+        !user
+        || typeof user !== 'object'
+        || user.role !== USER_ROLES.STAFF
+        || !user.is_active
+        || onboardingStatus !== USER_ONBOARDING_STATUSES.ACTIVE
+        || !user.phone_verified_at
+    ) {
+        throw new AppError(
+            'Staff must complete password setup and phone verification before activation',
+            409,
+            'STAFF_PROFILE_ACTIVATION_REQUIRES_COMPLETED_ONBOARDING'
+        );
+    }
+};
+
 const getStaffProfileDocumentById = async (staffProfileId) => {
     const staffProfile = await StaffProfile.findById(staffProfileId).populate(
         'user_id',
@@ -461,10 +473,12 @@ const createStaffProfile = async (payload = {}) => {
     );
 
     assertStaffTypeValid(createPayload.staff_type);
-    await getStaffUserDocument(createPayload.user_id);
+    const staffUser = await getStaffUserDocument(createPayload.user_id);
     await getGarageDocument(createPayload.garage_id);
     await assertStaffProfileUserAvailable(createPayload.user_id);
     await assertStaffCodeAvailable(createPayload.staff_code);
+
+    assertStaffUserCanBeActivated(staffUser);
 
     const createdStaffProfile = await StaffProfile.create(createPayload);
 
@@ -502,6 +516,10 @@ const updateStaffProfileStatus = async (staffProfileId, isActive) => {
 
     if (staffProfile.is_active === isActive) {
         throw new AppError('Staff profile status is unchanged', 400, 'NO_CHANGE');
+    }
+
+    if (isActive) {
+        assertStaffUserCanBeActivated(staffProfile.user_id);
     }
 
     const updatedStaffProfile = await StaffProfile.findByIdAndUpdate(

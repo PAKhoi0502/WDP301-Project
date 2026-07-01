@@ -1800,6 +1800,10 @@ const getActiveCareStaffAssignments = (bookingItem) => {
     return (bookingItem.assigned_care_staff || []).filter((assignment) => !assignment.released_at);
 };
 
+const getCareStaffWorkEndTime = (bookingItem) => {
+    return bookingItem.care_staff_work_end_time || bookingItem.care_staff_end_time;
+};
+
 const getPlannedBusyCareStaffProfileIds = (plannedAssignments, careStaffType, careStaffStartTime, careStaffEndTime) => {
     return new Set(plannedAssignments
         .filter((assignment) => {
@@ -1827,7 +1831,7 @@ const addPlannedCareStaffAssignments = (plannedAssignments, bookingItem, assignm
             staffProfileId,
             careStaffType: bookingItem.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF,
             careStaffStartTime: bookingItem.care_staff_start_time,
-            careStaffEndTime: bookingItem.care_staff_reserved_until || bookingItem.care_staff_end_time,
+            careStaffEndTime: getCareStaffWorkEndTime(bookingItem),
         });
     }
 };
@@ -2003,7 +2007,7 @@ const assignCareStaffToBookingIfNeeded = async (booking) => {
             plannedAssignments,
             careStaffType,
             bookingItem.care_staff_start_time,
-            bookingItem.care_staff_reserved_until || bookingItem.care_staff_end_time
+            getCareStaffWorkEndTime(bookingItem)
         );
         const activeAssignmentIds = new Set(activeAssignments
             .map((assignment) => toObjectIdString(getCareStaffAssignmentStaffProfileId(assignment)))
@@ -3226,6 +3230,78 @@ const applyEarlyStartTimeline = async ({ booking, user, startedAt }) => {
     booking.reschedule_count = (booking.reschedule_count || 0) + 1;
 };
 
+const LATE_START_CONFLICT_CODES = new Set([
+    'BOOKING_OUTSIDE_BUSINESS_HOURS',
+    'VEHICLE_BOOKING_OVERLAP',
+    'WASH_BAY_CAPACITY_FULL',
+    'WASH_BAY_TEMPORARILY_UNAVAILABLE',
+    'NO_ACTIVE_WASH_BAY_FOR_VEHICLE_TYPE',
+    'NO_AVAILABLE_WASH_BAY',
+    'CARE_STAFF_CAPACITY_FULL',
+    'NO_ACTIVE_CARE_STAFF',
+]);
+
+const buildLateStartConflictError = (error, startedAt) => {
+    if (!LATE_START_CONFLICT_CODES.has(error.errorCode)) {
+        return error;
+    }
+
+    return new AppError(
+        'Resources are unavailable at the actual service start time. Reassign resources or reschedule the booking.',
+        409,
+        'BOOKING_LATE_START_RESOURCE_CONFLICT',
+        [
+            {
+                reason: 'STAFF_DELAY',
+                conflict_code: error.errorCode,
+                conflict_message: error.message,
+                actual_start_time: startedAt,
+                options: ['REASSIGN_RESOURCES', 'RESCHEDULE'],
+            },
+        ]
+    );
+};
+
+const toBookingTimelineAuditSnapshot = (booking) => ({
+    status: booking.status,
+    start_time: booking.start_time,
+    end_time: booking.end_time,
+    booking_items: (booking.booking_items || []).map((item) => (
+        item.toObject ? item.toObject() : { ...item }
+    )),
+    reschedule_reason: booking.reschedule_reason,
+    reschedule_count: booking.reschedule_count || 0,
+});
+
+const applyLateStartTimeline = async ({ booking, user, startedAt }) => {
+    const garage = await getActiveGarage(booking.garage_id);
+    const timeline = buildShiftedBookingTimeline({
+        booking,
+        startTime: startedAt,
+    });
+
+    assertBookingInsideGarageBusinessHours(
+        garage,
+        timeline.start_time,
+        getLatestPlannedEnd(timeline)
+    );
+    await assertVehicleNoOverlap({
+        vehicleId: booking.vehicle_id,
+        normalizedLicensePlate: booking.normalized_license_plate,
+        vehicleType: booking.vehicle_type,
+        startTime: timeline.start_time,
+        endTime: timeline.end_time,
+        excludedBookingId: booking._id,
+    });
+
+    applyShiftedTimeline({ booking, timeline });
+
+    booking.rescheduled_at = startedAt;
+    booking.rescheduled_by_id = user._id;
+    booking.reschedule_reason = 'STAFF_DELAY';
+    booking.reschedule_count = (booking.reschedule_count || 0) + 1;
+};
+
 const resolveLateArrival = async (
     user,
     bookingId,
@@ -3401,57 +3477,129 @@ const assignWashBay = async (user, bookingId, { wash_bay_id } = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
-const startService = async (user, bookingId, { note, allow_early_start = false } = {}) => {
+const startService = async (
+    user,
+    bookingId,
+    { note, allow_early_start = false } = {},
+    auditContext = {}
+) => {
     const booking = await getRawBookingDocumentById(bookingId);
     const startedAt = new Date();
+    const isLateStart = Boolean(booking.start_time && startedAt > booking.start_time);
+    const lateStartBefore = isLateStart
+        ? toBookingTimelineAuditSnapshot(booking)
+        : null;
 
     await assertStaffCanAccessBooking(user, booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.CHECKED_IN], 'BOOKING_START_SERVICE_NOT_ALLOWED');
 
-    if (booking.start_time && startedAt < booking.start_time) {
-        if (allow_early_start) {
-            await applyEarlyStartTimeline({
+    try {
+        if (booking.start_time && startedAt < booking.start_time) {
+            if (allow_early_start) {
+                await applyEarlyStartTimeline({
+                    booking,
+                    user,
+                    startedAt,
+                });
+            } else {
+                throw new AppError(
+                    'Booking service cannot start before its scheduled time',
+                    409,
+                    'BOOKING_SERVICE_START_TOO_EARLY'
+                );
+            }
+        } else if (isLateStart) {
+            await applyLateStartTimeline({
                 booking,
                 user,
                 startedAt,
             });
-        } else {
-            throw new AppError(
-                'Booking service cannot start before its scheduled time',
-                409,
-                'BOOKING_SERVICE_START_TOO_EARLY'
-            );
         }
+
+        const servicePackage = await getServicePackageForBooking(booking);
+
+        await assertGarageCapacityAvailable({
+            garageId: booking.garage_id,
+            vehicleType: booking.vehicle_type,
+            bookingItems: booking.booking_items || [],
+            excludedBookingId: booking._id,
+        });
+
+        await assignCareStaffToBookingIfNeeded(booking);
+        await assignWashBayToBookingIfNeeded(booking);
+
+        booking.status = BOOKING_STATUS.IN_PROGRESS;
+        booking.started_at = startedAt;
+
+        if (note !== undefined) {
+            booking.note = normalizeText(note);
+        }
+
+        await booking.save();
+
+        const serviceSteps = await bookingServiceStepService.createStepsForBooking(booking, servicePackage);
+
+        if (isLateStart) {
+            await auditLogService.recordAuditEvent({
+                actorId: user._id,
+                action: AUDIT_ACTIONS.BOOKING_SERVICE_START_DELAYED,
+                resourceType: AUDIT_RESOURCE_TYPES.BOOKING,
+                resourceId: booking._id,
+                before: lateStartBefore,
+                after: toBookingTimelineAuditSnapshot(booking),
+                metadata: {
+                    reason: 'STAFF_DELAY',
+                    actual_start_time: startedAt,
+                },
+                ip: auditContext.ip,
+                userAgent: auditContext.userAgent,
+            });
+        }
+
+        const populatedBooking = await getBookingDocumentById(booking._id);
+
+        return {
+            booking: BookingMapper.toBookingDto(populatedBooking),
+            service_steps: serviceSteps,
+        };
+    } catch (error) {
+        if (isLateStart) {
+            const lateStartError = buildLateStartConflictError(error, startedAt);
+
+            if (lateStartError !== error) {
+                try {
+                    await auditLogService.recordAuditEvent({
+                        actorId: user._id,
+                        action: AUDIT_ACTIONS.BOOKING_SERVICE_START_DELAYED,
+                        resourceType: AUDIT_RESOURCE_TYPES.BOOKING,
+                        resourceId: booking._id,
+                        before: lateStartBefore,
+                        after: {
+                            status: BOOKING_STATUS.CHECKED_IN,
+                        },
+                        metadata: {
+                            reason: 'STAFF_DELAY',
+                            outcome: 'BLOCKED',
+                            conflict_code: error.errorCode,
+                            actual_start_time: startedAt,
+                            options: ['REASSIGN_RESOURCES', 'RESCHEDULE'],
+                        },
+                        ip: auditContext.ip,
+                        userAgent: auditContext.userAgent,
+                    });
+                } catch (auditError) {
+                    console.warn('[bookings] late-start conflict audit failed', {
+                        booking_id: booking._id?.toString?.() || booking._id,
+                        error: auditError.message,
+                    });
+                }
+            }
+
+            throw lateStartError;
+        }
+
+        throw error;
     }
-
-    const servicePackage = await getServicePackageForBooking(booking);
-
-    await assertGarageCapacityAvailable({
-        garageId: booking.garage_id,
-        vehicleType: booking.vehicle_type,
-        bookingItems: booking.booking_items || [],
-        excludedBookingId: booking._id,
-    });
-
-    await assignCareStaffToBookingIfNeeded(booking);
-    await assignWashBayToBookingIfNeeded(booking);
-
-    booking.status = BOOKING_STATUS.IN_PROGRESS;
-    booking.started_at = startedAt;
-
-    if (note !== undefined) {
-        booking.note = normalizeText(note);
-    }
-
-    await booking.save();
-
-    const serviceSteps = await bookingServiceStepService.createStepsForBooking(booking, servicePackage);
-    const populatedBooking = await getBookingDocumentById(booking._id);
-
-    return {
-        booking: BookingMapper.toBookingDto(populatedBooking),
-        service_steps: serviceSteps,
-    };
 };
 
 const getBookingServiceSteps = async (user, bookingId) => {

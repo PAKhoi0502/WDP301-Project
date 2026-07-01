@@ -422,6 +422,7 @@ const startServiceRequest = {
             description: 'Allow a checked-in early arrival to shift the booking timeline to the current time before starting service.',
         },
     },
+    description: 'A late start automatically shifts the booking timeline to the actual start time, rechecks capacity, and records STAFF_DELAY. Resource conflicts return BOOKING_LATE_START_RESOURCE_CONFLICT with reassignment/reschedule options.',
 };
 
 const assignWashBayRequest = {

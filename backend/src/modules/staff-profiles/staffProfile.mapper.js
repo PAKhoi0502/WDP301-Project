@@ -59,10 +59,6 @@ const toCreatePayload = (data = {}) => {
         payload.garage_id = data.garage_id;
     }
 
-    if (data.is_active !== undefined) {
-        payload.is_active = data.is_active;
-    }
-
     return payload;
 };
 
@@ -79,10 +75,6 @@ const toUpdatePayload = (data = {}) => {
 
     if (data.garage_id !== undefined) {
         payload.garage_id = data.garage_id;
-    }
-
-    if (data.is_active !== undefined) {
-        payload.is_active = data.is_active;
     }
 
     return payload;

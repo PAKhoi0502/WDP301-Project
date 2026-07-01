@@ -35,10 +35,6 @@ const schemas = {
                 nullable: true,
                 example: '665f1b7b2a5f9d0012a54321',
             },
-            is_active: {
-                type: 'boolean',
-                example: true,
-            },
         },
     },
     StaffProfileUpdateRequest: {
@@ -57,10 +53,6 @@ const schemas = {
                 type: 'string',
                 nullable: true,
                 example: '665f1b7b2a5f9d0012a54321',
-            },
-            is_active: {
-                type: 'boolean',
-                example: true,
             },
         },
     },
@@ -429,6 +421,7 @@ const paths = {
         post: {
             tags: ['Staff Profiles'],
             summary: 'Create staff profile',
+            description: 'Legacy endpoint for an existing STAFF user who has already completed onboarding and phone verification. New staff accounts must use POST /staff-profiles/invitations.',
             security: [
                 {
                     bearerAuth: [],
@@ -624,6 +617,7 @@ const paths = {
         patch: {
             tags: ['Staff Profiles'],
             summary: 'Update staff profile active status',
+            description: 'Deactivation is always allowed. Activation requires an active STAFF user with onboarding_status ACTIVE and a verified phone.',
             security: [
                 {
                     bearerAuth: [],
