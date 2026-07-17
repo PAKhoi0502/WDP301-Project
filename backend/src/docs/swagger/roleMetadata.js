@@ -238,7 +238,12 @@ const ROUTE_GROUPS = Object.freeze([
         scope: STAFF_GARAGE_SCOPE,
         operations: [
             'GET /admin/bookings/{id}/service-steps',
+            'GET /admin/bookings/{id}/service-workflow',
             'PATCH /admin/bookings/{id}/service-steps/{stepId}/done',
+            'PATCH /admin/bookings/{id}/service-items/{itemKey}/complete-early',
+            'PATCH /admin/bookings/{id}/service-items/{itemKey}/confirm-complete',
+            'PATCH /admin/bookings/{id}/service-items/{itemKey}/pause',
+            'PATCH /admin/bookings/{id}/service-items/{itemKey}/resume',
         ],
     },
     {

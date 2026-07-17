@@ -87,4 +87,62 @@ describe('service package module', () => {
             },
         });
     });
+
+    it('allows automatic transition for an automated workflow', async () => {
+        const servicePackage = createServicePackage({
+            service_type: 'WASH',
+            requires_wash_bay: true,
+            wash_bay_duration_minutes: 90,
+            countdown_duration_seconds: 5370,
+            transition_mode: 'AUTO',
+            steps_template: [
+                {
+                    step_code: 'AUTO_WASH',
+                    step_name: 'Automatic wash',
+                    order: 1,
+                    step_type: 'AUTOMATED_WASH_STEP',
+                    is_required: true,
+                },
+            ],
+        });
+
+        await expect(servicePackage.validate()).resolves.toBeUndefined();
+        expect(servicePackage.countdown_duration_seconds).toBe(5370);
+        expect(servicePackage.transition_mode).toBe('AUTO');
+    });
+
+    it('rejects automatic transition for a manual workflow', async () => {
+        const servicePackage = createServicePackage({
+            countdown_duration_seconds: 5400,
+            transition_mode: 'AUTO',
+            steps_template: [
+                {
+                    step_code: 'MANUAL_CARE',
+                    step_name: 'Manual care',
+                    order: 1,
+                    step_type: 'MANUAL_SERVICE_STEP',
+                    is_required: true,
+                },
+            ],
+        });
+
+        await expect(servicePackage.validate()).rejects.toMatchObject({
+            errors: {
+                transition_mode: expect.anything(),
+            },
+        });
+    });
+
+    it('rejects countdown longer than scheduled duration', async () => {
+        const servicePackage = createServicePackage({
+            duration_minutes: 10,
+            countdown_duration_seconds: 601,
+        });
+
+        await expect(servicePackage.validate()).rejects.toMatchObject({
+            errors: {
+                countdown_duration_seconds: expect.anything(),
+            },
+        });
+    });
 });

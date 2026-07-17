@@ -6,6 +6,9 @@ const {
     SERVICE_PACKAGE_TYPE_VALUES,
     SERVICE_STEP_TYPE_VALUES,
     SERVICE_PACKAGE_TYPES,
+    SERVICE_STEP_TYPES,
+    SERVICE_TRANSITION_MODES,
+    SERVICE_TRANSITION_MODE_VALUES,
 } = require('../../shared/constants/servicePackage.constant');
 
 const stepTemplateSchema = new mongoose.Schema(
@@ -109,6 +112,19 @@ const servicePackageSchema = new mongoose.Schema(
             max: [1440, 'Duration must not exceed 1440 minutes'],
         },
 
+        countdown_duration_seconds: {
+            type: Number,
+            min: [1, 'Countdown duration must be at least 1 second'],
+            max: [86400, 'Countdown duration must not exceed 86400 seconds'],
+            default: null,
+        },
+
+        transition_mode: {
+            type: String,
+            enum: SERVICE_TRANSITION_MODE_VALUES,
+            default: SERVICE_TRANSITION_MODES.REQUIRE_CONFIRMATION,
+        },
+
         wash_bay_duration_minutes: {
             type: Number,
             min: [0, 'Wash bay duration must be greater than or equal to 0'],
@@ -206,8 +222,31 @@ servicePackageSchema.index({ included_service_ids: 1 });
 servicePackageSchema.index({ created_at: -1 });
 
 servicePackageSchema.pre('validate', function (next) {
+    if (!this.countdown_duration_seconds && this.duration_minutes) {
+        this.countdown_duration_seconds = this.duration_minutes * 60;
+    }
+
+    if (this.countdown_duration_seconds > this.duration_minutes * 60) {
+        this.invalidate('countdown_duration_seconds', 'Countdown duration must not exceed scheduled duration');
+    }
+
     if (this.service_type === SERVICE_PACKAGE_TYPES.COMBO && this.steps_template?.length > 0) {
         this.invalidate('steps_template', 'Combo service package must not define operational steps');
+    }
+
+    if (this.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
+        this.transition_mode = SERVICE_TRANSITION_MODES.REQUIRE_CONFIRMATION;
+    }
+
+    if (this.transition_mode === SERVICE_TRANSITION_MODES.AUTO) {
+        const requiredSteps = (this.steps_template || []).filter((step) => step.is_required !== false);
+        const isAutomated = requiredSteps.length > 0
+            ? requiredSteps.every((step) => step.step_type === SERVICE_STEP_TYPES.AUTOMATED_WASH_STEP)
+            : this.requires_wash_bay && !this.requires_care_staff;
+
+        if (!isAutomated) {
+            this.invalidate('transition_mode', 'Automatic transition requires an automated service workflow');
+        }
     }
 
     if (this.service_type === SERVICE_PACKAGE_TYPES.COMBO && !this.included_service_ids?.length) {

@@ -57,6 +57,8 @@ const bookingSchema = {
                     name_snapshot: { type: 'string' },
                     price_snapshot: { type: 'number' },
                     duration_minutes: { type: 'number' },
+                    countdown_duration_seconds: { type: 'integer' },
+                    transition_mode: { type: 'string', enum: ['AUTO', 'REQUIRE_CONFIRMATION'] },
                     item_start_time: { type: 'string', format: 'date-time', nullable: true },
                     item_end_time: { type: 'string', format: 'date-time', nullable: true },
                     sequence: { type: 'number' },
@@ -76,7 +78,25 @@ const bookingSchema = {
                         type: 'array',
                         items: careStaffAssignmentSchema,
                     },
-                    status: { type: 'string' },
+                    status: {
+                        type: 'string',
+                        enum: ['PENDING', 'IN_PROGRESS', 'PAUSED', 'AWAITING_CONFIRMATION', 'WAITING_RESOURCE', 'DONE', 'SKIPPED'],
+                    },
+                    actual_started_at: { type: 'string', format: 'date-time', nullable: true },
+                    countdown_ends_at: { type: 'string', format: 'date-time', nullable: true },
+                    actual_completed_at: { type: 'string', format: 'date-time', nullable: true },
+                    remaining_seconds_at_pause: { type: 'integer', nullable: true },
+                    paused_at: { type: 'string', format: 'date-time', nullable: true },
+                    paused_by_staff_id: { type: 'string', nullable: true },
+                    pause_reason: { type: 'string', nullable: true },
+                    total_paused_seconds: { type: 'integer' },
+                    completion_source: {
+                        type: 'string',
+                        enum: ['TIMER', 'STAFF_EARLY', 'STAFF_CONFIRM'],
+                        nullable: true,
+                    },
+                    completed_by_staff_id: { type: 'string', nullable: true },
+                    completion_note: { type: 'string', nullable: true },
                 },
             },
         },
@@ -439,6 +459,14 @@ const serviceStepDoneRequest = {
     },
 };
 
+const pauseServiceItemRequest = {
+    type: 'object',
+    required: ['reason'],
+    properties: {
+        reason: { type: 'string', minLength: 2, maxLength: 500 },
+    },
+};
+
 const createVehicleInspectionRequest = {
     type: 'object',
     required: ['type'],
@@ -476,6 +504,35 @@ const serviceStepListResponse = {
         data: {
             type: 'array',
             items: bookingServiceStepSchema,
+        },
+    },
+};
+
+const serviceWorkflowResponse = {
+    type: 'object',
+    properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        data: {
+            type: 'object',
+            properties: {
+                server_time: { type: 'string', format: 'date-time' },
+                booking_id: { type: 'string' },
+                booking_status: { type: 'string' },
+                workflow_phase: { type: 'string', enum: ['NOT_STARTED', 'READY', 'SERVICE', 'POST_SERVICE', 'COMPLETED'] },
+                current_item: { type: 'object', nullable: true },
+                next_item: { type: 'object', nullable: true },
+                remaining_seconds: { type: 'integer', nullable: true },
+                all_service_items_done: { type: 'boolean' },
+                can_pause: { type: 'boolean' },
+                can_resume: { type: 'boolean' },
+                can_complete_early: { type: 'boolean' },
+                requires_confirmation: { type: 'boolean' },
+                service_steps: {
+                    type: 'array',
+                    items: bookingServiceStepSchema,
+                },
+            },
         },
     },
 };
@@ -902,6 +959,21 @@ const paths = {
             },
         },
     },
+    '/admin/bookings/{id}/service-workflow': {
+        get: {
+            tags: ['Booking Service Steps'],
+            summary: 'Get current service item, countdown and workflow controls',
+            security: [{ bearerAuth: [] }],
+            parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+            responses: {
+                200: {
+                    description: 'Booking service workflow',
+                    content: { 'application/json': { schema: serviceWorkflowResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/bookings/{id}/service-steps/{stepId}/done': {
         patch: {
             tags: ['Booking Service Steps'],
@@ -930,6 +1002,90 @@ const paths = {
                             },
                         },
                     },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/bookings/{id}/service-items/{itemKey}/complete-early': {
+        patch: {
+            tags: ['Booking Service Steps'],
+            summary: 'Complete the current service item before its countdown ends and start the next item',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                { name: 'itemKey', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: false,
+                content: { 'application/json': { schema: bookingOperationRequest } },
+            },
+            responses: {
+                200: {
+                    description: 'Service item completed early',
+                    content: { 'application/json': { schema: serviceWorkflowResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/bookings/{id}/service-items/{itemKey}/confirm-complete': {
+        patch: {
+            tags: ['Booking Service Steps'],
+            summary: 'Confirm a timed-out manual service item and start the next item',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                { name: 'itemKey', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: false,
+                content: { 'application/json': { schema: bookingOperationRequest } },
+            },
+            responses: {
+                200: {
+                    description: 'Service item completion confirmed',
+                    content: { 'application/json': { schema: serviceWorkflowResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/bookings/{id}/service-items/{itemKey}/pause': {
+        patch: {
+            tags: ['Booking Service Steps'],
+            summary: 'Pause the current service item countdown',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                { name: 'itemKey', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: true,
+                content: { 'application/json': { schema: pauseServiceItemRequest } },
+            },
+            responses: {
+                200: {
+                    description: 'Service item paused',
+                    content: { 'application/json': { schema: serviceWorkflowResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/bookings/{id}/service-items/{itemKey}/resume': {
+        patch: {
+            tags: ['Booking Service Steps'],
+            summary: 'Resume the current paused service item countdown',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                { name: 'itemKey', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Service item resumed',
+                    content: { 'application/json': { schema: serviceWorkflowResponse } },
                 },
                 ...commonErrorResponses,
             },
@@ -1067,6 +1223,7 @@ const schemas = {
     StartServiceRequest: startServiceRequest,
     AssignWashBayRequest: assignWashBayRequest,
     ServiceStepDoneRequest: serviceStepDoneRequest,
+    PauseServiceItemRequest: pauseServiceItemRequest,
 };
 
 module.exports = {

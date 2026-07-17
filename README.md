@@ -146,6 +146,10 @@ WAITLIST_EXPIRE_BATCH_SIZE
 EMAIL_RETRY_JOB_INTERVAL_MS
 EMAIL_RETRY_BATCH_SIZE
 POINT_EXPIRATION_JOB_INTERVAL_MS
+TIER_INACTIVITY_DOWNGRADE_JOB_INTERVAL_MS
+TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE
+SERVICE_ITEM_TIMER_JOB_INTERVAL_MS
+SERVICE_ITEM_TIMER_BATCH_SIZE
 WALK_IN_CLAIM_LOOKBACK_MONTHS
 
 SMTP_HOST
@@ -397,6 +401,36 @@ Current booking behavior:
 - Duplicate service items in the same booking are rejected.
 - Combo parent package must not define operational service steps; steps come from child service packages.
 - Booking service steps are generated at service start.
+
+## Service Countdown Workflow
+
+Service package countdown configuration:
+
+- `countdown_duration_seconds` stores the exact operational duration. It defaults to `duration_minutes * 60` and cannot exceed that scheduled duration.
+- `transition_mode=AUTO` automatically completes a timed-out item and starts the next item. It is allowed only when every required service step is `AUTOMATED_WASH_STEP`.
+- `transition_mode=REQUIRE_CONFIRMATION` moves a timed-out item to `AWAITING_CONFIRMATION` until Staff or Admin confirms completion.
+- Combo packages use the countdown configuration of each expanded child service.
+- Booking creation snapshots countdown and transition configuration into each `booking_item`.
+
+Staff/Admin countdown endpoints:
+
+```txt
+GET   /api/v1/admin/bookings/:id/service-workflow
+PATCH /api/v1/admin/bookings/:id/service-items/:itemKey/complete-early
+PATCH /api/v1/admin/bookings/:id/service-items/:itemKey/confirm-complete
+PATCH /api/v1/admin/bookings/:id/service-items/:itemKey/pause
+PATCH /api/v1/admin/bookings/:id/service-items/:itemKey/resume
+```
+
+Operational behavior:
+
+- `PATCH /start-service` starts the first booking item countdown.
+- The server stores an absolute `countdown_ends_at`; clients render seconds locally using `server_time` from the workflow response.
+- Completing or confirming the current item starts the next pending item automatically.
+- Pausing stores the remaining seconds and removes the item from timer processing. Resuming creates a new deadline without consuming paused time.
+- Planned booking and resource reservation windows are not shortened by early completion.
+- After the final item, the booking remains `IN_PROGRESS` for post-service inspection and handover. `PATCH /complete-service` requires all booking items and required service steps to be completed.
+- Existing data can be previewed with `npm run migrate:service-countdowns:dry-run` and migrated with `npm run migrate:service-countdowns`.
 
 ## Staff/Admin Cancel
 

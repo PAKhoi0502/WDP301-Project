@@ -3,6 +3,8 @@ const {
     getLateArrivalOptionsSchema,
     resolveLateArrivalSchema,
     createWalkInBookingSchema,
+    serviceItemOperationSchema,
+    pauseServiceItemSchema,
 } = require('./booking.validator');
 
 describe('booking available slots validator', () => {
@@ -197,5 +199,39 @@ describe('walk-in booking validator', () => {
         });
 
         expect(result.success).toBe(false);
+    });
+});
+
+describe('booking service item validator', () => {
+    const params = {
+        id: '507f1f77bcf86cd799439011',
+        itemKey: 'ITEM_1_507F1F77BCF86CD799439012',
+    };
+
+    it('accepts a service item completion request', () => {
+        const result = serviceItemOperationSchema.safeParse({
+            params,
+            body: {
+                note: 'Completed early',
+            },
+        });
+
+        expect(result.success).toBe(true);
+    });
+
+    it('requires a pause reason', () => {
+        const missingReason = pauseServiceItemSchema.safeParse({
+            params,
+            body: {},
+        });
+        const validReason = pauseServiceItemSchema.safeParse({
+            params,
+            body: {
+                reason: 'Equipment inspection',
+            },
+        });
+
+        expect(missingReason.success).toBe(false);
+        expect(validReason.success).toBe(true);
     });
 });

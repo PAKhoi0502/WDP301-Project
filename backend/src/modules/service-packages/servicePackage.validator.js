@@ -6,6 +6,8 @@ const {
     SERVICE_PACKAGE_TYPE_VALUES,
     SERVICE_STEP_TYPE_VALUES,
     SERVICE_PACKAGE_TYPES,
+    SERVICE_TRANSITION_MODES,
+    SERVICE_TRANSITION_MODE_VALUES,
 } = require('../../shared/constants/servicePackage.constant');
 
 const emptyToUndefined = (value) => {
@@ -130,11 +132,27 @@ const servicePackageBusinessRule = (data) => {
         }
     }
 
+    if (
+        data.countdown_duration_seconds
+        && data.duration_minutes
+        && data.countdown_duration_seconds > data.duration_minutes * 60
+    ) {
+        return false;
+    }
+
     return true;
 };
 
 const updateServicePackageBusinessRule = (data) => {
     if (data.service_type === SERVICE_PACKAGE_TYPES.COMBO && data.included_service_ids && data.included_service_ids.length === 0) {
+        return false;
+    }
+
+    if (
+        data.countdown_duration_seconds
+        && data.duration_minutes
+        && data.countdown_duration_seconds > data.duration_minutes * 60
+    ) {
         return false;
     }
 
@@ -207,6 +225,8 @@ const createServicePackageSchema = z.object({
             description: descriptionField,
             base_price: z.coerce.number().min(0),
             duration_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(1440).optional()),
+            countdown_duration_seconds: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(86400).optional()),
+            transition_mode: z.enum(SERVICE_TRANSITION_MODE_VALUES).default(SERVICE_TRANSITION_MODES.REQUIRE_CONFIRMATION),
             wash_bay_duration_minutes: z.coerce.number().int().min(0).max(1440).default(0),
             wash_bay_start_offset_minutes: z.coerce.number().int().min(0).max(1440).default(0),
             points_earned: z.coerce.number().int().min(0).default(0),
@@ -244,6 +264,8 @@ const updateServicePackageSchema = z.object({
             description: descriptionField,
             base_price: z.preprocess(emptyToUndefined, z.coerce.number().min(0).optional()),
             duration_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(1440).optional()),
+            countdown_duration_seconds: z.preprocess(emptyToUndefined, z.coerce.number().int().min(1).max(86400).optional()),
+            transition_mode: z.enum(SERVICE_TRANSITION_MODE_VALUES).optional(),
             wash_bay_duration_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(1440).optional()),
             wash_bay_start_offset_minutes: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).max(1440).optional()),
             points_earned: z.preprocess(emptyToUndefined, z.coerce.number().int().min(0).optional()),

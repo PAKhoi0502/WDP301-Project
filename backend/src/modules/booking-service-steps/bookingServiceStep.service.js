@@ -260,7 +260,7 @@ const createStepsForBooking = async (booking, fallbackServicePackage) => {
     return getStepsByBookingId(booking._id);
 };
 
-const markStepDone = async ({ bookingId, stepId, staffId, note }) => {
+const markStepDone = async ({ bookingId, stepId, staffId, note, currentBookingItemKey = null }) => {
     const step = await BookingServiceStep.findOne({
         _id: stepId,
         booking_id: bookingId,
@@ -268,6 +268,17 @@ const markStepDone = async ({ bookingId, stepId, staffId, note }) => {
 
     if (!step) {
         throw new AppError('Booking service step not found', 404, 'BOOKING_SERVICE_STEP_NOT_FOUND');
+    }
+
+    if (
+        step.booking_item_key
+        && normalizeStepCode(step.booking_item_key) !== normalizeStepCode(currentBookingItemKey)
+    ) {
+        throw new AppError(
+            'Service step does not belong to the current booking item',
+            409,
+            'BOOKING_SERVICE_STEP_NOT_CURRENT_ITEM'
+        );
     }
 
     if (step.status === BOOKING_SERVICE_STEP_STATUS.DONE) {
@@ -348,6 +359,44 @@ const markResourceReleasedForBookingItem = async (bookingId, bookingItemKey, rel
     );
 };
 
+const completeStepsForBookingItem = async ({
+    bookingId,
+    bookingItemKey,
+    completedAt = new Date(),
+    staffId = null,
+    note,
+}) => {
+    if (!bookingItemKey) {
+        return 0;
+    }
+
+    const steps = await BookingServiceStep.find({
+        booking_id: bookingId,
+        booking_item_key: bookingItemKey,
+        status: {
+            $nin: [
+                BOOKING_SERVICE_STEP_STATUS.DONE,
+                BOOKING_SERVICE_STEP_STATUS.SKIPPED,
+            ],
+        },
+    });
+
+    for (const step of steps) {
+        step.status = BOOKING_SERVICE_STEP_STATUS.DONE;
+        step.started_at = step.started_at || completedAt;
+        step.completed_at = completedAt;
+        step.confirmed_by_staff_id = staffId;
+
+        if (note !== undefined) {
+            step.note = normalizeText(note);
+        }
+
+        await step.save();
+    }
+
+    return steps.length;
+};
+
 const clearResourceReleasedForBookingItem = async (bookingId, bookingItemKey, releasedAt = null) => {
     if (!bookingItemKey) {
         return;
@@ -380,6 +429,7 @@ module.exports = {
     createStepsFromTemplate,
     createStepsForBooking,
     markStepDone,
+    completeStepsForBookingItem,
     assertAllRequiredStepsDone,
     areAllRequiredStepsDoneForBookingItem,
     markResourceReleasedForBookingItem,

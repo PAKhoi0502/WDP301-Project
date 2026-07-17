@@ -376,6 +376,52 @@ const serviceStepParamSchema = z.object({
         .default({}),
 });
 
+const bookingItemKeyField = z
+    .string()
+    .trim()
+    .min(3)
+    .max(100)
+    .regex(/^[A-Za-z0-9_]+$/, 'Invalid booking service item key');
+
+const serviceItemParamSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+            itemKey: bookingItemKeyField,
+        })
+        .strict(),
+    body: z.object({}).strict().default({}),
+});
+
+const serviceItemOperationSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+            itemKey: bookingItemKeyField,
+        })
+        .strict(),
+    body: z
+        .object({
+            note: optionalTextField(1000),
+        })
+        .strict()
+        .default({}),
+});
+
+const pauseServiceItemSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+            itemKey: bookingItemKeyField,
+        })
+        .strict(),
+    body: z
+        .object({
+            reason: z.string().trim().min(2).max(500),
+        })
+        .strict(),
+});
+
 module.exports = {
     idParamSchema,
     getAvailableSlotsSchema,
@@ -391,4 +437,7 @@ module.exports = {
     resolveLateArrivalSchema,
     assignWashBaySchema,
     serviceStepParamSchema,
+    serviceItemParamSchema,
+    serviceItemOperationSchema,
+    pauseServiceItemSchema,
 };

@@ -18,6 +18,9 @@ const {
     resolveLateArrivalSchema,
     assignWashBaySchema,
     serviceStepParamSchema,
+    serviceItemParamSchema,
+    serviceItemOperationSchema,
+    pauseServiceItemSchema,
 } = require('./booking.validator');
 const {
     createVehicleInspectionSchema,
@@ -137,10 +140,40 @@ adminRouter.get(
     bookingServiceStepController.getBookingServiceSteps
 );
 
+adminRouter.get(
+    '/:id/service-workflow',
+    validate(idParamSchema),
+    bookingController.getServiceWorkflow
+);
+
 adminRouter.patch(
     '/:id/service-steps/:stepId/done',
     validate(serviceStepParamSchema),
     bookingServiceStepController.markBookingServiceStepDone
+);
+
+adminRouter.patch(
+    '/:id/service-items/:itemKey/complete-early',
+    validate(serviceItemOperationSchema),
+    bookingController.completeServiceItemEarly
+);
+
+adminRouter.patch(
+    '/:id/service-items/:itemKey/confirm-complete',
+    validate(serviceItemOperationSchema),
+    bookingController.confirmServiceItemComplete
+);
+
+adminRouter.patch(
+    '/:id/service-items/:itemKey/pause',
+    validate(pauseServiceItemSchema),
+    bookingController.pauseServiceItem
+);
+
+adminRouter.patch(
+    '/:id/service-items/:itemKey/resume',
+    validate(serviceItemParamSchema),
+    bookingController.resumeServiceItem
 );
 
 adminRouter.patch(

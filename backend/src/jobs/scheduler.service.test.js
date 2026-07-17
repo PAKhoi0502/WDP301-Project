@@ -11,9 +11,14 @@ jest.mock('../modules/loyalty/loyalty.service', () => ({
     downgradeInactiveCustomerTiers: jest.fn(),
 }));
 
+jest.mock('../modules/bookings/booking.service', () => ({
+    processDueServiceItemTimers: jest.fn(),
+}));
+
 const bookingWaitlistService = require('../modules/booking-waitlists/bookingWaitlist.service');
 const notificationService = require('../modules/notifications/notification.service');
 const loyaltyService = require('../modules/loyalty/loyalty.service');
+const bookingService = require('../modules/bookings/booking.service');
 const schedulerService = require('./scheduler.service');
 
 describe('scheduler service', () => {
@@ -25,6 +30,7 @@ describe('scheduler service', () => {
         delete process.env.WAITLIST_EXPIRE_BATCH_SIZE;
         delete process.env.EMAIL_RETRY_BATCH_SIZE;
         delete process.env.TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE;
+        delete process.env.SERVICE_ITEM_TIMER_BATCH_SIZE;
     });
 
     afterEach(() => {
@@ -54,6 +60,7 @@ describe('scheduler service', () => {
             expect.objectContaining({ name: schedulerService.JOB_NAMES.EMAIL_RETRY }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.POINT_EXPIRATION }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.TIER_INACTIVITY_DOWNGRADE }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.SERVICE_ITEM_TIMER }),
         ]));
     });
 
@@ -94,5 +101,25 @@ describe('scheduler service', () => {
 
         expect(loyaltyService.downgradeInactiveCustomerTiers).toHaveBeenCalledWith({ limit: 30 });
         expect(result).toEqual({ downgraded_customers: 1 });
+    });
+
+    it('runs service item timer job on demand', async () => {
+        process.env.SERVICE_ITEM_TIMER_BATCH_SIZE = '10';
+        bookingService.processDueServiceItemTimers.mockResolvedValue({
+            processed: 2,
+            auto_completed: 1,
+            awaiting_confirmation: 1,
+            failed: 0,
+        });
+
+        const result = await schedulerService.runSchedulerJobNow(schedulerService.JOB_NAMES.SERVICE_ITEM_TIMER);
+
+        expect(bookingService.processDueServiceItemTimers).toHaveBeenCalledWith({ limit: 10 });
+        expect(result).toEqual({
+            processed: 2,
+            auto_completed: 1,
+            awaiting_confirmation: 1,
+            failed: 0,
+        });
     });
 });

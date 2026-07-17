@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { randomUUID } = require('crypto');
 
 const Booking = require('./booking.model');
 const BookingMapper = require('./booking.mapper');
@@ -23,7 +24,10 @@ const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const { STAFF_TYPES } = require('../../shared/constants/staff.constant');
 const { WASH_BAY_STATUS } = require('../../shared/constants/washBay.constant');
-const { SERVICE_PACKAGE_TYPES } = require('../../shared/constants/servicePackage.constant');
+const {
+    SERVICE_PACKAGE_TYPES,
+    SERVICE_TRANSITION_MODES,
+} = require('../../shared/constants/servicePackage.constant');
 const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
 const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 const {
@@ -37,12 +41,28 @@ const {
     BOOKING_PAYMENT_METHOD,
     BOOKING_PAYMENT_STATUS,
     DEFAULT_BOOKING_RULE,
+    BOOKING_ITEM_STATUS,
+    BOOKING_ITEM_COMPLETION_SOURCE,
 } = require('../../shared/constants/booking.constant');
 
 const DEFAULT_TIMEZONE_OFFSET = process.env.APP_TIMEZONE_OFFSET || '+07:00';
-const BOOKING_ITEM_HOLD_STATUSES = ['PENDING', 'IN_PROGRESS', 'DONE'];
-const BOOKING_ITEM_ACTIVE_STATUSES = ['PENDING', 'IN_PROGRESS'];
+const BOOKING_ITEM_HOLD_STATUSES = [
+    BOOKING_ITEM_STATUS.PENDING,
+    BOOKING_ITEM_STATUS.IN_PROGRESS,
+    BOOKING_ITEM_STATUS.PAUSED,
+    BOOKING_ITEM_STATUS.AWAITING_CONFIRMATION,
+    BOOKING_ITEM_STATUS.WAITING_RESOURCE,
+    BOOKING_ITEM_STATUS.DONE,
+];
+const BOOKING_ITEM_ACTIVE_STATUSES = [
+    BOOKING_ITEM_STATUS.PENDING,
+    BOOKING_ITEM_STATUS.IN_PROGRESS,
+    BOOKING_ITEM_STATUS.PAUSED,
+    BOOKING_ITEM_STATUS.AWAITING_CONFIRMATION,
+    BOOKING_ITEM_STATUS.WAITING_RESOURCE,
+];
 const BOOKING_RESOURCE_HOLD_STATUSES = [...BOOKING_HOLD_SLOT_STATUSES, BOOKING_STATUS.COMPLETED];
+const SERVICE_ITEM_TIMER_CLAIM_TIMEOUT_MS = 30 * 1000;
 
 const normalizeText = (value) => {
     if (value === null) {
@@ -104,6 +124,10 @@ const parseDateTime = (value, fieldName = 'datetime') => {
 
 const addMinutes = (date, minutes) => {
     return new Date(date.getTime() + minutes * 60 * 1000);
+};
+
+const addSeconds = (date, seconds) => {
+    return new Date(date.getTime() + seconds * 1000);
 };
 
 const getTimezoneOffsetMinutes = () => {
@@ -264,7 +288,7 @@ const populateBookingQuery = (query) => {
         .populate('vehicle_id', 'raw_license_plate normalized_license_plate vehicle_type engine_type brand model color is_active')
         .populate('garage_id', 'name garage_code address city opening_time closing_time slot_interval_minutes late_grace_minutes is_active')
         .populate('wash_bay_id', 'name bay_code vehicle_type status is_active')
-        .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes wash_bay_duration_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes is_active')
+        .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes countdown_duration_seconds transition_mode wash_bay_duration_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes is_active')
         .populate('promotion_id', 'code name discount_type discount_value max_discount_amount min_order_amount start_at end_at is_active')
         .populate('created_by_staff_id', 'full_name email phone role is_active')
         .populate('canceled_by_id', 'full_name email phone role is_active')
@@ -548,6 +572,10 @@ const buildBookingItems = ({ startTime, serviceItems, garage }) => {
             name_snapshot: servicePackage.name,
             price_snapshot: item.priceSnapshot,
             duration_minutes: servicePackage.duration_minutes,
+            countdown_duration_seconds: servicePackage.countdown_duration_seconds
+                || servicePackage.duration_minutes * 60,
+            transition_mode: servicePackage.transition_mode
+                || SERVICE_TRANSITION_MODES.REQUIRE_CONFIRMATION,
             item_start_time: itemStartTime,
             item_end_time: itemEndTime,
             sequence: index + 1,
@@ -567,7 +595,20 @@ const buildBookingItems = ({ startTime, serviceItems, garage }) => {
             care_staff_end_time: careStaffWorkEndTime,
             care_staff_work_end_time: careStaffWorkEndTime,
             care_staff_reserved_until: careStaffReservedUntil,
-            status: 'PENDING',
+            status: BOOKING_ITEM_STATUS.PENDING,
+            actual_started_at: null,
+            countdown_ends_at: null,
+            actual_completed_at: null,
+            remaining_seconds_at_pause: null,
+            paused_at: null,
+            paused_by_staff_id: null,
+            pause_reason: null,
+            total_paused_seconds: 0,
+            completion_source: null,
+            completed_by_staff_id: null,
+            completion_note: null,
+            timer_claimed_at: null,
+            timer_claim_token: null,
         };
     });
 };
@@ -654,7 +695,20 @@ const buildShiftedBookingTimeline = ({ booking, startTime }) => {
         const shiftedItem = {
             ...plainItem,
             assigned_care_staff: [],
-            status: 'PENDING',
+            status: BOOKING_ITEM_STATUS.PENDING,
+            actual_started_at: null,
+            countdown_ends_at: null,
+            actual_completed_at: null,
+            remaining_seconds_at_pause: null,
+            paused_at: null,
+            paused_by_staff_id: null,
+            pause_reason: null,
+            total_paused_seconds: 0,
+            completion_source: null,
+            completed_by_staff_id: null,
+            completion_note: null,
+            timer_claimed_at: null,
+            timer_claim_token: null,
         };
 
         for (const field of BOOKING_ITEM_TIMELINE_FIELDS) {
@@ -2045,40 +2099,188 @@ const assignCareStaffToBookingIfNeeded = async (booking) => {
     }
 };
 
-const markBookingItemDoneIfReady = async (booking, bookingItemKey) => {
-    const normalizedBookingItemKey = normalizeBookingItemKey(bookingItemKey);
-
-    if (!normalizedBookingItemKey) {
-        return;
-    }
-
-    const bookingItem = (booking.booking_items || []).find((item) => {
-        return normalizeBookingItemKey(item.item_key) === normalizedBookingItemKey;
-    });
-
-    if (!bookingItem || bookingItem.status === 'DONE') {
-        return;
-    }
-
-    const isReady = await bookingServiceStepService.areAllRequiredStepsDoneForBookingItem(
-        booking._id,
-        normalizedBookingItemKey
+const getEffectiveCountdownDurationSeconds = (bookingItem) => {
+    const countdownDurationSeconds = Number(
+        bookingItem.countdown_duration_seconds || bookingItem.duration_minutes * 60
     );
 
-    if (!isReady) {
-        return;
+    if (!Number.isInteger(countdownDurationSeconds) || countdownDurationSeconds < 1) {
+        throw new AppError(
+            'Booking service item countdown configuration is invalid',
+            409,
+            'BOOKING_SERVICE_ITEM_COUNTDOWN_INVALID'
+        );
     }
 
-    const releasedAt = new Date();
+    return countdownDurationSeconds;
+};
 
-    bookingItem.status = 'DONE';
-    releaseCareStaffAssignmentsForBookingItem(bookingItem, releasedAt);
-    booking.markModified('booking_items');
+const getBookingItemByKey = (booking, bookingItemKey) => {
+    const normalizedBookingItemKey = normalizeBookingItemKey(bookingItemKey);
+
+    return (booking.booking_items || []).find((item) => {
+        return normalizeBookingItemKey(item.item_key) === normalizedBookingItemKey;
+    }) || null;
+};
+
+const getCurrentBookingItem = (booking) => {
+    const currentStatuses = [
+        BOOKING_ITEM_STATUS.IN_PROGRESS,
+        BOOKING_ITEM_STATUS.PAUSED,
+        BOOKING_ITEM_STATUS.AWAITING_CONFIRMATION,
+        BOOKING_ITEM_STATUS.WAITING_RESOURCE,
+    ];
+
+    return [...(booking.booking_items || [])]
+        .sort((firstItem, secondItem) => firstItem.sequence - secondItem.sequence)
+        .find((item) => currentStatuses.includes(item.status)) || null;
+};
+
+const getNextPendingBookingItem = (booking, completedItem) => {
+    return [...(booking.booking_items || [])]
+        .sort((firstItem, secondItem) => firstItem.sequence - secondItem.sequence)
+        .find((item) => (
+            item.sequence > completedItem.sequence
+            && item.status === BOOKING_ITEM_STATUS.PENDING
+        )) || null;
+};
+
+const startBookingItemCountdown = (bookingItem, startedAt = new Date()) => {
+    const countdownDurationSeconds = getEffectiveCountdownDurationSeconds(bookingItem);
+
+    bookingItem.status = BOOKING_ITEM_STATUS.IN_PROGRESS;
+    bookingItem.actual_started_at = startedAt;
+    bookingItem.countdown_ends_at = addSeconds(startedAt, countdownDurationSeconds);
+    bookingItem.actual_completed_at = null;
+    bookingItem.remaining_seconds_at_pause = null;
+    bookingItem.paused_at = null;
+    bookingItem.paused_by_staff_id = null;
+    bookingItem.pause_reason = null;
+    bookingItem.total_paused_seconds = 0;
+    bookingItem.completion_source = null;
+    bookingItem.completed_by_staff_id = null;
+    bookingItem.completion_note = null;
+    bookingItem.timer_claimed_at = null;
+    bookingItem.timer_claim_token = null;
+
+    return bookingItem;
+};
+
+const recordServiceItemAudit = async ({
+    booking,
+    bookingItem,
+    actorId = null,
+    action,
+    before = null,
+    metadata = {},
+    auditContext = {},
+}) => {
+    try {
+        await auditLogService.recordAuditEvent({
+            actorId,
+            action,
+            resourceType: AUDIT_RESOURCE_TYPES.BOOKING,
+            resourceId: booking._id,
+            before,
+            after: {
+                item_key: bookingItem.item_key,
+                status: bookingItem.status,
+                actual_started_at: bookingItem.actual_started_at,
+                countdown_ends_at: bookingItem.countdown_ends_at,
+                actual_completed_at: bookingItem.actual_completed_at,
+                completion_source: bookingItem.completion_source,
+            },
+            metadata: {
+                booking_item_key: bookingItem.item_key,
+                service_package_id: bookingItem.service_package_id,
+                ...metadata,
+            },
+            ip: auditContext.ip,
+            userAgent: auditContext.userAgent,
+        });
+    } catch (error) {
+        console.warn('[bookings] service item audit failed', {
+            booking_id: booking._id?.toString?.() || booking._id,
+            booking_item_key: bookingItem.item_key,
+            action,
+            error: error.message,
+        });
+    }
+};
+
+const getCompletionAuditAction = (completionSource) => {
+    if (completionSource === BOOKING_ITEM_COMPLETION_SOURCE.TIMER) {
+        return AUDIT_ACTIONS.BOOKING_SERVICE_ITEM_AUTO_COMPLETED;
+    }
+
+    if (completionSource === BOOKING_ITEM_COMPLETION_SOURCE.STAFF_EARLY) {
+        return AUDIT_ACTIONS.BOOKING_SERVICE_ITEM_COMPLETED_EARLY;
+    }
+
+    return AUDIT_ACTIONS.BOOKING_SERVICE_ITEM_CONFIRMED;
+};
+
+const completeBookingItemAndAdvance = async ({
+    booking,
+    bookingItem,
+    completionSource,
+    completedAt = new Date(),
+    staffId = null,
+    note,
+    auditContext = {},
+}) => {
+    const before = {
+        status: bookingItem.status,
+        countdown_ends_at: bookingItem.countdown_ends_at,
+        remaining_seconds_at_pause: bookingItem.remaining_seconds_at_pause,
+    };
+
+    await bookingServiceStepService.completeStepsForBookingItem({
+        bookingId: booking._id,
+        bookingItemKey: normalizeBookingItemKey(bookingItem.item_key),
+        completedAt,
+        staffId,
+        note,
+    });
+
+    if (bookingItem.status === BOOKING_ITEM_STATUS.PAUSED && bookingItem.paused_at) {
+        bookingItem.total_paused_seconds = (bookingItem.total_paused_seconds || 0)
+            + Math.max(
+                0,
+                Math.ceil((completedAt.getTime() - new Date(bookingItem.paused_at).getTime()) / 1000)
+            );
+    }
+
+    bookingItem.status = BOOKING_ITEM_STATUS.DONE;
+    bookingItem.actual_completed_at = completedAt;
+    bookingItem.countdown_ends_at = null;
+    bookingItem.remaining_seconds_at_pause = null;
+    bookingItem.paused_at = null;
+    bookingItem.paused_by_staff_id = null;
+    bookingItem.pause_reason = null;
+    bookingItem.completion_source = completionSource;
+    bookingItem.completed_by_staff_id = staffId;
+    bookingItem.completion_note = normalizeText(note);
+    bookingItem.timer_claimed_at = null;
+    bookingItem.timer_claim_token = null;
+
+    releaseCareStaffAssignmentsForBookingItem(bookingItem, completedAt);
+
+    const nextBookingItem = getNextPendingBookingItem(booking, bookingItem);
+
+    if (nextBookingItem) {
+        startBookingItemCountdown(nextBookingItem, completedAt);
+    }
+
+    if (typeof booking.markModified === 'function') {
+        booking.markModified('booking_items');
+    }
+
     await booking.save();
     await bookingServiceStepService.markResourceReleasedForBookingItem(
         booking._id,
-        normalizedBookingItemKey,
-        releasedAt
+        normalizeBookingItemKey(bookingItem.item_key),
+        completedAt
     );
 
     const hasPendingWashBayItem = (booking.booking_items || []).some((item) => {
@@ -2088,6 +2290,69 @@ const markBookingItemDoneIfReady = async (booking, bookingItemKey) => {
     if (bookingItem.requires_wash_bay && !hasPendingWashBayItem) {
         await releaseWashBayForBooking(booking);
     }
+
+    await recordServiceItemAudit({
+        booking,
+        bookingItem,
+        actorId: staffId,
+        action: getCompletionAuditAction(completionSource),
+        before,
+        metadata: {
+            next_booking_item_key: nextBookingItem?.item_key || null,
+            note: normalizeText(note),
+        },
+        auditContext,
+    });
+
+    if (nextBookingItem) {
+        await recordServiceItemAudit({
+            booking,
+            bookingItem: nextBookingItem,
+            actorId: staffId,
+            action: AUDIT_ACTIONS.BOOKING_SERVICE_ITEM_STARTED,
+            metadata: {
+                previous_booking_item_key: bookingItem.item_key,
+                started_automatically: true,
+            },
+            auditContext,
+        });
+    }
+
+    return nextBookingItem;
+};
+
+const markBookingItemDoneIfReady = async (booking, bookingItemKey, { staffId = null, note } = {}) => {
+    const normalizedBookingItemKey = normalizeBookingItemKey(bookingItemKey);
+
+    if (!normalizedBookingItemKey) {
+        return false;
+    }
+
+    const bookingItem = getBookingItemByKey(booking, normalizedBookingItemKey);
+
+    if (!bookingItem || bookingItem.status === BOOKING_ITEM_STATUS.DONE) {
+        return false;
+    }
+
+    const isReady = await bookingServiceStepService.areAllRequiredStepsDoneForBookingItem(
+        booking._id,
+        normalizedBookingItemKey
+    );
+
+    if (!isReady) {
+        return false;
+    }
+
+    await completeBookingItemAndAdvance({
+        booking,
+        bookingItem,
+        completionSource: BOOKING_ITEM_COMPLETION_SOURCE.STAFF_CONFIRM,
+        completedAt: new Date(),
+        staffId,
+        note,
+    });
+
+    return true;
 };
 
 const getAvailableSlots = async ({
@@ -3531,6 +3796,18 @@ const startService = async (
         booking.status = BOOKING_STATUS.IN_PROGRESS;
         booking.started_at = startedAt;
 
+        const firstBookingItem = [...(booking.booking_items || [])]
+            .sort((firstItem, secondItem) => firstItem.sequence - secondItem.sequence)
+            .find((item) => item.status === BOOKING_ITEM_STATUS.PENDING);
+
+        if (firstBookingItem) {
+            startBookingItemCountdown(firstBookingItem, startedAt);
+
+            if (typeof booking.markModified === 'function') {
+                booking.markModified('booking_items');
+            }
+        }
+
         if (note !== undefined) {
             booking.note = normalizeText(note);
         }
@@ -3538,6 +3815,19 @@ const startService = async (
         await booking.save();
 
         const serviceSteps = await bookingServiceStepService.createStepsForBooking(booking, servicePackage);
+
+        if (firstBookingItem) {
+            await recordServiceItemAudit({
+                booking,
+                bookingItem: firstBookingItem,
+                actorId: user._id,
+                action: AUDIT_ACTIONS.BOOKING_SERVICE_ITEM_STARTED,
+                metadata: {
+                    started_automatically: false,
+                },
+                auditContext,
+            });
+        }
 
         if (isLateStart) {
             await auditLogService.recordAuditEvent({
@@ -3616,16 +3906,494 @@ const markBookingServiceStepDone = async (user, bookingId, stepId, { note } = {}
     await assertStaffCanAccessBooking(user, booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_STEP_DONE_NOT_ALLOWED');
 
+    const currentBookingItem = getCurrentBookingItem(booking);
+
     const step = await bookingServiceStepService.markStepDone({
         bookingId: booking._id,
         stepId,
         staffId: user._id,
         note,
+        currentBookingItemKey: currentBookingItem?.item_key || null,
     });
 
-    await markBookingItemDoneIfReady(booking, step.booking_item_key);
+    await markBookingItemDoneIfReady(booking, step.booking_item_key, {
+        staffId: user._id,
+        note,
+    });
 
     return step;
+};
+
+const getRemainingServiceItemSeconds = (bookingItem, serverTime = new Date()) => {
+    if (!bookingItem) {
+        return null;
+    }
+
+    if (bookingItem.status === BOOKING_ITEM_STATUS.PAUSED) {
+        return bookingItem.remaining_seconds_at_pause || 0;
+    }
+
+    if (!bookingItem.countdown_ends_at) {
+        return 0;
+    }
+
+    return Math.max(
+        0,
+        Math.ceil((new Date(bookingItem.countdown_ends_at).getTime() - serverTime.getTime()) / 1000)
+    );
+};
+
+const buildServiceWorkflowDto = ({ booking, serviceSteps = [], serverTime = new Date() }) => {
+    const bookingDto = BookingMapper.toBookingDto(booking);
+    const currentBookingItem = getCurrentBookingItem(booking);
+    const currentBookingItemDto = currentBookingItem
+        ? bookingDto.booking_items.find((item) => item.item_key === currentBookingItem.item_key)
+        : null;
+    const nextBookingItem = currentBookingItem
+        ? getNextPendingBookingItem(booking, currentBookingItem)
+        : [...(booking.booking_items || [])]
+            .sort((firstItem, secondItem) => firstItem.sequence - secondItem.sequence)
+            .find((item) => item.status === BOOKING_ITEM_STATUS.PENDING) || null;
+    const nextBookingItemDto = nextBookingItem
+        ? bookingDto.booking_items.find((item) => item.item_key === nextBookingItem.item_key)
+        : null;
+    const allServiceItemsDone = (booking.booking_items || []).length > 0
+        && (booking.booking_items || []).every((item) => (
+            item.status === BOOKING_ITEM_STATUS.DONE
+            || item.status === BOOKING_ITEM_STATUS.SKIPPED
+        ));
+
+    let workflowPhase = 'NOT_STARTED';
+
+    if (booking.status === BOOKING_STATUS.COMPLETED) {
+        workflowPhase = 'COMPLETED';
+    } else if (currentBookingItem) {
+        workflowPhase = 'SERVICE';
+    } else if (allServiceItemsDone) {
+        workflowPhase = 'POST_SERVICE';
+    } else if (booking.status === BOOKING_STATUS.IN_PROGRESS) {
+        workflowPhase = 'READY';
+    }
+
+    return {
+        server_time: serverTime,
+        booking_id: booking._id?.toString?.() || booking._id,
+        booking_status: booking.status,
+        workflow_phase: workflowPhase,
+        current_item: currentBookingItemDto,
+        next_item: nextBookingItemDto,
+        remaining_seconds: getRemainingServiceItemSeconds(currentBookingItem, serverTime),
+        all_service_items_done: allServiceItemsDone,
+        can_pause: currentBookingItem?.status === BOOKING_ITEM_STATUS.IN_PROGRESS,
+        can_resume: currentBookingItem?.status === BOOKING_ITEM_STATUS.PAUSED,
+        can_complete_early: [
+            BOOKING_ITEM_STATUS.IN_PROGRESS,
+            BOOKING_ITEM_STATUS.PAUSED,
+        ].includes(currentBookingItem?.status),
+        requires_confirmation: currentBookingItem?.status === BOOKING_ITEM_STATUS.AWAITING_CONFIRMATION,
+        service_steps: serviceSteps,
+    };
+};
+
+const getServiceWorkflow = async (user, bookingId) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+
+    const [populatedBooking, serviceSteps] = await Promise.all([
+        getBookingDocumentById(booking._id),
+        bookingServiceStepService.getStepsByBookingId(booking._id),
+    ]);
+
+    return buildServiceWorkflowDto({
+        booking: populatedBooking,
+        serviceSteps,
+        serverTime: new Date(),
+    });
+};
+
+const assertCurrentBookingItem = (booking, bookingItemKey, allowedStatuses, errorCode) => {
+    const bookingItem = getBookingItemByKey(booking, bookingItemKey);
+    const currentBookingItem = getCurrentBookingItem(booking);
+
+    if (!bookingItem) {
+        throw new AppError('Booking service item not found', 404, 'BOOKING_SERVICE_ITEM_NOT_FOUND');
+    }
+
+    if (!currentBookingItem || normalizeBookingItemKey(currentBookingItem.item_key) !== normalizeBookingItemKey(bookingItem.item_key)) {
+        throw new AppError(
+            'Booking service item is not the current item',
+            409,
+            'BOOKING_SERVICE_ITEM_NOT_CURRENT'
+        );
+    }
+
+    if (!allowedStatuses.includes(bookingItem.status)) {
+        throw new AppError('Booking service item cannot be processed in current status', 409, errorCode);
+    }
+
+    return bookingItem;
+};
+
+const completeServiceItemEarly = async (
+    user,
+    bookingId,
+    bookingItemKey,
+    { note } = {},
+    auditContext = {}
+) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+    assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_ITEM_COMPLETE_NOT_ALLOWED');
+
+    const bookingItem = assertCurrentBookingItem(
+        booking,
+        bookingItemKey,
+        [BOOKING_ITEM_STATUS.IN_PROGRESS, BOOKING_ITEM_STATUS.PAUSED],
+        'BOOKING_SERVICE_ITEM_EARLY_COMPLETE_NOT_ALLOWED'
+    );
+
+    await completeBookingItemAndAdvance({
+        booking,
+        bookingItem,
+        completionSource: BOOKING_ITEM_COMPLETION_SOURCE.STAFF_EARLY,
+        completedAt: new Date(),
+        staffId: user._id,
+        note,
+        auditContext,
+    });
+
+    return getServiceWorkflow(user, booking._id);
+};
+
+const confirmServiceItemComplete = async (
+    user,
+    bookingId,
+    bookingItemKey,
+    { note } = {},
+    auditContext = {}
+) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+    assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_ITEM_CONFIRM_NOT_ALLOWED');
+
+    const bookingItem = assertCurrentBookingItem(
+        booking,
+        bookingItemKey,
+        [BOOKING_ITEM_STATUS.AWAITING_CONFIRMATION],
+        'BOOKING_SERVICE_ITEM_CONFIRM_NOT_ALLOWED'
+    );
+
+    await completeBookingItemAndAdvance({
+        booking,
+        bookingItem,
+        completionSource: BOOKING_ITEM_COMPLETION_SOURCE.STAFF_CONFIRM,
+        completedAt: new Date(),
+        staffId: user._id,
+        note,
+        auditContext,
+    });
+
+    return getServiceWorkflow(user, booking._id);
+};
+
+const pauseServiceItem = async (
+    user,
+    bookingId,
+    bookingItemKey,
+    { reason } = {},
+    auditContext = {}
+) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+    assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_ITEM_PAUSE_NOT_ALLOWED');
+
+    const bookingItem = assertCurrentBookingItem(
+        booking,
+        bookingItemKey,
+        [BOOKING_ITEM_STATUS.IN_PROGRESS],
+        'BOOKING_SERVICE_ITEM_PAUSE_NOT_ALLOWED'
+    );
+    const pausedAt = new Date();
+    const remainingSeconds = getRemainingServiceItemSeconds(bookingItem, pausedAt);
+
+    if (remainingSeconds <= 0) {
+        throw new AppError(
+            'Service item countdown has already elapsed',
+            409,
+            'BOOKING_SERVICE_ITEM_COUNTDOWN_ELAPSED'
+        );
+    }
+
+    const before = {
+        status: bookingItem.status,
+        countdown_ends_at: bookingItem.countdown_ends_at,
+    };
+
+    bookingItem.status = BOOKING_ITEM_STATUS.PAUSED;
+    bookingItem.remaining_seconds_at_pause = remainingSeconds;
+    bookingItem.paused_at = pausedAt;
+    bookingItem.paused_by_staff_id = user._id;
+    bookingItem.pause_reason = normalizeText(reason);
+    bookingItem.countdown_ends_at = null;
+    bookingItem.timer_claimed_at = null;
+    bookingItem.timer_claim_token = null;
+    booking.markModified('booking_items');
+    await booking.save();
+
+    await recordServiceItemAudit({
+        booking,
+        bookingItem,
+        actorId: user._id,
+        action: AUDIT_ACTIONS.BOOKING_SERVICE_ITEM_PAUSED,
+        before,
+        metadata: {
+            reason: normalizeText(reason),
+            remaining_seconds: remainingSeconds,
+        },
+        auditContext,
+    });
+
+    return getServiceWorkflow(user, booking._id);
+};
+
+const resumeServiceItem = async (
+    user,
+    bookingId,
+    bookingItemKey,
+    auditContext = {}
+) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+    assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_ITEM_RESUME_NOT_ALLOWED');
+
+    const bookingItem = assertCurrentBookingItem(
+        booking,
+        bookingItemKey,
+        [BOOKING_ITEM_STATUS.PAUSED],
+        'BOOKING_SERVICE_ITEM_RESUME_NOT_ALLOWED'
+    );
+    const resumedAt = new Date();
+    const remainingSeconds = bookingItem.remaining_seconds_at_pause;
+
+    if (!remainingSeconds || remainingSeconds < 1) {
+        throw new AppError(
+            'Paused service item has no remaining countdown',
+            409,
+            'BOOKING_SERVICE_ITEM_REMAINING_TIME_INVALID'
+        );
+    }
+
+    const pausedSeconds = bookingItem.paused_at
+        ? Math.max(0, Math.ceil((resumedAt.getTime() - new Date(bookingItem.paused_at).getTime()) / 1000))
+        : 0;
+    const before = {
+        status: bookingItem.status,
+        remaining_seconds_at_pause: remainingSeconds,
+        paused_at: bookingItem.paused_at,
+    };
+
+    bookingItem.status = BOOKING_ITEM_STATUS.IN_PROGRESS;
+    bookingItem.countdown_ends_at = addSeconds(resumedAt, remainingSeconds);
+    bookingItem.remaining_seconds_at_pause = null;
+    bookingItem.total_paused_seconds = (bookingItem.total_paused_seconds || 0) + pausedSeconds;
+    bookingItem.paused_at = null;
+    bookingItem.paused_by_staff_id = null;
+    bookingItem.timer_claimed_at = null;
+    bookingItem.timer_claim_token = null;
+    booking.markModified('booking_items');
+    await booking.save();
+
+    await recordServiceItemAudit({
+        booking,
+        bookingItem,
+        actorId: user._id,
+        action: AUDIT_ACTIONS.BOOKING_SERVICE_ITEM_RESUMED,
+        before,
+        metadata: {
+            paused_seconds: pausedSeconds,
+            countdown_ends_at: bookingItem.countdown_ends_at,
+        },
+        auditContext,
+    });
+
+    return getServiceWorkflow(user, booking._id);
+};
+
+const claimDueServiceItemTimer = async (now = new Date()) => {
+    const timerClaimToken = randomUUID();
+    const staleClaimTime = new Date(now.getTime() - SERVICE_ITEM_TIMER_CLAIM_TIMEOUT_MS);
+    const booking = await Booking.findOneAndUpdate(
+        {
+            status: BOOKING_STATUS.IN_PROGRESS,
+            booking_items: {
+                $elemMatch: {
+                    status: BOOKING_ITEM_STATUS.IN_PROGRESS,
+                    countdown_ends_at: { $lte: now },
+                    $or: [
+                        { timer_claimed_at: null },
+                        { timer_claimed_at: { $exists: false } },
+                        { timer_claimed_at: { $lte: staleClaimTime } },
+                    ],
+                },
+            },
+        },
+        {
+            $set: {
+                'booking_items.$.timer_claimed_at': now,
+                'booking_items.$.timer_claim_token': timerClaimToken,
+            },
+        },
+        {
+            new: true,
+            sort: { 'booking_items.countdown_ends_at': 1 },
+        }
+    );
+
+    if (!booking) {
+        return null;
+    }
+
+    const bookingItem = (booking.booking_items || []).find((item) => {
+        return item.timer_claim_token === timerClaimToken;
+    });
+
+    if (!bookingItem) {
+        return null;
+    }
+
+    return {
+        bookingId: booking._id,
+        bookingItemKey: bookingItem.item_key,
+        timerClaimToken,
+    };
+};
+
+const processClaimedServiceItemTimer = async ({
+    bookingId,
+    bookingItemKey,
+    timerClaimToken,
+    processedAt = new Date(),
+}) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+    const bookingItem = getBookingItemByKey(booking, bookingItemKey);
+
+    if (
+        !bookingItem
+        || bookingItem.status !== BOOKING_ITEM_STATUS.IN_PROGRESS
+        || bookingItem.timer_claim_token !== timerClaimToken
+    ) {
+        return {
+            skipped: true,
+            reason: 'SERVICE_ITEM_TIMER_CLAIM_STALE',
+        };
+    }
+
+    if (
+        !bookingItem.countdown_ends_at
+        || new Date(bookingItem.countdown_ends_at).getTime() > processedAt.getTime()
+    ) {
+        bookingItem.timer_claimed_at = null;
+        bookingItem.timer_claim_token = null;
+        booking.markModified('booking_items');
+        await booking.save();
+
+        return {
+            skipped: true,
+            reason: 'SERVICE_ITEM_TIMER_NOT_DUE',
+        };
+    }
+
+    if (bookingItem.transition_mode !== SERVICE_TRANSITION_MODES.AUTO) {
+        const before = {
+            status: bookingItem.status,
+            countdown_ends_at: bookingItem.countdown_ends_at,
+        };
+
+        bookingItem.status = BOOKING_ITEM_STATUS.AWAITING_CONFIRMATION;
+        bookingItem.countdown_ends_at = null;
+        bookingItem.timer_claimed_at = null;
+        bookingItem.timer_claim_token = null;
+        booking.markModified('booking_items');
+        await booking.save();
+
+        await recordServiceItemAudit({
+            booking,
+            bookingItem,
+            action: AUDIT_ACTIONS.BOOKING_SERVICE_ITEM_TIMEOUT,
+            before,
+            metadata: {
+                transition_mode: bookingItem.transition_mode,
+            },
+        });
+
+        return {
+            awaiting_confirmation: true,
+            booking_id: booking._id,
+            booking_item_key: bookingItem.item_key,
+        };
+    }
+
+    await completeBookingItemAndAdvance({
+        booking,
+        bookingItem,
+        completionSource: BOOKING_ITEM_COMPLETION_SOURCE.TIMER,
+        completedAt: processedAt,
+    });
+
+    return {
+        auto_completed: true,
+        booking_id: booking._id,
+        booking_item_key: bookingItem.item_key,
+    };
+};
+
+const processDueServiceItemTimers = async ({ limit = 50 } = {}) => {
+    const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const result = {
+        processed: 0,
+        auto_completed: 0,
+        awaiting_confirmation: 0,
+        failed: 0,
+    };
+
+    for (let index = 0; index < safeLimit; index += 1) {
+        const claimedTimer = await claimDueServiceItemTimer(new Date());
+
+        if (!claimedTimer) {
+            break;
+        }
+
+        try {
+            const processed = await processClaimedServiceItemTimer({
+                ...claimedTimer,
+                processedAt: new Date(),
+            });
+
+            result.processed += 1;
+
+            if (processed.auto_completed) {
+                result.auto_completed += 1;
+            }
+
+            if (processed.awaiting_confirmation) {
+                result.awaiting_confirmation += 1;
+            }
+        } catch (error) {
+            result.failed += 1;
+            console.error('[bookings] service item timer processing failed', {
+                booking_id: claimedTimer.bookingId?.toString?.() || claimedTimer.bookingId,
+                booking_item_key: claimedTimer.bookingItemKey,
+                error: error.message,
+            });
+        }
+    }
+
+    return result;
 };
 
 
@@ -3694,6 +4462,20 @@ const completeService = async (user, bookingId, { note } = {}) => {
 
     await assertStaffCanAccessBooking(user, booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_COMPLETE_SERVICE_NOT_ALLOWED');
+
+    const unfinishedBookingItem = (booking.booking_items || []).find((item) => (
+        item.status !== BOOKING_ITEM_STATUS.DONE
+        && item.status !== BOOKING_ITEM_STATUS.SKIPPED
+    ));
+
+    if (unfinishedBookingItem) {
+        throw new AppError(
+            'All booking service items must be completed before completing booking',
+            400,
+            'BOOKING_SERVICE_ITEMS_NOT_DONE'
+        );
+    }
+
     await bookingServiceStepService.assertAllRequiredStepsDone(booking._id);
     await releaseWashBayForBooking(booking);
 
@@ -3804,7 +4586,13 @@ module.exports = {
     assignWashBay,
     startService,
     getBookingServiceSteps,
+    getServiceWorkflow,
     markBookingServiceStepDone,
+    completeServiceItemEarly,
+    confirmServiceItemComplete,
+    pauseServiceItem,
+    resumeServiceItem,
+    processDueServiceItemTimers,
     completeService,
     reopenCompletedBooking,
     markPaid,

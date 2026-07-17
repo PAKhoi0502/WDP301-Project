@@ -83,6 +83,17 @@ const schemas = {
                 description: 'Required for non-combo services. Combo duration is calculated from included services.',
                 example: 45,
             },
+            countdown_duration_seconds: {
+                type: 'integer',
+                description: 'Exact operational countdown in seconds. Defaults to duration_minutes multiplied by 60 and cannot exceed the scheduled duration.',
+                example: 2670,
+            },
+            transition_mode: {
+                type: 'string',
+                enum: ['AUTO', 'REQUIRE_CONFIRMATION'],
+                description: 'AUTO is allowed only when all required workflow steps are automated.',
+                example: 'AUTO',
+            },
             wash_bay_duration_minutes: {
                 type: 'integer',
                 example: 30,
@@ -173,6 +184,15 @@ const schemas = {
             duration_minutes: {
                 type: 'integer',
                 example: 50,
+            },
+            countdown_duration_seconds: {
+                type: 'integer',
+                example: 2970,
+            },
+            transition_mode: {
+                type: 'string',
+                enum: ['AUTO', 'REQUIRE_CONFIRMATION'],
+                example: 'AUTO',
             },
             wash_bay_duration_minutes: {
                 type: 'integer',
@@ -289,6 +309,15 @@ const schemas = {
             duration_minutes: {
                 type: 'integer',
                 example: 45,
+            },
+            countdown_duration_seconds: {
+                type: 'integer',
+                example: 2670,
+            },
+            transition_mode: {
+                type: 'string',
+                enum: ['AUTO', 'REQUIRE_CONFIRMATION'],
+                example: 'AUTO',
             },
             wash_bay_duration_minutes: {
                 type: 'integer',

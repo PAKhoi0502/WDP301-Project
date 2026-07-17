@@ -6,6 +6,7 @@ jest.mock('./booking.model', () => ({
     exists: jest.fn(),
     create: jest.fn(),
     findById: jest.fn(),
+    findOneAndUpdate: jest.fn(),
 }));
 
 jest.mock('../users/user.model', () => ({}));
@@ -221,7 +222,9 @@ describe('booking care staff capacity', () => {
             createCapacityReservation('507f1f77bcf86cd799439080'),
         ]);
         bookingServiceStepService.markStepDone = jest.fn();
+        bookingServiceStepService.completeStepsForBookingItem = jest.fn().mockResolvedValue(0);
         bookingServiceStepService.createStepsForBooking = jest.fn();
+        bookingServiceStepService.getStepsByBookingId = jest.fn().mockResolvedValue([]);
         bookingServiceStepService.areAllRequiredStepsDoneForBookingItem = jest.fn();
         bookingServiceStepService.markResourceReleasedForBookingItem = jest.fn();
         bookingServiceStepService.clearResourceReleasedForBookingItem = jest.fn();
@@ -288,6 +291,7 @@ describe('booking care staff capacity', () => {
                     source: 'PRIMARY',
                     name_snapshot: 'Interior care',
                     sequence: 1,
+                    duration_minutes: 90,
                     requires_wash_bay: false,
                     requires_care_staff: true,
                     care_staff_type: 'VEHICLE_CARE_STAFF',
@@ -352,6 +356,9 @@ describe('booking care staff capacity', () => {
         expect(booking.booking_items[0].assigned_care_staff[0].assigned_at).toBeInstanceOf(Date);
         expect(booking.assigned_care_staff_ids).toEqual([staffBId]);
         expect(booking.status).toBe('IN_PROGRESS');
+        expect(booking.booking_items[0].status).toBe('IN_PROGRESS');
+        expect(booking.booking_items[0].actual_started_at).toBeInstanceOf(Date);
+        expect(booking.booking_items[0].countdown_ends_at).toBeInstanceOf(Date);
         expect(bookingServiceStepService.createStepsForBooking).toHaveBeenCalledWith(
             expect.objectContaining({
                 booking_items: expect.arrayContaining([
@@ -485,6 +492,7 @@ describe('booking care staff capacity', () => {
                 {
                     item_key: 'ITEM_1_507F1F77BCF86CD799439016',
                     sequence: 1,
+                    duration_minutes: 30,
                     item_start_time: new Date('2999-01-01T06:00:00.000Z'),
                     item_end_time: new Date('2999-01-01T06:30:00.000Z'),
                     requires_wash_bay: false,
@@ -529,6 +537,7 @@ describe('booking care staff capacity', () => {
         const createCareItem = (sequence, start, end, reservedUntil) => ({
             item_key: `ITEM_${sequence}_507F1F77BCF86CD799439016`,
             sequence,
+            duration_minutes: 20,
             item_start_time: new Date(start),
             item_end_time: new Date(end),
             requires_wash_bay: false,
@@ -2226,7 +2235,7 @@ describe('booking care staff capacity', () => {
                 {
                     item_key: 'ITEM_1_507F1F77BCF86CD799439016',
                     requires_care_staff: true,
-                    status: 'IN_PROGRESS',
+                    status: 'DONE',
                     assigned_care_staff: [
                         {
                             staff_profile_id: '507f1f77bcf86cd799439031',
@@ -2386,5 +2395,219 @@ describe('booking care staff capacity', () => {
             statusCode: 403,
             errorCode: 'BOOKING_REOPEN_ADMIN_ONLY',
         });
+    });
+
+    it('pauses and resumes the current service item without consuming paused time', async () => {
+        const bookingId = '507f1f77bcf86cd799439019';
+        const user = { _id: '507f1f77bcf86cd799439021', role: 'ADMIN' };
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'IN_PROGRESS',
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439015',
+                    service_package_id: washServiceId,
+                    sequence: 1,
+                    duration_minutes: 5,
+                    countdown_duration_seconds: 300,
+                    transition_mode: 'AUTO',
+                    status: 'IN_PROGRESS',
+                    actual_started_at: new Date(),
+                    countdown_ends_at: new Date(Date.now() + 60000),
+                    total_paused_seconds: 0,
+                    assigned_care_staff: [],
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById.mockImplementation(() => createPopulateQuery(booking));
+
+        const paused = await bookingService.pauseServiceItem(
+            user,
+            bookingId,
+            booking.booking_items[0].item_key,
+            { reason: 'Kiểm tra thiết bị' }
+        );
+
+        expect(booking.booking_items[0].status).toBe('PAUSED');
+        expect(booking.booking_items[0].countdown_ends_at).toBeNull();
+        expect(paused.can_resume).toBe(true);
+        expect(paused.remaining_seconds).toBeGreaterThan(0);
+
+        const remainingSeconds = booking.booking_items[0].remaining_seconds_at_pause;
+        const resumed = await bookingService.resumeServiceItem(
+            user,
+            bookingId,
+            booking.booking_items[0].item_key
+        );
+
+        expect(booking.booking_items[0].status).toBe('IN_PROGRESS');
+        expect(booking.booking_items[0].remaining_seconds_at_pause).toBeNull();
+        expect(booking.booking_items[0].countdown_ends_at).toBeInstanceOf(Date);
+        expect(resumed.remaining_seconds).toBeLessThanOrEqual(remainingSeconds);
+        expect(resumed.can_pause).toBe(true);
+    });
+
+    it('completes the current service item early and starts the next item', async () => {
+        const bookingId = '507f1f77bcf86cd799439019';
+        const user = { _id: '507f1f77bcf86cd799439021', role: 'ADMIN' };
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'IN_PROGRESS',
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439015',
+                    service_package_id: washServiceId,
+                    sequence: 1,
+                    duration_minutes: 5,
+                    countdown_duration_seconds: 300,
+                    transition_mode: 'AUTO',
+                    status: 'IN_PROGRESS',
+                    actual_started_at: new Date(),
+                    countdown_ends_at: new Date(Date.now() + 60000),
+                    assigned_care_staff: [],
+                },
+                {
+                    item_key: 'ITEM_2_507F1F77BCF86CD799439016',
+                    service_package_id: careServiceId,
+                    sequence: 2,
+                    duration_minutes: 10,
+                    countdown_duration_seconds: 600,
+                    transition_mode: 'REQUIRE_CONFIRMATION',
+                    status: 'PENDING',
+                    assigned_care_staff: [],
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findById.mockImplementation(() => createPopulateQuery(booking));
+
+        const result = await bookingService.completeServiceItemEarly(
+            user,
+            bookingId,
+            booking.booking_items[0].item_key,
+            { note: 'Đã hoàn thành kiểm tra sớm' }
+        );
+
+        expect(booking.booking_items[0].status).toBe('DONE');
+        expect(booking.booking_items[0].completion_source).toBe('STAFF_EARLY');
+        expect(booking.booking_items[1].status).toBe('IN_PROGRESS');
+        expect(booking.booking_items[1].countdown_ends_at).toBeInstanceOf(Date);
+        expect(result.current_item.item_key).toBe('ITEM_2_507F1F77BCF86CD799439016');
+        expect(bookingServiceStepService.completeStepsForBookingItem).toHaveBeenCalledWith(
+            expect.objectContaining({
+                bookingId,
+                bookingItemKey: 'ITEM_1_507F1F77BCF86CD799439015',
+                staffId: user._id,
+            })
+        );
+    });
+
+    it('moves a manual service item to awaiting confirmation when its timer expires', async () => {
+        const bookingId = '507f1f77bcf86cd799439019';
+        const booking = {
+            _id: bookingId,
+            status: 'IN_PROGRESS',
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                    service_package_id: careServiceId,
+                    sequence: 1,
+                    duration_minutes: 10,
+                    countdown_duration_seconds: 600,
+                    transition_mode: 'REQUIRE_CONFIRMATION',
+                    status: 'IN_PROGRESS',
+                    countdown_ends_at: new Date(Date.now() - 1000),
+                    timer_claimed_at: null,
+                    timer_claim_token: null,
+                    assigned_care_staff: [],
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findOneAndUpdate
+            .mockImplementationOnce((filter, update) => {
+                booking.booking_items[0].timer_claimed_at = update.$set['booking_items.$.timer_claimed_at'];
+                booking.booking_items[0].timer_claim_token = update.$set['booking_items.$.timer_claim_token'];
+                return Promise.resolve(booking);
+            })
+            .mockResolvedValueOnce(null);
+        Booking.findById.mockImplementation(() => createPopulateQuery(booking));
+
+        const result = await bookingService.processDueServiceItemTimers({ limit: 5 });
+
+        expect(result).toEqual({
+            processed: 1,
+            auto_completed: 0,
+            awaiting_confirmation: 1,
+            failed: 0,
+        });
+        expect(booking.booking_items[0].status).toBe('AWAITING_CONFIRMATION');
+        expect(booking.booking_items[0].countdown_ends_at).toBeNull();
+    });
+
+    it('automatically completes an automated item and starts the next item when due', async () => {
+        const bookingId = '507f1f77bcf86cd799439019';
+        const booking = {
+            _id: bookingId,
+            status: 'IN_PROGRESS',
+            booking_items: [
+                {
+                    item_key: 'ITEM_1_507F1F77BCF86CD799439015',
+                    service_package_id: washServiceId,
+                    sequence: 1,
+                    duration_minutes: 5,
+                    countdown_duration_seconds: 300,
+                    transition_mode: 'AUTO',
+                    status: 'IN_PROGRESS',
+                    countdown_ends_at: new Date(Date.now() - 1000),
+                    timer_claimed_at: null,
+                    timer_claim_token: null,
+                    assigned_care_staff: [],
+                },
+                {
+                    item_key: 'ITEM_2_507F1F77BCF86CD799439016',
+                    service_package_id: careServiceId,
+                    sequence: 2,
+                    duration_minutes: 10,
+                    countdown_duration_seconds: 600,
+                    transition_mode: 'REQUIRE_CONFIRMATION',
+                    status: 'PENDING',
+                    assigned_care_staff: [],
+                },
+            ],
+            save: jest.fn().mockResolvedValue(undefined),
+            markModified: jest.fn(),
+        };
+
+        Booking.findOneAndUpdate
+            .mockImplementationOnce((filter, update) => {
+                booking.booking_items[0].timer_claimed_at = update.$set['booking_items.$.timer_claimed_at'];
+                booking.booking_items[0].timer_claim_token = update.$set['booking_items.$.timer_claim_token'];
+                return Promise.resolve(booking);
+            })
+            .mockResolvedValueOnce(null);
+        Booking.findById.mockImplementation(() => createPopulateQuery(booking));
+
+        const result = await bookingService.processDueServiceItemTimers({ limit: 5 });
+
+        expect(result).toEqual({
+            processed: 1,
+            auto_completed: 1,
+            awaiting_confirmation: 0,
+            failed: 0,
+        });
+        expect(booking.booking_items[0].status).toBe('DONE');
+        expect(booking.booking_items[0].completion_source).toBe('TIMER');
+        expect(booking.booking_items[1].status).toBe('IN_PROGRESS');
+        expect(booking.booking_items[1].countdown_ends_at).toBeInstanceOf(Date);
     });
 });

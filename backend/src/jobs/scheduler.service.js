@@ -1,12 +1,14 @@
 const bookingWaitlistService = require('../modules/booking-waitlists/bookingWaitlist.service');
 const notificationService = require('../modules/notifications/notification.service');
 const loyaltyService = require('../modules/loyalty/loyalty.service');
+const bookingService = require('../modules/bookings/booking.service');
 
 const JOB_NAMES = Object.freeze({
     WAITLIST_EXPIRE: 'waitlist-expire',
     EMAIL_RETRY: 'email-retry',
     POINT_EXPIRATION: 'point-expiration',
     TIER_INACTIVITY_DOWNGRADE: 'tier-inactivity-downgrade',
+    SERVICE_ITEM_TIMER: 'service-item-timer',
 });
 
 const DEFAULT_INTERVALS = Object.freeze({
@@ -14,6 +16,7 @@ const DEFAULT_INTERVALS = Object.freeze({
     EMAIL_RETRY_JOB_INTERVAL_MS: 5 * 60 * 1000,
     POINT_EXPIRATION_JOB_INTERVAL_MS: 24 * 60 * 60 * 1000,
     TIER_INACTIVITY_DOWNGRADE_JOB_INTERVAL_MS: 24 * 60 * 60 * 1000,
+    SERVICE_ITEM_TIMER_JOB_INTERVAL_MS: 1000,
 });
 
 let activeJobs = [];
@@ -87,6 +90,17 @@ const buildJobDefinitions = () => [
         ),
         handler: () => loyaltyService.downgradeInactiveCustomerTiers({
             limit: getPositiveIntegerEnv('TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE', 50, 200),
+        }),
+    },
+    {
+        name: JOB_NAMES.SERVICE_ITEM_TIMER,
+        intervalMs: getPositiveIntegerEnv(
+            'SERVICE_ITEM_TIMER_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.SERVICE_ITEM_TIMER_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => bookingService.processDueServiceItemTimers({
+            limit: getPositiveIntegerEnv('SERVICE_ITEM_TIMER_BATCH_SIZE', 50, 200),
         }),
     },
 ];

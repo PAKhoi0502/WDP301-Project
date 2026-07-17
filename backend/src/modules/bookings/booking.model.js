@@ -11,7 +11,14 @@ const {
     BOOKING_PAYMENT_METHOD_VALUES,
     BOOKING_PAYMENT_STATUS,
     BOOKING_PAYMENT_STATUS_VALUES,
+    BOOKING_ITEM_STATUS,
+    BOOKING_ITEM_STATUS_VALUES,
+    BOOKING_ITEM_COMPLETION_SOURCE_VALUES,
 } = require('../../shared/constants/booking.constant');
+const {
+    SERVICE_TRANSITION_MODES,
+    SERVICE_TRANSITION_MODE_VALUES,
+} = require('../../shared/constants/servicePackage.constant');
 
 const bookingItemCareStaffAssignmentSchema = new mongoose.Schema(
     {
@@ -85,6 +92,19 @@ const bookingItemSchema = new mongoose.Schema(
             type: Number,
             required: [true, 'Booking item duration is required'],
             min: [1, 'Booking item duration must be at least 1 minute'],
+        },
+
+        countdown_duration_seconds: {
+            type: Number,
+            min: [1, 'Booking item countdown must be at least 1 second'],
+            max: [86400, 'Booking item countdown must not exceed 86400 seconds'],
+            default: null,
+        },
+
+        transition_mode: {
+            type: String,
+            enum: SERVICE_TRANSITION_MODE_VALUES,
+            default: SERVICE_TRANSITION_MODES.REQUIRE_CONFIRMATION,
         },
 
         item_start_time: {
@@ -173,8 +193,84 @@ const bookingItemSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ['PENDING', 'IN_PROGRESS', 'DONE', 'SKIPPED'],
-            default: 'PENDING',
+            enum: BOOKING_ITEM_STATUS_VALUES,
+            default: BOOKING_ITEM_STATUS.PENDING,
+        },
+
+        actual_started_at: {
+            type: Date,
+            default: null,
+        },
+
+        countdown_ends_at: {
+            type: Date,
+            default: null,
+        },
+
+        actual_completed_at: {
+            type: Date,
+            default: null,
+        },
+
+        remaining_seconds_at_pause: {
+            type: Number,
+            min: [0, 'Remaining pause seconds must be greater than or equal to 0'],
+            default: null,
+        },
+
+        paused_at: {
+            type: Date,
+            default: null,
+        },
+
+        paused_by_staff_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        pause_reason: {
+            type: String,
+            trim: true,
+            maxlength: [500, 'Pause reason must not exceed 500 characters'],
+            default: null,
+        },
+
+        total_paused_seconds: {
+            type: Number,
+            min: [0, 'Total paused seconds must be greater than or equal to 0'],
+            default: 0,
+        },
+
+        completion_source: {
+            type: String,
+            enum: BOOKING_ITEM_COMPLETION_SOURCE_VALUES,
+            default: null,
+        },
+
+        completed_by_staff_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        completion_note: {
+            type: String,
+            trim: true,
+            maxlength: [1000, 'Completion note must not exceed 1000 characters'],
+            default: null,
+        },
+
+        timer_claimed_at: {
+            type: Date,
+            default: null,
+        },
+
+        timer_claim_token: {
+            type: String,
+            trim: true,
+            maxlength: [100, 'Timer claim token must not exceed 100 characters'],
+            default: null,
         },
     },
     {
@@ -628,6 +724,7 @@ bookingSchema.index({ garage_id: 1, 'booking_items.care_staff_type': 1, 'booking
 bookingSchema.index({ garage_id: 1, start_time: -1 });
 bookingSchema.index({ service_package_id: 1 });
 bookingSchema.index({ status: 1 });
+bookingSchema.index({ status: 1, 'booking_items.status': 1, 'booking_items.countdown_ends_at': 1 });
 bookingSchema.index({ payment_status: 1 });
 bookingSchema.index({ is_walk_in: 1 });
 bookingSchema.index({ normalized_guest_phone: 1, is_walk_in: 1, claimed_customer_id: 1 });
@@ -705,6 +802,10 @@ bookingSchema.pre('validate', function (next) {
     const itemKeys = new Set();
 
     for (const item of this.booking_items || []) {
+        if (!item.countdown_duration_seconds && item.duration_minutes) {
+            item.countdown_duration_seconds = item.duration_minutes * 60;
+        }
+
         if (itemKeys.has(item.item_key)) {
             this.invalidate('booking_items', 'Booking item key must be unique');
             break;

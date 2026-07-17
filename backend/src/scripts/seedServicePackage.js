@@ -4,6 +4,7 @@ const { STAFF_TYPES } = require('../shared/constants/staff.constant');
 const {
     SERVICE_PACKAGE_TYPES,
     SERVICE_STEP_TYPES,
+    SERVICE_TRANSITION_MODES,
 } = require('../shared/constants/servicePackage.constant');
 
 const packageDefinitions = [
@@ -790,6 +791,21 @@ const hasVehicleCareStaffStep = (definition) => {
     });
 };
 
+const getDefinitionTransitionMode = (definition) => {
+    if (definition.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
+        return SERVICE_TRANSITION_MODES.REQUIRE_CONFIRMATION;
+    }
+
+    const requiredSteps = (definition.steps_template || []).filter((step) => step.is_required !== false);
+    const isAutomated = requiredSteps.length > 0
+        ? requiredSteps.every((step) => step.step_type === SERVICE_STEP_TYPES.AUTOMATED_WASH_STEP)
+        : definition.requires_wash_bay && !getDefinitionRequiresCareStaff(definition);
+
+    return isAutomated
+        ? SERVICE_TRANSITION_MODES.AUTO
+        : SERVICE_TRANSITION_MODES.REQUIRE_CONFIRMATION;
+};
+
 const getDefinitionRequiresCareStaff = (definition) => {
     return definition.requires_care_staff !== undefined
         ? definition.requires_care_staff
@@ -885,6 +901,8 @@ const toSeedPayload = (definition, idByKey) => {
         description: definition.description,
         base_price: definition.base_price,
         duration_minutes: definition.duration_minutes,
+        countdown_duration_seconds: definition.countdown_duration_seconds || definition.duration_minutes * 60,
+        transition_mode: definition.transition_mode || getDefinitionTransitionMode(definition),
         wash_bay_duration_minutes: definition.wash_bay_duration_minutes,
         wash_bay_start_offset_minutes: requiresWashBay
             ? definition.wash_bay_start_offset_minutes || 0

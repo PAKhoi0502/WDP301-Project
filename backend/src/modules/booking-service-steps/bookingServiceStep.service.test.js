@@ -209,6 +209,48 @@ describe('booking service step service', () => {
         );
     });
 
+    it('completes all unfinished steps for a booking item from one workflow transition', async () => {
+        const completedAt = new Date('2999-01-01T06:30:00.000Z');
+        const firstStep = {
+            status: 'PENDING',
+            started_at: null,
+            completed_at: null,
+            confirmed_by_staff_id: null,
+            note: null,
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        const secondStep = {
+            status: 'IN_PROGRESS',
+            started_at: new Date('2999-01-01T06:20:00.000Z'),
+            completed_at: null,
+            confirmed_by_staff_id: null,
+            note: null,
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+
+        BookingServiceStep.find.mockReturnValue(createFindQuery([firstStep, secondStep]));
+
+        const completed = await bookingServiceStepService.completeStepsForBookingItem({
+            bookingId: '507f1f77bcf86cd799439001',
+            bookingItemKey: 'ITEM_1_507F1F77BCF86CD799439003',
+            completedAt,
+            staffId: '507f1f77bcf86cd799439006',
+            note: 'Confirmed from service workflow',
+        });
+
+        expect(completed).toBe(2);
+        expect(firstStep).toMatchObject({
+            status: 'DONE',
+            started_at: completedAt,
+            completed_at: completedAt,
+            confirmed_by_staff_id: '507f1f77bcf86cd799439006',
+            note: 'Confirmed from service workflow',
+        });
+        expect(secondStep.started_at).toEqual(new Date('2999-01-01T06:20:00.000Z'));
+        expect(firstStep.save).toHaveBeenCalledWith();
+        expect(secondStep.save).toHaveBeenCalledWith();
+    });
+
     it('clears item resource release timestamp for a reopened booking item', async () => {
         const bookingId = '507f1f77bcf86cd799439001';
         const bookingItemKey = 'ITEM_1_507F1F77BCF86CD799439003';

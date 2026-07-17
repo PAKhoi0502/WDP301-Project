@@ -253,6 +253,82 @@ const reopenCompletedBooking = asyncHandler(async (req, res) => {
     });
 });
 
+const getServiceWorkflow = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const result = await bookingService.getServiceWorkflow(req.user, id);
+
+    return sendSuccess(res, {
+        message: 'Get booking service workflow successfully',
+        data: result,
+    });
+});
+
+const completeServiceItemEarly = asyncHandler(async (req, res) => {
+    const { id, itemKey } = req.validated.params;
+    const { body } = req.validated;
+    const result = await bookingService.completeServiceItemEarly(
+        req.user,
+        id,
+        itemKey,
+        body || {},
+        getAuditRequestContext(req)
+    );
+
+    return sendSuccess(res, {
+        message: 'Complete booking service item early successfully',
+        data: result,
+    });
+});
+
+const confirmServiceItemComplete = asyncHandler(async (req, res) => {
+    const { id, itemKey } = req.validated.params;
+    const { body } = req.validated;
+    const result = await bookingService.confirmServiceItemComplete(
+        req.user,
+        id,
+        itemKey,
+        body || {},
+        getAuditRequestContext(req)
+    );
+
+    return sendSuccess(res, {
+        message: 'Confirm booking service item successfully',
+        data: result,
+    });
+});
+
+const pauseServiceItem = asyncHandler(async (req, res) => {
+    const { id, itemKey } = req.validated.params;
+    const { body } = req.validated;
+    const result = await bookingService.pauseServiceItem(
+        req.user,
+        id,
+        itemKey,
+        body || {},
+        getAuditRequestContext(req)
+    );
+
+    return sendSuccess(res, {
+        message: 'Pause booking service item successfully',
+        data: result,
+    });
+});
+
+const resumeServiceItem = asyncHandler(async (req, res) => {
+    const { id, itemKey } = req.validated.params;
+    const result = await bookingService.resumeServiceItem(
+        req.user,
+        id,
+        itemKey,
+        getAuditRequestContext(req)
+    );
+
+    return sendSuccess(res, {
+        message: 'Resume booking service item successfully',
+        data: result,
+    });
+});
+
 module.exports = {
     getAvailableSlots,
     getMyBookings,
@@ -269,6 +345,11 @@ module.exports = {
     resolveLateArrival,
     assignWashBay,
     startService,
+    getServiceWorkflow,
+    completeServiceItemEarly,
+    confirmServiceItemComplete,
+    pauseServiceItem,
+    resumeServiceItem,
     completeService,
     reopenCompletedBooking,
     markPaid,

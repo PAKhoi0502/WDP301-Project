@@ -15,7 +15,9 @@
     "migrate:phone-e164": "node src/scripts/migrateUserPhonesToE164.js",
     "migrate:legacy-onboarding": "node src/scripts/migrateLegacyUserOnboarding.js",
     "migrate:legacy-onboarding:dry-run": "node src/scripts/migrateLegacyUserOnboarding.js --dry-run",
-    "migrate:walk-in-promotions": "node src/scripts/migrateWalkInPromotionClaims.js"
+    "migrate:walk-in-promotions": "node src/scripts/migrateWalkInPromotionClaims.js",
+    "migrate:service-countdowns": "node src/scripts/migrateServiceCountdowns.js",
+    "migrate:service-countdowns:dry-run": "node src/scripts/migrateServiceCountdowns.js --dry-run"
   },
   "keywords": [],
   "author": "Pham Anh Khoi",
