@@ -12,7 +12,7 @@ const { USER_ROLES } = require('../../shared/constants/roles.constant');
 
 const router = express.Router();
 
-router.use(authenticate, authorize(USER_ROLES.CUSTOMER));
+router.use(authenticate, authorize(USER_ROLES.CUSTOMER, USER_ROLES.STAFF, USER_ROLES.ADMIN));
 
 router.get(
     '/',

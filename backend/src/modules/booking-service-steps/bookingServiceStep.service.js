@@ -1,12 +1,14 @@
 const BookingServiceStep = require('./bookingServiceStep.model');
 const BookingServiceStepMapper = require('./bookingServiceStep.mapper');
 const ServicePackage = require('../service-packages/servicePackage.model');
+const Booking = require('../bookings/booking.model');
 const { AppError } = require('../../shared/utils/appError');
 const {
     BOOKING_SERVICE_STEP_STATUS,
     BOOKING_SERVICE_STEP_WORKFLOW_TYPES,
 } = require('../../shared/constants/bookingServiceStep.constant');
 const { SERVICE_STEP_TYPES } = require('../../shared/constants/servicePackage.constant');
+const { BOOKING_OPERATION_STATUS } = require('../../shared/constants/bookingIncident.constant');
 
 const PRE_SERVICE_GROUP_NAME = 'Trước dịch vụ';
 const ADD_ON_GROUP_NAME = 'Dịch vụ bổ sung';
@@ -261,6 +263,23 @@ const createStepsForBooking = async (booking, fallbackServicePackage) => {
 };
 
 const markStepDone = async ({ bookingId, stepId, staffId, note, currentBookingItemKey = null }) => {
+    const booking = await Booking.findById(bookingId).select('operation_status active_incident_id');
+
+    if (!booking) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    }
+
+    if (
+        booking.operation_status === BOOKING_OPERATION_STATUS.AWAITING_CUSTOMER_DECISION
+        || booking.active_incident_id
+    ) {
+        throw new AppError(
+            'Booking has an unresolved garage incident',
+            409,
+            'BOOKING_INCIDENT_DECISION_REQUIRED'
+        );
+    }
+
     const step = await BookingServiceStep.findOne({
         _id: stepId,
         booking_id: bookingId,

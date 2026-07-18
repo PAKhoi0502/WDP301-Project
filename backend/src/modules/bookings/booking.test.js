@@ -117,4 +117,28 @@ describe('booking module', () => {
 
         await expect(booking.validate()).resolves.toBeUndefined();
     });
+
+    it('requires an active incident while awaiting customer decision', async () => {
+        const booking = createBooking({
+            operation_status: 'AWAITING_CUSTOMER_DECISION',
+        });
+
+        await expect(booking.validate()).rejects.toMatchObject({
+            errors: {
+                active_incident_id: expect.anything(),
+            },
+        });
+    });
+
+    it('requires an incident reference for garage cancellation', async () => {
+        const booking = createBooking({
+            cancellation_source: 'GARAGE_INCIDENT',
+        });
+
+        await expect(booking.validate()).rejects.toMatchObject({
+            errors: {
+                cancellation_incident_id: expect.anything(),
+            },
+        });
+    });
 });

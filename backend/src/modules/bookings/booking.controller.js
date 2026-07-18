@@ -253,6 +253,116 @@ const reopenCompletedBooking = asyncHandler(async (req, res) => {
     });
 });
 
+const getMyActiveBookingIncident = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const result = await bookingService.getMyActiveBookingIncident(req.user._id, id);
+
+    return sendSuccess(res, {
+        message: 'Get active booking incident successfully',
+        data: result,
+    });
+});
+
+const resolveMyBookingIncident = asyncHandler(async (req, res) => {
+    const { id, incidentId } = req.validated.params;
+    const { body } = req.validated;
+    const result = await bookingService.resolveMyBookingIncident(
+        req.user,
+        id,
+        incidentId,
+        body,
+        getAuditRequestContext(req)
+    );
+
+    if (result.released_booking_snapshot) {
+        await offerNextWaitlistForReleasedBooking(result.released_booking_snapshot);
+    }
+
+    return sendSuccess(res, {
+        message: 'Resolve booking incident successfully',
+        data: result.data,
+    });
+});
+
+const reportBookingIncident = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const { body } = req.validated;
+    const result = await bookingService.reportBookingIncident(
+        req.user,
+        id,
+        body,
+        getAuditRequestContext(req)
+    );
+
+    return sendCreated(res, {
+        message: 'Report booking incident successfully',
+        data: result,
+    });
+});
+
+const getAdminActiveBookingIncident = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const result = await bookingService.getAdminActiveBookingIncident(req.user, id);
+
+    return sendSuccess(res, {
+        message: 'Get active booking incident successfully',
+        data: result,
+    });
+});
+
+const getAdminBookingIncidentOptions = asyncHandler(async (req, res) => {
+    const { id, incidentId } = req.validated.params;
+    const result = await bookingService.getAdminBookingIncidentOptions(
+        req.user,
+        id,
+        incidentId,
+        req.validated.query
+    );
+
+    return sendSuccess(res, {
+        message: 'Get booking incident resolution options successfully',
+        data: result,
+    });
+});
+
+const recordBookingIncidentCustomerDecision = asyncHandler(async (req, res) => {
+    const { id, incidentId } = req.validated.params;
+    const { body } = req.validated;
+    const result = await bookingService.recordBookingIncidentCustomerDecision(
+        req.user,
+        id,
+        incidentId,
+        body,
+        getAuditRequestContext(req)
+    );
+
+    if (result.released_booking_snapshot) {
+        await offerNextWaitlistForReleasedBooking(result.released_booking_snapshot);
+    }
+
+    return sendSuccess(res, {
+        message: 'Record customer booking incident decision successfully',
+        data: result.data,
+    });
+});
+
+const createIncidentCompensationVoucher = asyncHandler(async (req, res) => {
+    const { id, incidentId } = req.validated.params;
+    const { body } = req.validated;
+    const result = await bookingService.createIncidentCompensationVoucher(
+        req.user,
+        id,
+        incidentId,
+        body,
+        getAuditRequestContext(req)
+    );
+
+    return sendCreated(res, {
+        message: 'Create incident compensation voucher successfully',
+        data: result,
+    });
+});
+
 const getServiceWorkflow = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
     const result = await bookingService.getServiceWorkflow(req.user, id);
@@ -336,6 +446,13 @@ module.exports = {
     createCustomerBooking,
     cancelMyBooking,
     cancelBooking,
+    getMyActiveBookingIncident,
+    resolveMyBookingIncident,
+    reportBookingIncident,
+    getAdminActiveBookingIncident,
+    getAdminBookingIncidentOptions,
+    recordBookingIncidentCustomerDecision,
+    createIncidentCompensationVoucher,
     markNoShow,
     getAllBookings,
     getBookingById,

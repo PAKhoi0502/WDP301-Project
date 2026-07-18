@@ -58,6 +58,15 @@ jest.mock('../booking-violations/bookingViolation.service', () => ({
     recordLateCancelIfNeeded: jest.fn(),
     recordNoShow: jest.fn(),
 }));
+jest.mock('../notifications/notification.service', () => ({
+    createInAppNotification: jest.fn().mockResolvedValue({}),
+}));
+jest.mock('../customer-vouchers/customerVoucher.service', () => ({
+    previewVoucherForBooking: jest.fn().mockResolvedValue(null),
+    reserveVoucherForBooking: jest.fn().mockResolvedValue(null),
+    releaseVoucherForBooking: jest.fn().mockResolvedValue(null),
+    consumeVoucherForBooking: jest.fn().mockResolvedValue(null),
+}));
 
 const Booking = require('./booking.model');
 const Vehicle = require('../vehicles/vehicle.model');

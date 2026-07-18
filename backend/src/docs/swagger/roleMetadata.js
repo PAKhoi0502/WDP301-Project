@@ -204,6 +204,8 @@ const ROUTE_GROUPS = Object.freeze([
             'POST /bookings',
             'GET /bookings/{id}',
             'PATCH /bookings/{id}/cancel',
+            'GET /bookings/{id}/incidents/active',
+            'PATCH /bookings/{id}/incidents/{incidentId}/decision',
         ],
     },
     {
@@ -230,6 +232,11 @@ const ROUTE_GROUPS = Object.freeze([
             'PATCH /admin/bookings/{id}/start-service',
             'PATCH /admin/bookings/{id}/complete-service',
             'PATCH /admin/bookings/{id}/mark-paid',
+            'POST /admin/bookings/{id}/incidents',
+            'GET /admin/bookings/{id}/incidents/active',
+            'GET /admin/bookings/{id}/incidents/{incidentId}/resolution-options',
+            'PATCH /admin/bookings/{id}/incidents/{incidentId}/record-customer-decision',
+            'POST /admin/bookings/{id}/incidents/{incidentId}/compensation-vouchers',
         ],
     },
     {
@@ -354,7 +361,7 @@ const ROUTE_GROUPS = Object.freeze([
         ],
     },
     {
-        roles: ['CUSTOMER'],
+        roles: ['AUTHENTICATED'],
         feature: 'My notifications',
         operations: [
             'GET /notifications',
@@ -363,6 +370,30 @@ const ROUTE_GROUPS = Object.freeze([
             'PATCH /notifications/mark-all-read',
             'PATCH /notifications/{id}/read',
             'DELETE /notifications/{id}',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'My compensation vouchers',
+        operations: [
+            'GET /customer-vouchers',
+            'POST /customer-vouchers/validate',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Compensation voucher operations',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/customer-vouchers',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Compensation voucher operations',
+        operations: [
+            'PATCH /admin/customer-vouchers/{id}/approve',
+            'PATCH /admin/customer-vouchers/{id}/revoke',
         ],
     },
     {

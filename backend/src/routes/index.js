@@ -20,6 +20,7 @@ const auditLogRoutes = require('../modules/audit-logs/auditLog.routes');
 const surveyRoutes = require('../modules/surveys/survey.routes');
 const analyticsRoutes = require('../modules/analytics/analytics.routes');
 const researchRoutes = require('../modules/research/research.routes');
+const customerVoucherRoutes = require('../modules/customer-vouchers/customerVoucher.routes');
 
 const router = express.Router();
 
@@ -42,6 +43,7 @@ router.use('/promotions', promotionRoutes.publicRouter);
 router.use('/promotions', promotionRoutes.customerRouter);
 router.use('/loyalty', loyaltyRoutes.customerRouter);
 router.use('/notifications', notificationRoutes);
+router.use('/customer-vouchers', customerVoucherRoutes.customerRouter);
 router.use('/wash-histories', washHistoryRoutes.customerRouter);
 router.use('/payments', paymentRoutes.publicRouter);
 router.use('/uploads', uploadRoutes.publicRouter);
@@ -57,6 +59,7 @@ router.use('/admin/audit-logs', auditLogRoutes.adminRouter);
 router.use('/admin/surveys', surveyRoutes.adminRouter);
 router.use('/admin/analytics', analyticsRoutes.adminRouter);
 router.use('/admin/research', researchRoutes.adminRouter);
+router.use('/admin/customer-vouchers', customerVoucherRoutes.adminRouter);
 router.use('/admin/promotions', promotionRoutes.adminRouter);
 router.use('/admin/loyalty', loyaltyRoutes.adminRouter);
 router.use('/admin/wash-histories', washHistoryRoutes.adminRouter);

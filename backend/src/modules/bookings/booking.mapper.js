@@ -1,4 +1,6 @@
 const StaffProfileMapper = require('../staff-profiles/staffProfile.mapper');
+const BookingIncidentMapper = require('../booking-incidents/bookingIncident.mapper');
+const CustomerVoucherMapper = require('../customer-vouchers/customerVoucher.mapper');
 
 const toId = (value) => {
     if (!value) {
@@ -144,6 +146,7 @@ const toBookingItemDto = (item = {}) => {
         countdown_ends_at: item.countdown_ends_at,
         actual_completed_at: item.actual_completed_at,
         remaining_seconds_at_pause: item.remaining_seconds_at_pause,
+        countdown_resume_seconds: item.countdown_resume_seconds,
         paused_at: item.paused_at,
         paused_by_staff_id: toId(item.paused_by_staff_id),
         pause_reason: item.pause_reason,
@@ -242,6 +245,7 @@ const toBookingDto = (booking) => {
         original_price: plainBooking.original_price,
         promotion_discount_amount: plainBooking.promotion_discount_amount,
         points_discount_amount: plainBooking.points_discount_amount,
+        voucher_discount_amount: plainBooking.voucher_discount_amount || 0,
         discount_amount: plainBooking.discount_amount,
         final_price: plainBooking.final_price,
         payment_method: plainBooking.payment_method,
@@ -250,8 +254,17 @@ const toBookingDto = (booking) => {
         earned_points: plainBooking.earned_points,
         promotion_id: toId(plainBooking.promotion_id),
         promotion: toPromotionSummaryDto(plainBooking.promotion_id),
+        customer_voucher_id: toId(plainBooking.customer_voucher_id),
+        customer_voucher: plainBooking.customer_voucher_id?._id
+            ? CustomerVoucherMapper.toCustomerVoucherDto(plainBooking.customer_voucher_id)
+            : null,
         requires_wash_bay: plainBooking.requires_wash_bay,
         status: plainBooking.status,
+        operation_status: plainBooking.operation_status || 'NORMAL',
+        active_incident_id: toId(plainBooking.active_incident_id),
+        active_incident: plainBooking.active_incident_id?._id
+            ? BookingIncidentMapper.toBookingIncidentDto(plainBooking.active_incident_id)
+            : null,
         arrival_status: plainBooking.arrival_status,
         arrived_at: plainBooking.arrived_at,
         arrival_reference_start_time: plainBooking.arrival_reference_start_time,
@@ -277,6 +290,8 @@ const toBookingDto = (booking) => {
         canceled_at: plainBooking.canceled_at,
         canceled_by_id: toId(plainBooking.canceled_by_id),
         cancel_reason: plainBooking.cancel_reason,
+        cancellation_source: plainBooking.cancellation_source,
+        cancellation_incident_id: toId(plainBooking.cancellation_incident_id),
         no_show_at: plainBooking.no_show_at,
         no_show_by_id: toId(plainBooking.no_show_by_id),
         no_show_by: toUserSummaryDto(plainBooking.no_show_by_id),
@@ -312,6 +327,7 @@ const customerCreateFields = [
     'add_on_service_ids',
     'start_time',
     'promotion_code',
+    'voucher_code',
     'used_points',
     'note',
 ];
