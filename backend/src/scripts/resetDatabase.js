@@ -38,8 +38,12 @@ const CustomerCaseMessage = require('../modules/customer-cases/customerCaseMessa
 const CustomerCaseTechnicalAssessment = require('../modules/customer-cases/customerCaseTechnicalAssessment.model');
 const CustomerCaseResolution = require('../modules/customer-cases/customerCaseResolution.model');
 const CustomerCaseRefund = require('../modules/customer-cases/customerCaseRefund.model');
+const BookingPlateScan = require('../modules/booking-arrivals/bookingPlateScan.model');
+const CameraDevice = require('../modules/booking-arrivals/cameraDevice.model');
 
 const resetTargets = Object.freeze([
+    { group: 'Runtime arrival', model: BookingPlateScan, seed: '-', note: 'Plate recognition, confirmation and retention audit metadata' },
+    { group: 'Runtime arrival', model: CameraDevice, seed: '-', note: 'Registered fixed gate cameras and health state' },
     { group: 'Runtime customer case', model: CustomerCaseRefund, seed: '-', note: 'Auditable refund processing ledger' },
     { group: 'Runtime customer case', model: CustomerCaseResolution, seed: '-', note: 'Versioned customer resolution proposals' },
     { group: 'Runtime customer case', model: CustomerCaseTechnicalAssessment, seed: '-', note: 'Assigned inspection staff findings' },

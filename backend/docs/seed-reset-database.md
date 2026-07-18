@@ -12,6 +12,18 @@
 
 ## Reset Table
 
+The executable order is generated from `resetTargets` and is the source of
+truth. Two arrival collections now precede the legacy rows shown below:
+
+| Order | Group | Collection | Seed Source | Purpose |
+| --- | --- | --- | --- | --- |
+| 1 | Runtime arrival | `booking_plate_scans` | `-` | Recognition, candidate, confirmation and retention audit metadata. |
+| 2 | Runtime arrival | `camera_devices` | `-` | Fixed camera registration, credentials and health state. |
+
+For the remaining legacy rows in the reference table, the runtime order is the
+displayed order plus 2. `npm run db:reset -- --dry-run` always prints the exact
+current order.
+
 | Order | Group | Collection | Seed Source | Purpose |
 | --- | --- | --- | --- | --- |
 | 1 | Runtime customer case | `customer_case_refunds` | `-` | Auditable refund processing ledger. |

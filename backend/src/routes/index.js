@@ -22,6 +22,7 @@ const analyticsRoutes = require('../modules/analytics/analytics.routes');
 const researchRoutes = require('../modules/research/research.routes');
 const customerVoucherRoutes = require('../modules/customer-vouchers/customerVoucher.routes');
 const customerCaseRoutes = require('../modules/customer-cases/customerCase.routes');
+const bookingArrivalRoutes = require('../modules/booking-arrivals/bookingArrival.routes');
 
 const router = express.Router();
 
@@ -41,6 +42,7 @@ router.use('/service-packages', servicePackageRoutes.publicRouter);
 router.use('/bookings', bookingRoutes.customerRouter);
 router.use('/staff/bookings', bookingRoutes.staffRouter);
 router.use('/staff/tasks', bookingRoutes.staffTaskRouter);
+router.use('/staff/booking-arrivals', bookingArrivalRoutes.staffRouter);
 router.use('/waitlists', bookingWaitlistRoutes.customerRouter);
 router.use('/promotions', promotionRoutes.publicRouter);
 router.use('/promotions', promotionRoutes.customerRouter);
@@ -66,6 +68,8 @@ router.use('/admin/research', researchRoutes.adminRouter);
 router.use('/admin/customer-vouchers', customerVoucherRoutes.adminRouter);
 router.use('/staff/customer-cases', customerCaseRoutes.staffRouter);
 router.use('/admin/customer-cases', customerCaseRoutes.adminRouter);
+router.use('/admin/booking-arrivals', bookingArrivalRoutes.adminRouter);
+router.use('/camera-devices', bookingArrivalRoutes.deviceRouter);
 router.use('/admin/promotions', promotionRoutes.adminRouter);
 router.use('/admin/loyalty', loyaltyRoutes.adminRouter);
 router.use('/admin/wash-histories', washHistoryRoutes.adminRouter);

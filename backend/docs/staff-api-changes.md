@@ -302,6 +302,15 @@ require the case to be assigned to the acting customer service staff member.
 See `docs/customer-case-handover-workflow.md` for the full workflow and API
 payloads.
 
+### License plate arrival workspace
+
+Customer service staff additionally receive `booking.plate_scan` and
+`booking.arrival_queue`. Canonical routes are under
+`/staff/booking-arrivals`. Scan reads and candidate searches are garage-scoped;
+only the confirm endpoint invokes the existing check-in service. Fuzzy/manual
+confirmation requires an audited override reason. See
+`docs/license-plate-arrival-workflow.md` for staff, admin and fixed-camera APIs.
+
 Inspection staff additionally receive
 `customer_case.technical_assess_assigned`. This capability does not grant a
 garage-wide case list: assessment detail/start/submit still verify that the

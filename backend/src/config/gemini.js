@@ -28,7 +28,7 @@ const getGeminiConfig = () => {
 
     return {
         apiKey,
-        model: process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash',
+        model: process.env.GEMINI_MODEL?.trim() || 'gemini-3.5-flash',
         timeoutMs: getPositiveInteger('GEMINI_TIMEOUT_MS', 60000, 300000),
         maxOutputTokens: getPositiveInteger('GEMINI_MAX_OUTPUT_TOKENS', 4096, 32768),
     };

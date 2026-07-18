@@ -623,6 +623,15 @@ const bookingSchema = new mongoose.Schema(
             default: null,
         },
 
+        arrival_detected_at: { type: Date, default: null },
+        arrival_detection_scan_id: { type: mongoose.Schema.Types.ObjectId, ref: 'BookingPlateScan', default: null },
+        check_in_method: { type: String, enum: ['MANUAL', 'PLATE_SCAN'], default: null },
+        check_in_verification_id: { type: mongoose.Schema.Types.ObjectId, ref: 'BookingPlateScan', default: null },
+        check_in_detected_plate: { type: String, trim: true, uppercase: true, maxlength: 20, default: null },
+        check_in_match_type: { type: String, enum: ['EXACT', 'FUZZY', 'MANUAL', 'NONE'], default: null },
+        check_in_manual_override: { type: Boolean, default: false },
+        check_in_override_reason: { type: String, trim: true, maxlength: 1000, default: null },
+
         arrived_at: {
             type: Date,
             default: null,
@@ -817,8 +826,10 @@ bookingSchema.index(
 );
 bookingSchema.index({ normalized_guest_phone: 1, is_walk_in: 1, claimed_customer_id: 1 });
 bookingSchema.index({ normalized_license_plate: 1, vehicle_type: 1, start_time: 1 });
+bookingSchema.index({ garage_id: 1, normalized_license_plate: 1, status: 1, start_time: 1 });
 bookingSchema.index({ created_by_staff_id: 1 });
 bookingSchema.index({ assigned_inspection_staff_id: 1, status: 1 });
+bookingSchema.index({ garage_id: 1, arrival_detected_at: -1 });
 bookingSchema.index({ 'booking_items.assigned_execution_staff.user_id': 1, status: 1 });
 bookingSchema.index({ created_at: -1 });
 

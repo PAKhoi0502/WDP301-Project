@@ -156,6 +156,16 @@ Neu source route cho ca STAFF va ADMIN cung truy cap, tai lieu nay lap lai endpo
 | Assign technical assessment | CUSTOMER_SERVICE_STAFF, ADMIN | `PATCH /api/v1/staff/customer-cases/:id/technical-assessment/assign` |
 | Resolution, refund, rework and conclusion | ADMIN | `POST /api/v1/admin/customer-cases/:id/resolutions`, `POST /api/v1/admin/customer-cases/:id/resolutions/:resolutionId/apply`, `PATCH /api/v1/admin/customer-cases/:id/refunds/:refundId`, `POST /api/v1/admin/customer-cases/:id/reopen`, `PATCH /api/v1/admin/customer-cases/:id/conclude`, `PATCH /api/v1/admin/customer-cases/:id/close` |
 
+### License plate arrival and check-in
+
+| Chuc nang | Role | APIs |
+| --- | --- | --- |
+| Scan, candidate, retry, confirm and fallback | CUSTOMER_SERVICE_STAFF, ADMIN | `GET/POST /api/v1/staff/booking-arrivals/plate-scans`, `GET /api/v1/staff/booking-arrivals/plate-scans/:scanId`, `POST .../:scanId/retry`, `POST .../:scanId/confirm`, `POST .../:scanId/reject` |
+| Arrival queue | CUSTOMER_SERVICE_STAFF, ADMIN | `GET /api/v1/staff/booking-arrivals/arrival-queue` |
+| Alternate vehicle request | CUSTOMER_SERVICE_STAFF, ADMIN | `POST /api/v1/staff/booking-arrivals/plate-scans/:scanId/alternate-vehicle` |
+| Metrics, alternate approval and devices | ADMIN | `GET /api/v1/admin/booking-arrivals/plate-scans`, `GET /api/v1/admin/booking-arrivals/metrics`, `PATCH /api/v1/admin/booking-arrivals/plate-scans/:scanId/alternate-vehicle`, `/api/v1/admin/booking-arrivals/camera-devices...` |
+| Heartbeat, frame upload and offline event batch | Registered camera | `POST /api/v1/camera-devices/heartbeat`, `POST /api/v1/camera-devices/uploads`, `POST /api/v1/camera-devices/events/batch` |
+
 ### Wash histories
 
 | Chuc nang | Role | APIs |

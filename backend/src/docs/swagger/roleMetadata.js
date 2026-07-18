@@ -25,6 +25,10 @@ const ROLE_DETAILS = Object.freeze({
         label: 'ADMIN',
         auth: 'Bearer JWT required. User role must be ADMIN.',
     },
+    CAMERA_DEVICE: {
+        label: 'CAMERA DEVICE',
+        auth: 'X-Camera-Device-Code and X-Camera-Device-Key headers are required.',
+    },
 });
 
 const STAFF_GARAGE_SCOPE = 'STAFF access is limited by assigned garage where the service enforces garage scope. ADMIN access is system-wide unless a request filter is provided.';
@@ -299,6 +303,43 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'GET /admin/bookings/{id}/inspections',
             'POST /admin/bookings/{id}/inspections',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'License plate arrival verification',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /staff/booking-arrivals/arrival-queue',
+            'GET /staff/booking-arrivals/plate-scans',
+            'POST /staff/booking-arrivals/plate-scans',
+            'GET /staff/booking-arrivals/plate-scans/{scanId}',
+            'POST /staff/booking-arrivals/plate-scans/{scanId}/retry',
+            'POST /staff/booking-arrivals/plate-scans/{scanId}/confirm',
+            'POST /staff/booking-arrivals/plate-scans/{scanId}/reject',
+            'POST /staff/booking-arrivals/plate-scans/{scanId}/alternate-vehicle',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'License plate arrival administration',
+        operations: [
+            'GET /admin/booking-arrivals/plate-scans',
+            'GET /admin/booking-arrivals/metrics',
+            'PATCH /admin/booking-arrivals/plate-scans/{scanId}/alternate-vehicle',
+            'GET /admin/booking-arrivals/camera-devices',
+            'POST /admin/booking-arrivals/camera-devices',
+            'PATCH /admin/booking-arrivals/camera-devices/{id}',
+            'POST /admin/booking-arrivals/camera-devices/{id}/rotate-key',
+        ],
+    },
+    {
+        roles: ['CAMERA_DEVICE'],
+        feature: 'Gate camera ingestion',
+        operations: [
+            'POST /camera-devices/heartbeat',
+            'POST /camera-devices/uploads',
+            'POST /camera-devices/events/batch',
         ],
     },
     {

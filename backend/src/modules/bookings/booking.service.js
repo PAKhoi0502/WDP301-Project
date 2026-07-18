@@ -4582,7 +4582,7 @@ const createIncidentCompensationVoucher = async (
 };
 
 
-const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {}) => {
+const checkInBooking = async (user, bookingId, { note, verification = null } = {}, auditContext = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
@@ -4590,7 +4590,7 @@ const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {})
     assertBookingStatusIn(booking, [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED], 'BOOKING_CHECK_IN_NOT_ALLOWED');
 
     const garage = await getActiveGarage(booking.garage_id);
-    const arrivedAt = booking.arrived_at || new Date();
+    const arrivedAt = verification?.arrived_at || booking.arrived_at || new Date();
     const scheduledStartTime = booking.arrival_reference_start_time || booking.start_time;
     const classification = getArrivalClassification({
         arrivedAt,
@@ -4603,6 +4603,14 @@ const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {})
     booking.arrival_status = classification.arrivalStatus;
     booking.late_minutes = classification.lateMinutes;
     booking.grace_exceeded_minutes = classification.graceExceededMinutes;
+    booking.check_in_method = verification ? 'PLATE_SCAN' : (booking.check_in_method || 'MANUAL');
+    booking.check_in_verification_id = verification?.scan_id || booking.check_in_verification_id || null;
+    booking.check_in_detected_plate = verification?.detected_plate || booking.check_in_detected_plate || null;
+    booking.check_in_match_type = verification?.match_type || booking.check_in_match_type || 'MANUAL';
+    booking.check_in_manual_override = verification
+        ? !!verification.manual_override : !!booking.check_in_manual_override;
+    booking.check_in_override_reason = verification
+        ? normalizeText(verification.override_reason) : booking.check_in_override_reason;
 
     if (classification.arrivalStatus !== BOOKING_ARRIVAL_STATUS.LATE) {
         booking.status = BOOKING_STATUS.CHECKED_IN;
@@ -4629,9 +4637,17 @@ const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {})
             arrived_at: result.arrived_at,
             late_minutes: result.late_minutes,
             grace_exceeded_minutes: result.grace_exceeded_minutes,
+            check_in_method: result.check_in_method,
+            check_in_verification_id: result.check_in_verification_id,
+            check_in_detected_plate: result.check_in_detected_plate,
+            check_in_match_type: result.check_in_match_type,
+            check_in_manual_override: result.check_in_manual_override,
         },
         ip: auditContext.ip,
         userAgent: auditContext.userAgent,
+        metadata: {
+            verification_scan_id: verification?.scan_id?.toString?.() || null,
+        },
     });
 
     return result;
