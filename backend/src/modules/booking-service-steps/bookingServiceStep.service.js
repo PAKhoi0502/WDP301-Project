@@ -78,8 +78,12 @@ const getServiceStepGroupName = (bookingItem, fallbackServicePackage) => {
 };
 
 const getFirstAssignedCareStaffUserId = (bookingItem) => {
-    const assignment = (bookingItem.assigned_care_staff || []).find((item) => !item.released_at)
-        || (bookingItem.assigned_care_staff || [])[0];
+    const assignments = [
+        ...(bookingItem.assigned_execution_staff || []),
+        ...(bookingItem.assigned_care_staff || []),
+    ];
+    const assignment = assignments.find((item) => !item.released_at)
+        || assignments[0];
 
     return assignment?.user_id?._id || assignment?.user_id || null;
 };
@@ -442,6 +446,26 @@ const clearResourceReleasedForBookingItem = async (bookingId, bookingItemKey, re
     );
 };
 
+const assignStaffForBookingItem = async (bookingId, bookingItemKey, staffUserId) => {
+    if (!bookingItemKey) {
+        return 0;
+    }
+
+    const result = await BookingServiceStep.updateMany(
+        {
+            booking_id: bookingId,
+            booking_item_key: normalizeStepCode(bookingItemKey),
+        },
+        {
+            $set: {
+                assigned_staff_id: staffUserId,
+            },
+        }
+    );
+
+    return result.modifiedCount || 0;
+};
+
 module.exports = {
     getStepsByBookingId,
     countStepsByBookingId,
@@ -453,4 +477,5 @@ module.exports = {
     areAllRequiredStepsDoneForBookingItem,
     markResourceReleasedForBookingItem,
     clearResourceReleasedForBookingItem,
+    assignStaffForBookingItem,
 };

@@ -38,6 +38,8 @@ router.use('/garages', garageRoutes.publicRouter);
 router.use('/vehicles', vehicleRoutes.customerRouter);
 router.use('/service-packages', servicePackageRoutes.publicRouter);
 router.use('/bookings', bookingRoutes.customerRouter);
+router.use('/staff/bookings', bookingRoutes.staffRouter);
+router.use('/staff/tasks', bookingRoutes.staffTaskRouter);
 router.use('/waitlists', bookingWaitlistRoutes.customerRouter);
 router.use('/promotions', promotionRoutes.publicRouter);
 router.use('/promotions', promotionRoutes.customerRouter);

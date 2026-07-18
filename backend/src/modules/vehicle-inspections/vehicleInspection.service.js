@@ -6,6 +6,10 @@ const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const { BOOKING_STATUS } = require('../../shared/constants/booking.constant');
 const { VEHICLE_INSPECTION_TYPES } = require('../../shared/constants/vehicleInspection.constant');
+const {
+    STAFF_CAPABILITIES,
+    staffTypeHasCapability,
+} = require('../../shared/constants/staff.constant');
 
 const normalizeText = (value) => {
     if (value === null || value === undefined) {
@@ -56,7 +60,11 @@ const getActiveStaffProfile = async (staffUserId) => {
     return staffProfile;
 };
 
-const assertStaffCanAccessBooking = async (user, booking) => {
+const assertStaffCanAccessBooking = async (
+    user,
+    booking,
+    { requireCreateCapability = false } = {}
+) => {
     if (user.role === USER_ROLES.ADMIN) {
         return;
     }
@@ -69,6 +77,47 @@ const assertStaffCanAccessBooking = async (user, booking) => {
 
     if (staffProfile.garage_id.toString() !== booking.garage_id.toString()) {
         throw new AppError('Staff cannot access bookings outside assigned garage', 403, 'STAFF_GARAGE_ACCESS_DENIED');
+    }
+
+    const requiredCapability = requireCreateCapability
+        ? STAFF_CAPABILITIES.INSPECTION_CREATE_ASSIGNED
+        : STAFF_CAPABILITIES.INSPECTION_READ_ASSIGNED;
+    const hasGarageRead = staffTypeHasCapability(
+        staffProfile.staff_type,
+        STAFF_CAPABILITIES.INSPECTION_READ_GARAGE
+    );
+
+    if (requireCreateCapability && !staffTypeHasCapability(
+        staffProfile.staff_type,
+        requiredCapability
+    )) {
+        throw new AppError(
+            'Staff is not allowed to create vehicle inspections',
+            403,
+            'INSPECTION_CAPABILITY_REQUIRED'
+        );
+    }
+
+    if (!requireCreateCapability && !hasGarageRead && !staffTypeHasCapability(
+        staffProfile.staff_type,
+        requiredCapability
+    )) {
+        throw new AppError(
+            'Staff is not allowed to view vehicle inspections',
+            403,
+            'INSPECTION_CAPABILITY_REQUIRED'
+        );
+    }
+
+    if (!hasGarageRead && (
+        !booking.assigned_inspection_staff_id
+        || booking.assigned_inspection_staff_id.toString() !== user._id.toString()
+    )) {
+        throw new AppError(
+            'Inspection staff must be assigned to this booking',
+            403,
+            'INSPECTION_ASSIGNMENT_REQUIRED'
+        );
     }
 };
 
@@ -107,7 +156,7 @@ const assertInspectionTypeAllowed = (booking, type) => {
 const createInspection = async (user, bookingId, payload = {}) => {
     const booking = await getBookingDocumentById(bookingId);
 
-    await assertStaffCanAccessBooking(user, booking);
+    await assertStaffCanAccessBooking(user, booking, { requireCreateCapability: true });
     assertInspectionTypeAllowed(booking, payload.type);
 
     const existedInspection = await VehicleInspection.exists({

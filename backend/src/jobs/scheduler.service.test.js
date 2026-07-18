@@ -15,10 +15,15 @@ jest.mock('../modules/bookings/booking.service', () => ({
     processDueServiceItemTimers: jest.fn(),
 }));
 
+jest.mock('../modules/staff-profiles/staffTypeChange.service', () => ({
+    processDueStaffTypeChanges: jest.fn(),
+}));
+
 const bookingWaitlistService = require('../modules/booking-waitlists/bookingWaitlist.service');
 const notificationService = require('../modules/notifications/notification.service');
 const loyaltyService = require('../modules/loyalty/loyalty.service');
 const bookingService = require('../modules/bookings/booking.service');
+const staffTypeChangeService = require('../modules/staff-profiles/staffTypeChange.service');
 const schedulerService = require('./scheduler.service');
 
 describe('scheduler service', () => {
@@ -31,6 +36,7 @@ describe('scheduler service', () => {
         delete process.env.EMAIL_RETRY_BATCH_SIZE;
         delete process.env.TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE;
         delete process.env.SERVICE_ITEM_TIMER_BATCH_SIZE;
+        delete process.env.STAFF_TYPE_CHANGE_BATCH_SIZE;
     });
 
     afterEach(() => {
@@ -61,6 +67,7 @@ describe('scheduler service', () => {
             expect.objectContaining({ name: schedulerService.JOB_NAMES.POINT_EXPIRATION }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.TIER_INACTIVITY_DOWNGRADE }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.SERVICE_ITEM_TIMER }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.STAFF_TYPE_CHANGE }),
         ]));
     });
 
@@ -121,5 +128,22 @@ describe('scheduler service', () => {
             awaiting_confirmation: 1,
             failed: 0,
         });
+    });
+
+    it('runs due staff type changes on demand', async () => {
+        process.env.STAFF_TYPE_CHANGE_BATCH_SIZE = '15';
+        staffTypeChangeService.processDueStaffTypeChanges.mockResolvedValue({
+            processed: 1,
+            applied: 1,
+            deferred: 0,
+            failed: 0,
+        });
+
+        const result = await schedulerService.runSchedulerJobNow(
+            schedulerService.JOB_NAMES.STAFF_TYPE_CHANGE
+        );
+
+        expect(staffTypeChangeService.processDueStaffTypeChanges).toHaveBeenCalledWith({ limit: 15 });
+        expect(result.applied).toBe(1);
     });
 });

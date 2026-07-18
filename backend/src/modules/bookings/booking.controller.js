@@ -199,6 +199,37 @@ const assignWashBay = asyncHandler(async (req, res) => {
     });
 });
 
+const assignInspectionStaff = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const { staff_profile_id: staffProfileId } = req.validated.body;
+    const result = await bookingService.assignInspectionStaff(
+        req.user,
+        id,
+        staffProfileId
+    );
+
+    return sendSuccess(res, {
+        message: 'Assign inspection staff successfully',
+        data: result,
+    });
+});
+
+const assignServiceItemStaff = asyncHandler(async (req, res) => {
+    const { id, itemKey } = req.validated.params;
+    const { staff_profile_id: staffProfileId } = req.validated.body;
+    const result = await bookingService.assignServiceItemStaff(
+        req.user,
+        id,
+        itemKey,
+        staffProfileId
+    );
+
+    return sendSuccess(res, {
+        message: 'Assign service item staff successfully',
+        data: result,
+    });
+});
+
 const startService = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
     const { body } = req.validated;
@@ -461,6 +492,8 @@ module.exports = {
     getLateArrivalOptions,
     resolveLateArrival,
     assignWashBay,
+    assignInspectionStaff,
+    assignServiceItemStaff,
     startService,
     getServiceWorkflow,
     completeServiceItemEarly,

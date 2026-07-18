@@ -85,6 +85,16 @@ const ROUTE_GROUPS = Object.freeze([
         feature: 'Staff profile',
         operations: [
             'GET /staff-profiles/me',
+            'GET /staff-profiles/me/capabilities',
+            'GET /staff-profiles/me/type-change-requests',
+            'POST /staff-profiles/me/type-change-requests',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Staff position change',
+        operations: [
+            'PATCH /staff-profiles/type-change-requests/{requestId}/cancel',
         ],
     },
     {
@@ -100,6 +110,11 @@ const ROUTE_GROUPS = Object.freeze([
             'DELETE /staff-profiles/{id}',
             'PATCH /staff-profiles/{id}/status',
             'PATCH /staff-profiles/{id}/employment-status',
+            'GET /staff-profiles/type-change-requests',
+            'PATCH /staff-profiles/type-change-requests/{requestId}/approve',
+            'PATCH /staff-profiles/type-change-requests/{requestId}/reject',
+            'GET /staff-profiles/{id}/type-change-impact',
+            'GET /staff-profiles/{id}/type-change-history',
         ],
     },
     {
@@ -258,6 +273,8 @@ const ROUTE_GROUPS = Object.freeze([
         feature: 'Booking operations',
         operations: [
             'PATCH /admin/bookings/{id}/reopen-service',
+            'PATCH /admin/bookings/{id}/assign-inspection-staff',
+            'PATCH /admin/bookings/{id}/service-items/{itemKey}/assign-staff',
         ],
     },
     {

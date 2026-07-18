@@ -197,6 +197,11 @@ const bookingItemSchema = new mongoose.Schema(
             default: [],
         },
 
+        assigned_execution_staff: {
+            type: [bookingItemCareStaffAssignmentSchema],
+            default: [],
+        },
+
         status: {
             type: String,
             enum: BOOKING_ITEM_STATUS_VALUES,
@@ -360,6 +365,12 @@ const bookingSchema = new mongoose.Schema(
         },
 
         created_by_staff_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        assigned_inspection_staff_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             default: null,
@@ -778,6 +789,8 @@ bookingSchema.index({ is_walk_in: 1 });
 bookingSchema.index({ normalized_guest_phone: 1, is_walk_in: 1, claimed_customer_id: 1 });
 bookingSchema.index({ normalized_license_plate: 1, vehicle_type: 1, start_time: 1 });
 bookingSchema.index({ created_by_staff_id: 1 });
+bookingSchema.index({ assigned_inspection_staff_id: 1, status: 1 });
+bookingSchema.index({ 'booking_items.assigned_execution_staff.user_id': 1, status: 1 });
 bookingSchema.index({ created_at: -1 });
 
 bookingSchema.pre('validate', function (next) {

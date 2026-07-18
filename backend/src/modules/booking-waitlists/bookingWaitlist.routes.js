@@ -12,6 +12,8 @@ const {
 const { validate } = require('../../shared/middlewares/validate.middleware');
 const { authenticate, authorize } = require('../../shared/middlewares/auth.middleware');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
+const { STAFF_CAPABILITIES } = require('../../shared/constants/staff.constant');
+const { requireStaffCapabilities } = require('../../shared/middlewares/staffCapability.middleware');
 
 const customerRouter = express.Router();
 const adminRouter = express.Router();
@@ -49,6 +51,7 @@ customerRouter.patch(
 );
 
 adminRouter.use(authenticate, authorize(USER_ROLES.STAFF, USER_ROLES.ADMIN));
+adminRouter.use(requireStaffCapabilities(STAFF_CAPABILITIES.WAITLIST_MANAGE_GARAGE));
 
 adminRouter.get(
     '/',

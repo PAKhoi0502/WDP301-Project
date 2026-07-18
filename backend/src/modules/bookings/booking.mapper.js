@@ -141,6 +141,9 @@ const toBookingItemDto = (item = {}) => {
         care_staff_work_end_time: item.care_staff_work_end_time || item.care_staff_end_time,
         care_staff_reserved_until: item.care_staff_reserved_until || item.care_staff_end_time,
         assigned_care_staff: (item.assigned_care_staff || []).map((assignment) => toCareStaffAssignmentDto(assignment)),
+        assigned_execution_staff: (item.assigned_execution_staff || []).map(
+            (assignment) => toCareStaffAssignmentDto(assignment)
+        ),
         status: item.status,
         actual_started_at: item.actual_started_at,
         countdown_ends_at: item.countdown_ends_at,
@@ -216,6 +219,8 @@ const toBookingDto = (booking) => {
         vehicle_type: plainBooking.vehicle_type,
         created_by_staff_id: toId(plainBooking.created_by_staff_id),
         created_by_staff: toUserSummaryDto(plainBooking.created_by_staff_id),
+        assigned_inspection_staff_id: toId(plainBooking.assigned_inspection_staff_id),
+        assigned_inspection_staff: toUserSummaryDto(plainBooking.assigned_inspection_staff_id),
         garage_id: toId(plainBooking.garage_id),
         garage: toGarageSummaryDto(plainBooking.garage_id),
         wash_bay_id: toId(plainBooking.wash_bay_id),

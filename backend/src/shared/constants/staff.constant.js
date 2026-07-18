@@ -7,6 +7,101 @@ const STAFF_TYPES = Object.freeze({
 
 const STAFF_TYPE_VALUES = Object.freeze(Object.values(STAFF_TYPES));
 
+const STAFF_GROUPS = Object.freeze({
+    BOOKING_OPERATIONS: 'BOOKING_OPERATIONS',
+    SERVICE_EXECUTION: 'SERVICE_EXECUTION',
+});
+
+const STAFF_CAPABILITIES = Object.freeze({
+    BOOKING_READ_GARAGE: 'booking.read_garage',
+    BOOKING_READ_ASSIGNED: 'booking.read_assigned',
+    BOOKING_WALK_IN_CREATE: 'booking.walk_in.create',
+    BOOKING_CANCEL_CUSTOMER_REQUEST: 'booking.cancel_customer_request',
+    BOOKING_ARRIVAL_MANAGE: 'booking.arrival.manage',
+    BOOKING_CHECK_IN: 'booking.check_in',
+    BOOKING_LATE_ARRIVAL_MANAGE: 'booking.late_arrival.manage',
+    BOOKING_WASH_BAY_ASSIGN: 'booking.wash_bay.assign',
+    BOOKING_SERVICE_START: 'booking.service.start',
+    BOOKING_SERVICE_READ_GARAGE: 'booking.service.read_garage',
+    BOOKING_SERVICE_COMPLETE: 'booking.service.complete',
+    BOOKING_PAYMENT_COLLECT_CASH: 'booking.payment.collect_cash',
+    SERVICE_TASK_READ_ASSIGNED: 'service_task.read_assigned',
+    SERVICE_TASK_WASH_EXECUTE_ASSIGNED: 'service_task.wash.execute_assigned',
+    SERVICE_TASK_CARE_EXECUTE_ASSIGNED: 'service_task.care.execute_assigned',
+    INSPECTION_READ_GARAGE: 'inspection.read_garage',
+    INSPECTION_READ_ASSIGNED: 'inspection.read_assigned',
+    INSPECTION_CREATE_ASSIGNED: 'inspection.create_assigned',
+    INCIDENT_READ_GARAGE: 'incident.read_garage',
+    INCIDENT_READ_ASSIGNED: 'incident.read_assigned',
+    INCIDENT_REPORT_WASH_BAY_FAILURE: 'incident.report_wash_bay_failure',
+    INCIDENT_REPORT_STAFF_UNAVAILABLE: 'incident.report_staff_unavailable',
+    INCIDENT_REPORT_OTHER_GARAGE: 'incident.report_other_garage',
+    INCIDENT_RECORD_CUSTOMER_DECISION: 'incident.record_customer_decision',
+    INCIDENT_COMPENSATION_ISSUE: 'incident.compensation.issue',
+    CUSTOMER_READ_GARAGE: 'customer.read_garage',
+    WAITLIST_MANAGE_GARAGE: 'waitlist.manage_garage',
+    PAYMENT_MANAGE_GARAGE: 'payment.manage_garage',
+    VOUCHER_READ_GARAGE: 'voucher.read_garage',
+    WASH_HISTORY_READ_GARAGE: 'wash_history.read_garage',
+});
+
+const STAFF_CAPABILITY_VALUES = Object.freeze(Object.values(STAFF_CAPABILITIES));
+
+const STAFF_TYPE_GROUPS = Object.freeze({
+    [STAFF_TYPES.CUSTOMER_SERVICE_STAFF]: STAFF_GROUPS.BOOKING_OPERATIONS,
+    [STAFF_TYPES.VEHICLE_INSPECTION_STAFF]: STAFF_GROUPS.BOOKING_OPERATIONS,
+    [STAFF_TYPES.WASH_OPERATOR]: STAFF_GROUPS.SERVICE_EXECUTION,
+    [STAFF_TYPES.VEHICLE_CARE_STAFF]: STAFF_GROUPS.SERVICE_EXECUTION,
+});
+
+const freezeCapabilities = (capabilities) => Object.freeze([...capabilities]);
+
+const STAFF_TYPE_CAPABILITIES = Object.freeze({
+    [STAFF_TYPES.CUSTOMER_SERVICE_STAFF]: freezeCapabilities([
+        STAFF_CAPABILITIES.BOOKING_READ_GARAGE,
+        STAFF_CAPABILITIES.BOOKING_WALK_IN_CREATE,
+        STAFF_CAPABILITIES.BOOKING_CANCEL_CUSTOMER_REQUEST,
+        STAFF_CAPABILITIES.BOOKING_ARRIVAL_MANAGE,
+        STAFF_CAPABILITIES.BOOKING_CHECK_IN,
+        STAFF_CAPABILITIES.BOOKING_LATE_ARRIVAL_MANAGE,
+        STAFF_CAPABILITIES.BOOKING_WASH_BAY_ASSIGN,
+        STAFF_CAPABILITIES.BOOKING_SERVICE_START,
+        STAFF_CAPABILITIES.BOOKING_SERVICE_READ_GARAGE,
+        STAFF_CAPABILITIES.BOOKING_SERVICE_COMPLETE,
+        STAFF_CAPABILITIES.BOOKING_PAYMENT_COLLECT_CASH,
+        STAFF_CAPABILITIES.INSPECTION_READ_GARAGE,
+        STAFF_CAPABILITIES.INCIDENT_READ_GARAGE,
+        STAFF_CAPABILITIES.INCIDENT_REPORT_STAFF_UNAVAILABLE,
+        STAFF_CAPABILITIES.INCIDENT_REPORT_OTHER_GARAGE,
+        STAFF_CAPABILITIES.INCIDENT_RECORD_CUSTOMER_DECISION,
+        STAFF_CAPABILITIES.INCIDENT_COMPENSATION_ISSUE,
+        STAFF_CAPABILITIES.CUSTOMER_READ_GARAGE,
+        STAFF_CAPABILITIES.WAITLIST_MANAGE_GARAGE,
+        STAFF_CAPABILITIES.PAYMENT_MANAGE_GARAGE,
+        STAFF_CAPABILITIES.VOUCHER_READ_GARAGE,
+        STAFF_CAPABILITIES.WASH_HISTORY_READ_GARAGE,
+    ]),
+    [STAFF_TYPES.VEHICLE_INSPECTION_STAFF]: freezeCapabilities([
+        STAFF_CAPABILITIES.BOOKING_READ_ASSIGNED,
+        STAFF_CAPABILITIES.INSPECTION_READ_ASSIGNED,
+        STAFF_CAPABILITIES.INSPECTION_CREATE_ASSIGNED,
+    ]),
+    [STAFF_TYPES.WASH_OPERATOR]: freezeCapabilities([
+        STAFF_CAPABILITIES.BOOKING_READ_ASSIGNED,
+        STAFF_CAPABILITIES.SERVICE_TASK_READ_ASSIGNED,
+        STAFF_CAPABILITIES.SERVICE_TASK_WASH_EXECUTE_ASSIGNED,
+        STAFF_CAPABILITIES.INCIDENT_READ_ASSIGNED,
+        STAFF_CAPABILITIES.INCIDENT_REPORT_WASH_BAY_FAILURE,
+    ]),
+    [STAFF_TYPES.VEHICLE_CARE_STAFF]: freezeCapabilities([
+        STAFF_CAPABILITIES.BOOKING_READ_ASSIGNED,
+        STAFF_CAPABILITIES.SERVICE_TASK_READ_ASSIGNED,
+        STAFF_CAPABILITIES.SERVICE_TASK_CARE_EXECUTE_ASSIGNED,
+        STAFF_CAPABILITIES.INCIDENT_READ_ASSIGNED,
+        STAFF_CAPABILITIES.INCIDENT_REPORT_STAFF_UNAVAILABLE,
+    ]),
+});
+
 const STAFF_EMPLOYMENT_STATUS = Object.freeze({
     ACTIVE: 'ACTIVE',
     SUSPENDED: 'SUSPENDED',
@@ -18,11 +113,28 @@ const STAFF_EMPLOYMENT_STATUS_VALUES = Object.freeze(
 );
 
 const isValidStaffType = (staffType) => STAFF_TYPE_VALUES.includes(staffType);
+const isValidStaffCapability = (capability) => STAFF_CAPABILITY_VALUES.includes(capability);
+const getStaffGroup = (staffType) => STAFF_TYPE_GROUPS[staffType] || null;
+const getStaffCapabilities = (staffType) => [
+    ...(STAFF_TYPE_CAPABILITIES[staffType] || []),
+];
+const staffTypeHasCapability = (staffType, capability) => (
+    getStaffCapabilities(staffType).includes(capability)
+);
 
 module.exports = {
     STAFF_TYPES,
     STAFF_TYPE_VALUES,
+    STAFF_GROUPS,
+    STAFF_CAPABILITIES,
+    STAFF_CAPABILITY_VALUES,
+    STAFF_TYPE_GROUPS,
+    STAFF_TYPE_CAPABILITIES,
     STAFF_EMPLOYMENT_STATUS,
     STAFF_EMPLOYMENT_STATUS_VALUES,
     isValidStaffType,
+    isValidStaffCapability,
+    getStaffGroup,
+    getStaffCapabilities,
+    staffTypeHasCapability,
 };

@@ -469,6 +469,14 @@ const assignWashBayRequest = {
     },
 };
 
+const assignStaffRequest = {
+    type: 'object',
+    required: ['staff_profile_id'],
+    properties: {
+        staff_profile_id: { type: 'string' },
+    },
+};
+
 const serviceStepDoneRequest = {
     type: 'object',
     properties: {
@@ -945,6 +953,24 @@ const paths = {
             },
         },
     },
+    '/admin/bookings/{id}/assign-inspection-staff': {
+        patch: {
+            tags: ['Bookings'],
+            summary: 'Assign inspection staff to booking',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: true,
+                content: { 'application/json': { schema: assignStaffRequest } },
+            },
+            responses: {
+                200: { description: 'Inspection staff assigned', content: { 'application/json': { schema: successBookingResponse } } },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/bookings/{id}/start-service': {
         patch: {
             tags: ['Admin Bookings'],
@@ -1107,6 +1133,25 @@ const paths = {
                     description: 'Service item resumed',
                     content: { 'application/json': { schema: serviceWorkflowResponse } },
                 },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/bookings/{id}/service-items/{itemKey}/assign-staff': {
+        patch: {
+            tags: ['Bookings'],
+            summary: 'Assign execution staff to service item',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                { name: 'itemKey', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: true,
+                content: { 'application/json': { schema: assignStaffRequest } },
+            },
+            responses: {
+                200: { description: 'Execution staff assigned', content: { 'application/json': { schema: serviceWorkflowResponse } } },
                 ...commonErrorResponses,
             },
         },
