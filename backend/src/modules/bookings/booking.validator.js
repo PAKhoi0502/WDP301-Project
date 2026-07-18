@@ -96,6 +96,18 @@ const optionalPromotionCodeField = z.preprocess(
         .optional()
 );
 
+const optionalVoucherCodeField = z.preprocess(
+    emptyToUndefined,
+    z
+        .string()
+        .trim()
+        .min(6)
+        .max(40)
+        .regex(/^[A-Za-z0-9_]+$/, 'Voucher code is invalid')
+        .transform((value) => value.toUpperCase())
+        .optional()
+);
+
 const optionalGuestPhoneField = z.preprocess(
     emptyToUndefined,
     z
@@ -189,6 +201,7 @@ const createCustomerBookingSchema = z.object({
             add_on_service_ids: z.array(objectIdField).default([]),
             start_time: isoDateTimeField,
             promotion_code: optionalPromotionCodeField,
+            voucher_code: optionalVoucherCodeField,
             used_points: z.coerce.number().int().min(0).default(0),
             note: optionalTextField(1000),
         })

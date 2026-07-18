@@ -19,6 +19,12 @@ const {
     SERVICE_TRANSITION_MODES,
     SERVICE_TRANSITION_MODE_VALUES,
 } = require('../../shared/constants/servicePackage.constant');
+const {
+    BOOKING_OPERATION_STATUS,
+    BOOKING_OPERATION_STATUS_VALUES,
+    BOOKING_CANCELLATION_SOURCES,
+    BOOKING_CANCELLATION_SOURCE_VALUES,
+} = require('../../shared/constants/bookingIncident.constant');
 
 const bookingItemCareStaffAssignmentSchema = new mongoose.Schema(
     {
@@ -215,6 +221,12 @@ const bookingItemSchema = new mongoose.Schema(
         remaining_seconds_at_pause: {
             type: Number,
             min: [0, 'Remaining pause seconds must be greater than or equal to 0'],
+            default: null,
+        },
+
+        countdown_resume_seconds: {
+            type: Number,
+            min: [1, 'Countdown resume seconds must be greater than 0'],
             default: null,
         },
 
@@ -448,6 +460,12 @@ const bookingSchema = new mongoose.Schema(
             default: 0,
         },
 
+        voucher_discount_amount: {
+            type: Number,
+            min: [0, 'Voucher discount must be greater than or equal to 0'],
+            default: 0,
+        },
+
         discount_amount: {
             type: Number,
             min: [0, 'Discount amount must be greater than or equal to 0'],
@@ -488,6 +506,12 @@ const bookingSchema = new mongoose.Schema(
         promotion_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Promotion',
+            default: null,
+        },
+
+        customer_voucher_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'CustomerVoucher',
             default: null,
         },
 
@@ -545,6 +569,18 @@ const bookingSchema = new mongoose.Schema(
             type: String,
             enum: BOOKING_STATUS_VALUES,
             default: BOOKING_STATUS.CONFIRMED,
+        },
+
+        operation_status: {
+            type: String,
+            enum: BOOKING_OPERATION_STATUS_VALUES,
+            default: BOOKING_OPERATION_STATUS.NORMAL,
+        },
+
+        active_incident_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'BookingIncident',
+            default: null,
         },
 
         arrival_status: {
@@ -689,6 +725,18 @@ const bookingSchema = new mongoose.Schema(
             default: null,
         },
 
+        cancellation_source: {
+            type: String,
+            enum: BOOKING_CANCELLATION_SOURCE_VALUES,
+            default: null,
+        },
+
+        cancellation_incident_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'BookingIncident',
+            default: null,
+        },
+
         reward_processed: {
             type: Boolean,
             default: false,
@@ -733,6 +781,27 @@ bookingSchema.index({ created_by_staff_id: 1 });
 bookingSchema.index({ created_at: -1 });
 
 bookingSchema.pre('validate', function (next) {
+    if (
+        this.operation_status === BOOKING_OPERATION_STATUS.AWAITING_CUSTOMER_DECISION
+        && !this.active_incident_id
+    ) {
+        this.invalidate('active_incident_id', 'Active incident is required while awaiting customer decision');
+    }
+
+    if (
+        this.active_incident_id
+        && this.operation_status !== BOOKING_OPERATION_STATUS.AWAITING_CUSTOMER_DECISION
+    ) {
+        this.invalidate('operation_status', 'Active incident requires awaiting customer decision status');
+    }
+
+    if (
+        this.cancellation_source === BOOKING_CANCELLATION_SOURCES.GARAGE_INCIDENT
+        && !this.cancellation_incident_id
+    ) {
+        this.invalidate('cancellation_incident_id', 'Garage incident cancellation requires incident reference');
+    }
+
     if (this.start_time && this.end_time && this.start_time >= this.end_time) {
         this.invalidate('end_time', 'End time must be after start time');
     }

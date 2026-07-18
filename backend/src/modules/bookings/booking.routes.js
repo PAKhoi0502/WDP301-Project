@@ -23,6 +23,14 @@ const {
     pauseServiceItemSchema,
 } = require('./booking.validator');
 const {
+    bookingParamSchema: incidentBookingParamSchema,
+    reportBookingIncidentSchema,
+    getIncidentOptionsSchema,
+    customerIncidentDecisionSchema,
+    staffIncidentDecisionSchema,
+    createIncidentCompensationVoucherSchema,
+} = require('../booking-incidents/bookingIncident.validator');
+const {
     createVehicleInspectionSchema,
     getVehicleInspectionsSchema,
 } = require('../vehicle-inspections/vehicleInspection.validator');
@@ -72,6 +80,18 @@ customerRouter.patch(
     bookingController.cancelMyBooking
 );
 
+customerRouter.get(
+    '/:id/incidents/active',
+    validate(incidentBookingParamSchema),
+    bookingController.getMyActiveBookingIncident
+);
+
+customerRouter.patch(
+    '/:id/incidents/:incidentId/decision',
+    validate(customerIncidentDecisionSchema),
+    bookingController.resolveMyBookingIncident
+);
+
 adminRouter.use(authenticate, authorize(USER_ROLES.STAFF, USER_ROLES.ADMIN));
 
 adminRouter.get(
@@ -96,6 +116,36 @@ adminRouter.patch(
     '/:id/cancel',
     validate(cancelBookingSchema),
     bookingController.cancelBooking
+);
+
+adminRouter.post(
+    '/:id/incidents',
+    validate(reportBookingIncidentSchema),
+    bookingController.reportBookingIncident
+);
+
+adminRouter.get(
+    '/:id/incidents/active',
+    validate(incidentBookingParamSchema),
+    bookingController.getAdminActiveBookingIncident
+);
+
+adminRouter.get(
+    '/:id/incidents/:incidentId/resolution-options',
+    validate(getIncidentOptionsSchema),
+    bookingController.getAdminBookingIncidentOptions
+);
+
+adminRouter.patch(
+    '/:id/incidents/:incidentId/record-customer-decision',
+    validate(staffIncidentDecisionSchema),
+    bookingController.recordBookingIncidentCustomerDecision
+);
+
+adminRouter.post(
+    '/:id/incidents/:incidentId/compensation-vouchers',
+    validate(createIncidentCompensationVoucherSchema),
+    bookingController.createIncidentCompensationVoucher
 );
 
 adminRouter.patch(

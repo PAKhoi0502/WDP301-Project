@@ -20,6 +20,8 @@ const auditLogSwagger = require('../../modules/audit-logs/auditLog.swagger');
 const surveySwagger = require('../../modules/surveys/survey.swagger');
 const analyticsSwagger = require('../../modules/analytics/analytics.swagger');
 const researchSwagger = require('../../modules/research/research.swagger');
+const bookingIncidentSwagger = require('../../modules/booking-incidents/bookingIncident.swagger');
+const customerVoucherSwagger = require('../../modules/customer-vouchers/customerVoucher.swagger');
 
 const paths = {
     ...authSwagger.paths,
@@ -44,6 +46,8 @@ const paths = {
     ...surveySwagger.paths,
     ...analyticsSwagger.paths,
     ...researchSwagger.paths,
+    ...bookingIncidentSwagger.paths,
+    ...customerVoucherSwagger.paths,
 };
 
 module.exports = paths;

@@ -1,4 +1,5 @@
 const bookingRewardService = require('./bookingReward.service');
+const customerVoucherService = require('../customer-vouchers/customerVoucher.service');
 const {
     BOOKING_STATUS,
     BOOKING_PAYMENT_STATUS,
@@ -51,6 +52,12 @@ const confirmBookingPaid = async ({
     }
 
     await booking.save(session ? { session } : undefined);
+    if (booking.customer_voucher_id) {
+        await customerVoucherService.consumeVoucherForBooking({
+            bookingId: booking._id,
+            session,
+        });
+    }
 
     const rewardResult = await bookingRewardService.processCompletedPaidBooking({
         booking,

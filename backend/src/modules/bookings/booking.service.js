@@ -9,6 +9,8 @@ const Garage = require('../garages/garage.model');
 const WashBay = require('../wash-bays/washBay.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
+const BookingIncident = require('../booking-incidents/bookingIncident.model');
+const BookingIncidentMapper = require('../booking-incidents/bookingIncident.mapper');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const bookingPaymentService = require('./bookingPayment.service');
 const paymentService = require('../payments/payment.service');
@@ -17,6 +19,9 @@ const promotionService = require('../promotions/promotion.service');
 const promotionUsageService = require('../promotion-usages/promotionUsage.service');
 const loyaltyService = require('../loyalty/loyalty.service');
 const bookingViolationService = require('../booking-violations/bookingViolation.service');
+const customerVoucherService = require('../customer-vouchers/customerVoucher.service');
+const CustomerVoucherMapper = require('../customer-vouchers/customerVoucher.mapper');
+const notificationService = require('../notifications/notification.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
 const { LOYALTY_TIERS } = require('../../shared/constants/loyalty.constant');
@@ -44,6 +49,20 @@ const {
     BOOKING_ITEM_STATUS,
     BOOKING_ITEM_COMPLETION_SOURCE,
 } = require('../../shared/constants/booking.constant');
+const {
+    BOOKING_OPERATION_STATUS,
+    BOOKING_INCIDENT_TYPES,
+    BOOKING_INCIDENT_STATUS,
+    BOOKING_INCIDENT_DECISIONS,
+    BOOKING_INCIDENT_CONTACT_CHANNELS,
+    BOOKING_INCIDENT_DECISION_SOURCES,
+    BOOKING_INCIDENT_CONTINUATION_POLICIES,
+    BOOKING_CANCELLATION_SOURCES,
+} = require('../../shared/constants/bookingIncident.constant');
+const {
+    NOTIFICATION_TYPES,
+    NOTIFICATION_RELATED_TYPES,
+} = require('../../shared/constants/notification.constant');
 
 const DEFAULT_TIMEZONE_OFFSET = process.env.APP_TIMEZONE_OFFSET || '+07:00';
 const BOOKING_ITEM_HOLD_STATUSES = [
@@ -290,6 +309,15 @@ const populateBookingQuery = (query) => {
         .populate('wash_bay_id', 'name bay_code vehicle_type status is_active')
         .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes countdown_duration_seconds transition_mode wash_bay_duration_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes is_active')
         .populate('promotion_id', 'code name discount_type discount_value max_discount_amount min_order_amount start_at end_at is_active')
+        .populate('customer_voucher_id')
+        .populate({
+            path: 'active_incident_id',
+            populate: [
+                { path: 'reported_by_id', select: 'full_name email phone role is_active' },
+                { path: 'decision_recorded_by_id', select: 'full_name email phone role is_active' },
+                { path: 'resolved_by_id', select: 'full_name email phone role is_active' },
+            ],
+        })
         .populate('created_by_staff_id', 'full_name email phone role is_active')
         .populate('canceled_by_id', 'full_name email phone role is_active')
         .populate('no_show_by_id', 'full_name email phone role is_active')
@@ -600,6 +628,7 @@ const buildBookingItems = ({ startTime, serviceItems, garage }) => {
             countdown_ends_at: null,
             actual_completed_at: null,
             remaining_seconds_at_pause: null,
+            countdown_resume_seconds: null,
             paused_at: null,
             paused_by_staff_id: null,
             pause_reason: null,
@@ -700,6 +729,7 @@ const buildShiftedBookingTimeline = ({ booking, startTime }) => {
             countdown_ends_at: null,
             actual_completed_at: null,
             remaining_seconds_at_pause: null,
+            countdown_resume_seconds: null,
             paused_at: null,
             paused_by_staff_id: null,
             pause_reason: null,
@@ -973,13 +1003,15 @@ const buildBookingBasePayload = ({
     vehicleType,
     note,
     promotionResult = null,
+    voucherResult = null,
     redeemResult = null,
 }) => {
     const endTime = addMinutes(startTime, bookingPlan.totalDurationMinutes);
     const originalPrice = bookingPlan.originalPrice;
     const promotionDiscountAmount = promotionResult?.discount_amount || 0;
+    const voucherDiscountAmount = voucherResult?.discount_amount || 0;
     const pointsDiscountAmount = redeemResult?.points_discount_amount || 0;
-    const discountAmount = promotionDiscountAmount + pointsDiscountAmount;
+    const discountAmount = promotionDiscountAmount + voucherDiscountAmount + pointsDiscountAmount;
     const finalPrice = Math.max(originalPrice - discountAmount, 0);
 
     return {
@@ -1005,6 +1037,7 @@ const buildBookingBasePayload = ({
         assigned_care_staff_ids: [],
         original_price: originalPrice,
         promotion_discount_amount: promotionDiscountAmount,
+        voucher_discount_amount: voucherDiscountAmount,
         points_discount_amount: pointsDiscountAmount,
         discount_amount: discountAmount,
         final_price: finalPrice,
@@ -1013,6 +1046,7 @@ const buildBookingBasePayload = ({
         used_points: redeemResult?.used_points || 0,
         earned_points: 0,
         promotion_id: promotionResult?.promotion?._id || null,
+        customer_voucher_id: voucherResult?.voucher?._id || null,
         requires_wash_bay: bookingPlan.requires_wash_bay,
         status: BOOKING_STATUS.CONFIRMED,
         reward_processed: false,
@@ -1722,7 +1756,7 @@ const getServicePackageForBooking = async (booking) => {
     return servicePackage;
 };
 
-const assignWashBayToBooking = async (booking, requestedWashBayId = null) => {
+const assignWashBayToBooking = async (booking, requestedWashBayId = null, session = null) => {
     if (!booking.requires_wash_bay) {
         throw new AppError('Booking does not require wash bay', 400, 'BOOKING_DOES_NOT_REQUIRE_WASH_BAY');
     }
@@ -1752,6 +1786,7 @@ const assignWashBayToBooking = async (booking, requestedWashBayId = null) => {
         {
             new: true,
             sort: { bay_code: 1, name: 1 },
+            ...(session ? { session } : {}),
         }
     );
 
@@ -1761,34 +1796,39 @@ const assignWashBayToBooking = async (booking, requestedWashBayId = null) => {
 
     booking.wash_bay_id = washBay._id;
 
-    await booking.save();
+    await booking.save(session ? { session } : undefined);
 
     return washBay;
 };
 
-const assignWashBayToBookingIfNeeded = async (booking) => {
+const assignWashBayToBookingIfNeeded = async (booking, session = null) => {
     if (!booking.requires_wash_bay || booking.wash_bay_id) {
         return null;
     }
 
-    return assignWashBayToBooking(booking);
+    return assignWashBayToBooking(booking, null, session);
 };
 
-const releaseWashBayForBooking = async (booking) => {
+const releaseWashBayForBooking = async (booking, session = null) => {
     if (!booking.wash_bay_id) {
         return;
     }
 
-    await WashBay.findOneAndUpdate(
-        {
-            _id: booking.wash_bay_id,
-            current_booking_id: booking._id,
-        },
-        {
-            status: WASH_BAY_STATUS.AVAILABLE,
-            current_booking_id: null,
-        }
-    );
+    const filter = {
+        _id: booking.wash_bay_id,
+        current_booking_id: booking._id,
+    };
+    const update = {
+        status: WASH_BAY_STATUS.AVAILABLE,
+        current_booking_id: null,
+    };
+
+    if (session) {
+        await WashBay.findOneAndUpdate(filter, update, { session });
+        return;
+    }
+
+    await WashBay.findOneAndUpdate(filter, update);
 
 };
 
@@ -2101,7 +2141,9 @@ const assignCareStaffToBookingIfNeeded = async (booking) => {
 
 const getEffectiveCountdownDurationSeconds = (bookingItem) => {
     const countdownDurationSeconds = Number(
-        bookingItem.countdown_duration_seconds || bookingItem.duration_minutes * 60
+        bookingItem.countdown_resume_seconds
+        || bookingItem.countdown_duration_seconds
+        || bookingItem.duration_minutes * 60
     );
 
     if (!Number.isInteger(countdownDurationSeconds) || countdownDurationSeconds < 1) {
@@ -2153,6 +2195,7 @@ const startBookingItemCountdown = (bookingItem, startedAt = new Date()) => {
     bookingItem.countdown_ends_at = addSeconds(startedAt, countdownDurationSeconds);
     bookingItem.actual_completed_at = null;
     bookingItem.remaining_seconds_at_pause = null;
+    bookingItem.countdown_resume_seconds = null;
     bookingItem.paused_at = null;
     bookingItem.paused_by_staff_id = null;
     bookingItem.pause_reason = null;
@@ -2852,10 +2895,20 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         originalPrice: bookingPlan.originalPrice,
         promotionResult,
     });
+    const voucherResult = await customerVoucherService.previewVoucherForBooking({
+        customerId,
+        code: createPayload.voucher_code,
+        servicePackage,
+        orderAmount: priceAfterPromotion,
+    });
+    const priceAfterVoucher = Math.max(
+        priceAfterPromotion - (voucherResult?.discount_amount || 0),
+        0
+    );
     const redeemResult = await loyaltyService.calculateBookingRedeemDiscount({
         customerId,
         usedPoints,
-        priceAfterPromotion,
+        priceAfterPromotion: priceAfterVoucher,
     });
     const basePayload = buildBookingBasePayload({
         garage,
@@ -2865,6 +2918,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
         vehicleType: vehicle.vehicle_type,
         note: createPayload.note,
         promotionResult,
+        voucherResult,
         redeemResult,
     });
 
@@ -2886,15 +2940,26 @@ const createCustomerBooking = async (customerId, payload = {}) => {
 
     let booking;
 
-    if (basePayload.used_points > 0) {
+    if (basePayload.used_points > 0 || voucherResult) {
         const session = await mongoose.startSession();
 
         try {
             await session.withTransaction(async () => {
+                const transactionalVoucherResult = await customerVoucherService.previewVoucherForBooking({
+                    customerId,
+                    code: createPayload.voucher_code,
+                    servicePackage,
+                    orderAmount: priceAfterPromotion,
+                    session,
+                });
+                const transactionalPriceAfterVoucher = Math.max(
+                    priceAfterPromotion - (transactionalVoucherResult?.discount_amount || 0),
+                    0
+                );
                 const transactionalRedeemResult = await loyaltyService.calculateBookingRedeemDiscount({
                     customerId,
                     usedPoints: basePayload.used_points,
-                    priceAfterPromotion,
+                    priceAfterPromotion: transactionalPriceAfterVoucher,
                     session,
                 });
                 const transactionalBasePayload = buildBookingBasePayload({
@@ -2905,6 +2970,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
                     vehicleType: vehicle.vehicle_type,
                     note: createPayload.note,
                     promotionResult,
+                    voucherResult: transactionalVoucherResult,
                     redeemResult: transactionalRedeemResult,
                 });
 
@@ -2917,15 +2983,26 @@ const createCustomerBooking = async (customerId, payload = {}) => {
                     session
                 );
 
-                await loyaltyService.redeemPointsForBooking({
-                    booking,
-                    customerId,
-                    usedPoints: transactionalBasePayload.used_points,
-                    priceAfterPromotion,
-                    actorId: customerId,
-                    expectedPointsDiscountAmount: transactionalBasePayload.points_discount_amount,
-                    session,
-                });
+                if (transactionalVoucherResult) {
+                    await customerVoucherService.reserveVoucherForBooking({
+                        voucherId: transactionalVoucherResult.voucher._id,
+                        customerId,
+                        bookingId: booking._id,
+                        session,
+                    });
+                }
+
+                if (transactionalBasePayload.used_points > 0) {
+                    await loyaltyService.redeemPointsForBooking({
+                        booking,
+                        customerId,
+                        usedPoints: transactionalBasePayload.used_points,
+                        priceAfterPromotion: transactionalPriceAfterVoucher,
+                        actorId: customerId,
+                        expectedPointsDiscountAmount: transactionalBasePayload.points_discount_amount,
+                        session,
+                    });
+                }
             });
         } finally {
             await session.endSession();
@@ -3141,6 +3218,42 @@ const createWalkInBooking = async (user, payload = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
+const assertBookingHasNoActiveIncident = (booking) => {
+    if (
+        booking.operation_status === BOOKING_OPERATION_STATUS.AWAITING_CUSTOMER_DECISION
+        || booking.active_incident_id
+    ) {
+        throw new AppError(
+            'Booking has an unresolved garage incident',
+            409,
+            'BOOKING_INCIDENT_DECISION_REQUIRED'
+        );
+    }
+};
+
+const emitBookingCanceledNotification = async ({ booking, incidentId = null }) => {
+    if (!booking.customer_id) {
+        return null;
+    }
+
+    return notificationService.createInAppNotification({
+        userId: booking.customer_id,
+        type: NOTIFICATION_TYPES.BOOKING_CANCELED,
+        title: 'Booking canceled',
+        message: incidentId
+            ? 'Your booking was canceled after you confirmed the garage incident resolution.'
+            : 'Your booking has been canceled.',
+        relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+        relatedId: booking._id,
+        metadata: {
+            booking_id: booking._id.toString(),
+            cancellation_source: booking.cancellation_source,
+            incident_id: toObjectIdString(incidentId),
+            canceled_at: booking.canceled_at,
+        },
+    });
+};
+
 const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
     const booking = await Booking.findOne({
         _id: bookingId,
@@ -3152,6 +3265,8 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
     }
 
+    assertBookingHasNoActiveIncident(booking);
+
     if (!BOOKING_CUSTOMER_CANCELABLE_STATUSES.includes(booking.status)) {
         throw new AppError('Booking cannot be canceled in current status', 400, 'BOOKING_NOT_CANCELABLE');
     }
@@ -3162,8 +3277,12 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
     booking.canceled_at = canceledAt;
     booking.canceled_by_id = customerId;
     booking.cancel_reason = normalizeText(reason);
+    booking.cancellation_source = BOOKING_CANCELLATION_SOURCES.CUSTOMER;
 
     await booking.save();
+    if (booking.customer_voucher_id) {
+        await customerVoucherService.releaseVoucherForBooking({ bookingId: booking._id });
+    }
     await loyaltyService.refundRedeemedPointsForBooking({
         booking,
         actorId: customerId,
@@ -3174,6 +3293,7 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
         actorId: customerId,
         canceledAt,
     });
+    await emitBookingCanceledNotification({ booking });
 
     const populatedBooking = await getBookingDocumentById(booking._id);
 
@@ -3184,6 +3304,7 @@ const cancelBooking = async (user, bookingId, { reason } = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
 
     if (booking.payment_status === BOOKING_PAYMENT_STATUS.PAID) {
         throw new AppError('Paid booking cannot be canceled', 409, 'BOOKING_PAID_CANNOT_CANCEL');
@@ -3206,6 +3327,9 @@ const cancelBooking = async (user, bookingId, { reason } = {}) => {
     booking.canceled_at = canceledAt;
     booking.canceled_by_id = user._id;
     booking.cancel_reason = normalizeText(reason);
+    booking.cancellation_source = user.role === USER_ROLES.ADMIN
+        ? BOOKING_CANCELLATION_SOURCES.ADMIN_CORRECTION
+        : BOOKING_CANCELLATION_SOURCES.STAFF_CUSTOMER_REQUEST;
 
     if (booking.is_walk_in && booking.promotion_id) {
         const session = await mongoose.startSession();
@@ -3231,6 +3355,10 @@ const cancelBooking = async (user, bookingId, { reason } = {}) => {
             actorId: user._id,
         });
     }
+    if (booking.customer_voucher_id) {
+        await customerVoucherService.releaseVoucherForBooking({ bookingId: booking._id });
+    }
+    await emitBookingCanceledNotification({ booking });
 
     for (const bookingItemKey of releasedBookingItemKeys) {
         await bookingServiceStepService.markResourceReleasedForBookingItem(
@@ -3249,6 +3377,7 @@ const markNoShow = async (user, bookingId, { reason } = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
 
     if (booking.arrived_at) {
         throw new AppError(
@@ -3303,6 +3432,9 @@ const markNoShow = async (user, bookingId, { reason } = {}) => {
         actorId: user._id,
         noShowAt,
     });
+    if (booking.customer_voucher_id) {
+        await customerVoucherService.consumeVoucherForBooking({ bookingId: booking._id });
+    }
 
     for (const bookingItemKey of releasedBookingItemKeys) {
         await bookingServiceStepService.markResourceReleasedForBookingItem(
@@ -3317,11 +3449,1037 @@ const markNoShow = async (user, bookingId, { reason } = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
+const BOOKING_INCIDENT_ELIGIBLE_STATUSES = [
+    BOOKING_STATUS.PENDING,
+    BOOKING_STATUS.CONFIRMED,
+    BOOKING_STATUS.CHECKED_IN,
+    BOOKING_STATUS.IN_PROGRESS,
+];
+
+const populateBookingIncidentQuery = (query) => query
+    .populate('reported_by_id', 'full_name email phone role is_active')
+    .populate('decision_recorded_by_id', 'full_name email phone role is_active')
+    .populate('resolved_by_id', 'full_name email phone role is_active');
+
+const getBookingIncidentDocument = async (bookingId, incidentId, session = null) => {
+    const query = BookingIncident.findOne({
+        _id: incidentId,
+        booking_id: bookingId,
+    });
+    const incident = session ? await query.session(session) : await query;
+
+    if (!incident) {
+        throw new AppError('Booking incident not found', 404, 'BOOKING_INCIDENT_NOT_FOUND');
+    }
+
+    return incident;
+};
+
+const getIncidentScheduleSnapshot = (booking) => ({
+    _id: booking._id,
+    customer_id: booking.customer_id,
+    garage_id: booking.garage_id,
+    service_package_id: booking.service_package_id,
+    vehicle_type: booking.vehicle_type,
+    add_on_service_ids: booking.add_on_service_ids || [],
+    start_time: booking.start_time,
+    end_time: booking.end_time,
+    booking_status: booking.status,
+    checked_in_at: booking.checked_in_at,
+    started_at: booking.started_at,
+    booking_items: (booking.booking_items || []).map((item) => ({
+        item_key: item.item_key,
+        sequence: item.sequence,
+        status: item.status,
+        actual_started_at: item.actual_started_at,
+        countdown_ends_at: item.countdown_ends_at,
+        actual_completed_at: item.actual_completed_at,
+        remaining_seconds_at_pause: item.remaining_seconds_at_pause,
+    })),
+});
+
+const pauseCurrentBookingItemForIncident = (booking, userId, pausedAt) => {
+    const bookingItem = getCurrentBookingItem(booking);
+
+    if (!bookingItem || bookingItem.status !== BOOKING_ITEM_STATUS.IN_PROGRESS) {
+        return null;
+    }
+
+    const remainingSeconds = Math.max(getRemainingServiceItemSeconds(bookingItem, pausedAt), 1);
+
+    bookingItem.status = BOOKING_ITEM_STATUS.PAUSED;
+    bookingItem.remaining_seconds_at_pause = remainingSeconds;
+    bookingItem.paused_at = pausedAt;
+    bookingItem.paused_by_staff_id = userId;
+    bookingItem.pause_reason = 'GARAGE_INCIDENT';
+    bookingItem.countdown_ends_at = null;
+    bookingItem.timer_claimed_at = null;
+    bookingItem.timer_claim_token = null;
+    booking.markModified('booking_items');
+
+    return bookingItem;
+};
+
+const releaseAffectedStaffForIncident = ({
+    booking,
+    affectedStaffProfileId,
+    affectedBookingItemKey,
+    releasedAt,
+}) => {
+    const normalizedItemKey = normalizeBookingItemKey(affectedBookingItemKey);
+    let matchedAssignment = false;
+    const releasedBookingItemKeys = [];
+
+    for (const bookingItem of booking.booking_items || []) {
+        if (normalizedItemKey && normalizeBookingItemKey(bookingItem.item_key) !== normalizedItemKey) {
+            continue;
+        }
+
+        let released = false;
+
+        for (const assignment of bookingItem.assigned_care_staff || []) {
+            if (assignment.released_at) {
+                continue;
+            }
+
+            const staffProfileId = toObjectIdString(getCareStaffAssignmentStaffProfileId(assignment));
+
+            if (affectedStaffProfileId && staffProfileId !== toObjectIdString(affectedStaffProfileId)) {
+                continue;
+            }
+
+            assignment.released_at = releasedAt;
+            matchedAssignment = true;
+            released = true;
+        }
+
+        if (released) {
+            releasedBookingItemKeys.push(normalizeBookingItemKey(bookingItem.item_key));
+        }
+    }
+
+    if (affectedStaffProfileId && !matchedAssignment) {
+        throw new AppError(
+            'Affected staff is not actively assigned to this booking',
+            400,
+            'BOOKING_INCIDENT_STAFF_NOT_ASSIGNED'
+        );
+    }
+
+    if (matchedAssignment) {
+        syncAssignedCareStaffIds(booking);
+        booking.markModified('booking_items');
+    }
+
+    return releasedBookingItemKeys.filter(Boolean);
+};
+
+const getGarageStaffUserIds = async (garageId) => {
+    const staffProfiles = await StaffProfile.find({
+        garage_id: garageId,
+        is_active: true,
+    }).select('user_id').lean();
+
+    return [...new Set(staffProfiles
+        .map((profile) => toObjectIdString(profile.user_id))
+        .filter(Boolean))];
+};
+
+const sendBookingIncidentReportedNotifications = async ({ booking, incident }) => {
+    const staffUserIds = await getGarageStaffUserIds(booking.garage_id);
+    const notifications = staffUserIds.map((userId) => notificationService.createInAppNotification({
+        userId,
+        type: NOTIFICATION_TYPES.BOOKING_INCIDENT_REPORTED,
+        title: 'Garage incident requires customer decision',
+        message: 'Contact the customer and record whether they continue, reschedule, or cancel.',
+        relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+        relatedId: booking._id,
+        metadata: {
+            booking_id: booking._id.toString(),
+            incident_id: incident._id.toString(),
+            incident_type: incident.incident_type,
+        },
+    }));
+
+    if (booking.customer_id) {
+        notifications.push(notificationService.createInAppNotification({
+            userId: booking.customer_id,
+            type: NOTIFICATION_TYPES.BOOKING_CUSTOMER_DECISION_REQUIRED,
+            title: 'Your booking needs a decision',
+            message: 'The garage reported an operational incident. Choose whether to continue, reschedule, or cancel.',
+            relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+            relatedId: booking._id,
+            metadata: {
+                booking_id: booking._id.toString(),
+                incident_id: incident._id.toString(),
+                incident_type: incident.incident_type,
+            },
+        }));
+    }
+
+    await Promise.allSettled(notifications);
+};
+
+const sendBookingIncidentResolvedNotifications = async ({ booking, incident }) => {
+    const recipients = new Set(await getGarageStaffUserIds(booking.garage_id));
+
+    if (booking.customer_id) {
+        recipients.add(toObjectIdString(booking.customer_id));
+    }
+
+    await Promise.allSettled([...recipients].map((userId) => notificationService.createInAppNotification({
+        userId,
+        type: NOTIFICATION_TYPES.BOOKING_INCIDENT_RESOLVED,
+        title: 'Booking incident resolved',
+        message: `The customer decision was recorded as ${incident.decision}.`,
+        relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+        relatedId: booking._id,
+        metadata: {
+            booking_id: booking._id.toString(),
+            incident_id: incident._id.toString(),
+            decision: incident.decision,
+            new_start_time: incident.new_start_time,
+        },
+    })));
+};
+
+const reportBookingIncident = async (user, bookingId, payload = {}, auditContext = {}) => {
+    const session = await mongoose.startSession();
+    let booking;
+    let incident;
+    let releasedBookingItemKeys = [];
+
+    try {
+        await session.withTransaction(async () => {
+            booking = await getRawBookingDocumentById(bookingId, session);
+
+            await assertStaffCanAccessBooking(user, booking);
+            assertBookingStatusIn(
+                booking,
+                BOOKING_INCIDENT_ELIGIBLE_STATUSES,
+                'BOOKING_INCIDENT_REPORT_NOT_ALLOWED'
+            );
+            assertBookingHasNoActiveIncident(booking);
+
+            const reportedAt = new Date();
+            const activeBookingItem = getCurrentBookingItem(booking);
+            const affectedBookingItemKey = normalizeBookingItemKey(
+                payload.affected_booking_item_key || activeBookingItem?.item_key
+            );
+
+            if (
+                affectedBookingItemKey
+                && !getBookingItemByKey(booking, affectedBookingItemKey)
+            ) {
+                throw new AppError(
+                    'Affected booking item not found',
+                    404,
+                    'BOOKING_INCIDENT_ITEM_NOT_FOUND'
+                );
+            }
+
+            const pausedItem = pauseCurrentBookingItemForIncident(booking, user._id, reportedAt);
+            let affectedWashBayId = payload.affected_wash_bay_id || null;
+
+            if (payload.incident_type === BOOKING_INCIDENT_TYPES.WASH_BAY_FAILURE) {
+                affectedWashBayId = affectedWashBayId || booking.wash_bay_id;
+
+                if (
+                    affectedWashBayId
+                    && (!booking.wash_bay_id
+                        || toObjectIdString(booking.wash_bay_id) !== toObjectIdString(affectedWashBayId))
+                ) {
+                    throw new AppError(
+                        'Affected wash bay is not assigned to this booking',
+                        400,
+                        'BOOKING_INCIDENT_WASH_BAY_NOT_ASSIGNED'
+                    );
+                }
+
+                if (affectedWashBayId) {
+                    const updatedWashBay = await WashBay.findOneAndUpdate(
+                        {
+                            _id: affectedWashBayId,
+                            garage_id: booking.garage_id,
+                            current_booking_id: booking._id,
+                        },
+                        {
+                            status: WASH_BAY_STATUS.MAINTENANCE,
+                            current_booking_id: null,
+                            is_active: true,
+                        },
+                        { new: true, session }
+                    );
+
+                    if (!updatedWashBay) {
+                        throw new AppError(
+                            'Assigned wash bay could not be marked for maintenance',
+                            409,
+                            'BOOKING_INCIDENT_WASH_BAY_UPDATE_FAILED'
+                        );
+                    }
+
+                    booking.wash_bay_id = null;
+                }
+            }
+
+            if (payload.incident_type === BOOKING_INCIDENT_TYPES.STAFF_UNAVAILABLE) {
+                releasedBookingItemKeys = releaseAffectedStaffForIncident({
+                    booking,
+                    affectedStaffProfileId: payload.affected_staff_profile_id,
+                    affectedBookingItemKey,
+                    releasedAt: reportedAt,
+                });
+            }
+
+            const documents = await BookingIncident.create(
+                [
+                    {
+                        booking_id: booking._id,
+                        garage_id: booking.garage_id,
+                        customer_id: booking.customer_id,
+                        incident_type: payload.incident_type,
+                        description: normalizeText(payload.description),
+                        affected_booking_item_key: affectedBookingItemKey,
+                        affected_wash_bay_id: affectedWashBayId,
+                        affected_staff_profile_id: payload.affected_staff_profile_id || null,
+                        reported_by_id: user._id,
+                        reported_booking_status: booking.status,
+                        reported_schedule_snapshot: getIncidentScheduleSnapshot(booking),
+                        countdown_paused_automatically: Boolean(pausedItem),
+                    },
+                ],
+                { session }
+            );
+
+            [incident] = documents;
+            booking.operation_status = BOOKING_OPERATION_STATUS.AWAITING_CUSTOMER_DECISION;
+            booking.active_incident_id = incident._id;
+            await booking.save({ session });
+
+            await auditLogService.recordAuditEvent({
+                actorId: user._id,
+                action: AUDIT_ACTIONS.BOOKING_INCIDENT_REPORTED,
+                resourceType: AUDIT_RESOURCE_TYPES.BOOKING_INCIDENT,
+                resourceId: incident._id,
+                after: {
+                    booking_id: booking._id,
+                    incident_type: incident.incident_type,
+                    operation_status: booking.operation_status,
+                    countdown_paused_automatically: incident.countdown_paused_automatically,
+                },
+                ip: auditContext.ip,
+                userAgent: auditContext.userAgent,
+                session,
+            });
+        });
+    } catch (error) {
+        if (error?.code === 11000) {
+            throw new AppError(
+                'Booking already has an unresolved garage incident',
+                409,
+                'BOOKING_INCIDENT_ALREADY_ACTIVE'
+            );
+        }
+
+        throw error;
+    } finally {
+        await session.endSession();
+    }
+
+    for (const bookingItemKey of releasedBookingItemKeys) {
+        await bookingServiceStepService.markResourceReleasedForBookingItem(
+            booking._id,
+            bookingItemKey,
+            incident.created_at
+        );
+    }
+
+    await sendBookingIncidentReportedNotifications({ booking, incident });
+
+    const [populatedBooking, populatedIncident] = await Promise.all([
+        getBookingDocumentById(booking._id),
+        populateBookingIncidentQuery(BookingIncident.findById(incident._id)),
+    ]);
+
+    return {
+        booking: BookingMapper.toBookingDto(populatedBooking),
+        incident: BookingIncidentMapper.toBookingIncidentDto(populatedIncident),
+    };
+};
+
+const getIncidentSearchStartTime = ({ garage, now }) => {
+    const localDate = getLocalDateString(now);
+    const openingDate = createDateFromLocalTime(localDate, garage.opening_time);
+    const closingDate = createDateFromLocalTime(localDate, garage.closing_time);
+
+    if (now <= openingDate) {
+        return openingDate;
+    }
+
+    const roundedTime = ceilToGarageSlot(now, garage);
+
+    if (roundedTime < closingDate) {
+        return roundedTime;
+    }
+
+    return createDateFromLocalTime(addDaysToDateString(localDate, 1), garage.opening_time);
+};
+
+const buildIncidentContinuationBooking = (booking) => {
+    const remainingItems = (booking.booking_items || [])
+        .filter((item) => ![BOOKING_ITEM_STATUS.DONE, BOOKING_ITEM_STATUS.SKIPPED].includes(item.status))
+        .sort((firstItem, secondItem) => firstItem.sequence - secondItem.sequence);
+
+    if (remainingItems.length === 0) {
+        throw new AppError(
+            'Booking has no remaining service items to reschedule',
+            409,
+            'BOOKING_INCIDENT_NO_REMAINING_ITEMS'
+        );
+    }
+
+    const plainBooking = booking.toObject ? booking.toObject() : { ...booking };
+    const firstItem = remainingItems[0];
+    const lastItem = remainingItems[remainingItems.length - 1];
+
+    return {
+        ...plainBooking,
+        _id: booking._id,
+        start_time: firstItem.item_start_time,
+        end_time: lastItem.item_end_time,
+        booking_items: remainingItems.map((item) => item.toObject ? item.toObject() : { ...item }),
+    };
+};
+
+const getIncidentResolutionOptionsInternal = async ({ booking, incident, days = 3 }) => {
+    const garage = await getActiveGarage(booking.garage_id);
+    const continuationBooking = buildIncidentContinuationBooking(booking);
+    const searchStartTime = getIncidentSearchStartTime({
+        garage,
+        now: new Date(),
+    });
+    const candidateDays = buildLateArrivalCandidateDays({
+        booking: continuationBooking,
+        garage,
+        searchStartTime,
+        days,
+    });
+    const availabilityDays = await evaluateLateArrivalCandidates({
+        booking: continuationBooking,
+        garage,
+        candidateDays,
+    });
+    let canReassignAndContinue = false;
+
+    if ([BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.IN_PROGRESS].includes(booking.status)) {
+        if (incident.incident_type === BOOKING_INCIDENT_TYPES.WASH_BAY_FAILURE) {
+            canReassignAndContinue = !booking.requires_wash_bay || Boolean(await WashBay.exists({
+                garage_id: booking.garage_id,
+                vehicle_type: booking.vehicle_type,
+                is_active: true,
+                status: WASH_BAY_STATUS.AVAILABLE,
+                current_booking_id: null,
+            }));
+        } else if (incident.incident_type === BOOKING_INCIDENT_TYPES.STAFF_UNAVAILABLE) {
+            const affectedItem = getBookingItemByKey(
+                booking,
+                incident.affected_booking_item_key
+            ) || getCurrentBookingItem(booking);
+            const requiredCount = affectedItem?.care_staff_required_count || 0;
+            const activeAssignments = affectedItem
+                ? getActiveCareStaffAssignments(affectedItem).length
+                : 0;
+
+            canReassignAndContinue = requiredCount === 0 || activeAssignments < requiredCount;
+        } else {
+            canReassignAndContinue = true;
+        }
+    }
+
+    return {
+        booking_id: booking._id.toString(),
+        incident_id: incident._id.toString(),
+        incident_type: incident.incident_type,
+        operation_status: booking.operation_status,
+        can_reassign_and_continue: canReassignAndContinue,
+        available_actions: [
+            ...(canReassignAndContinue
+                ? [BOOKING_INCIDENT_DECISIONS.REASSIGN_AND_CONTINUE]
+                : []),
+            BOOKING_INCIDENT_DECISIONS.RESCHEDULE_NEAREST,
+            BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM,
+            BOOKING_INCIDENT_DECISIONS.CANCEL_BY_GARAGE,
+        ],
+        search_start_time: searchStartTime,
+        days: availabilityDays,
+        suggested_slots: availabilityDays.flatMap((day) => day.suggested_slots),
+    };
+};
+
+const assertCustomerOwnsIncidentBooking = (customerId, booking) => {
+    if (
+        !booking.customer_id
+        || toObjectIdString(booking.customer_id) !== toObjectIdString(customerId)
+        || booking.is_walk_in
+    ) {
+        throw new AppError('Booking incident not found', 404, 'BOOKING_INCIDENT_NOT_FOUND');
+    }
+};
+
+const getAdminActiveBookingIncident = async (user, bookingId) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+
+    if (!booking.active_incident_id) {
+        return null;
+    }
+
+    const incident = await populateBookingIncidentQuery(
+        BookingIncident.findById(booking.active_incident_id)
+    );
+
+    return {
+        incident: BookingIncidentMapper.toBookingIncidentDto(incident),
+        resolution_options: await getIncidentResolutionOptionsInternal({
+            booking,
+            incident,
+            days: 3,
+        }),
+    };
+};
+
+const getMyActiveBookingIncident = async (customerId, bookingId) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    assertCustomerOwnsIncidentBooking(customerId, booking);
+
+    if (!booking.active_incident_id) {
+        return null;
+    }
+
+    const incident = await populateBookingIncidentQuery(
+        BookingIncident.findById(booking.active_incident_id)
+    );
+
+    return {
+        incident: BookingIncidentMapper.toBookingIncidentDto(incident),
+        resolution_options: await getIncidentResolutionOptionsInternal({
+            booking,
+            incident,
+            days: 3,
+        }),
+    };
+};
+
+const getAdminBookingIncidentOptions = async (user, bookingId, incidentId, { days = 3 } = {}) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+    const incident = await getBookingIncidentDocument(booking._id, incidentId);
+
+    if (incident.status !== BOOKING_INCIDENT_STATUS.AWAITING_CUSTOMER_DECISION) {
+        throw new AppError(
+            'Booking incident has already been resolved',
+            409,
+            'BOOKING_INCIDENT_ALREADY_RESOLVED'
+        );
+    }
+
+    return getIncidentResolutionOptionsInternal({ booking, incident, days });
+};
+
+const applyIncidentRescheduledTimeline = ({
+    booking,
+    startTime,
+    continuationPolicy,
+    user,
+    incident,
+    resolvedAt,
+}) => {
+    const completedItems = (booking.booking_items || [])
+        .filter((item) => [BOOKING_ITEM_STATUS.DONE, BOOKING_ITEM_STATUS.SKIPPED].includes(item.status))
+        .map((item) => item.toObject ? item.toObject() : { ...item });
+    const continuationBooking = buildIncidentContinuationBooking(booking);
+    const pausedItem = (booking.booking_items || []).find((item) => item.status === BOOKING_ITEM_STATUS.PAUSED);
+    const pausedItemKey = normalizeBookingItemKey(pausedItem?.item_key);
+    const pausedRemainingSeconds = pausedItem?.remaining_seconds_at_pause || null;
+    const timeline = buildShiftedBookingTimeline({
+        booking: continuationBooking,
+        startTime,
+    });
+
+    if (
+        continuationPolicy === BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING
+        && pausedItemKey
+        && pausedRemainingSeconds
+    ) {
+        const shiftedPausedItem = timeline.booking_items.find((item) => (
+            normalizeBookingItemKey(item.item_key) === pausedItemKey
+        ));
+
+        if (shiftedPausedItem) {
+            shiftedPausedItem.countdown_resume_seconds = pausedRemainingSeconds;
+        }
+    }
+
+    if (!booking.original_start_time) {
+        booking.original_start_time = incident.reported_schedule_snapshot.start_time;
+    }
+
+    if (!booking.original_end_time) {
+        booking.original_end_time = incident.reported_schedule_snapshot.end_time;
+    }
+
+    booking.booking_date = startOfBookingDate(timeline.start_time);
+    booking.start_time = timeline.start_time;
+    booking.end_time = timeline.end_time;
+    booking.booking_items = [...completedItems, ...timeline.booking_items]
+        .sort((firstItem, secondItem) => firstItem.sequence - secondItem.sequence);
+    booking.wash_bay_start_time = timeline.wash_bay_start_time;
+    booking.wash_bay_end_time = timeline.wash_bay_end_time;
+    booking.wash_bay_work_end_time = timeline.wash_bay_work_end_time;
+    booking.wash_bay_reserved_until = timeline.wash_bay_reserved_until;
+    booking.care_staff_start_time = timeline.care_staff_start_time;
+    booking.care_staff_end_time = timeline.care_staff_end_time;
+    booking.care_staff_work_end_time = timeline.care_staff_work_end_time;
+    booking.care_staff_reserved_until = timeline.care_staff_reserved_until;
+    booking.assigned_care_staff_ids = [];
+    booking.status = BOOKING_STATUS.CONFIRMED;
+    booking.arrival_status = null;
+    booking.arrived_at = null;
+    booking.arrival_reference_start_time = startTime;
+    booking.late_minutes = 0;
+    booking.grace_exceeded_minutes = 0;
+    booking.late_resolution = null;
+    booking.late_accepted_by_id = null;
+    booking.late_accepted_at = null;
+    booking.checked_in_at = null;
+    booking.started_at = null;
+    booking.rescheduled_at = resolvedAt;
+    booking.rescheduled_by_id = user._id;
+    booking.reschedule_reason = 'GARAGE_INCIDENT';
+    booking.reschedule_count = (booking.reschedule_count || 0) + 1;
+    booking.markModified('booking_items');
+};
+
+const resumeIncidentPausedItem = (booking, resumedAt) => {
+    const bookingItem = (booking.booking_items || []).find((item) => (
+        item.status === BOOKING_ITEM_STATUS.PAUSED
+    ));
+
+    if (!bookingItem) {
+        return null;
+    }
+
+    const remainingSeconds = bookingItem.remaining_seconds_at_pause;
+
+    if (!remainingSeconds || remainingSeconds < 1) {
+        throw new AppError(
+            'Paused service item has no remaining countdown',
+            409,
+            'BOOKING_SERVICE_ITEM_REMAINING_TIME_INVALID'
+        );
+    }
+
+    const pausedSeconds = bookingItem.paused_at
+        ? Math.max(0, Math.ceil((resumedAt.getTime() - new Date(bookingItem.paused_at).getTime()) / 1000))
+        : 0;
+
+    bookingItem.status = BOOKING_ITEM_STATUS.IN_PROGRESS;
+    bookingItem.countdown_ends_at = addSeconds(resumedAt, remainingSeconds);
+    bookingItem.remaining_seconds_at_pause = null;
+    bookingItem.total_paused_seconds = (bookingItem.total_paused_seconds || 0) + pausedSeconds;
+    bookingItem.paused_at = null;
+    bookingItem.paused_by_staff_id = null;
+    bookingItem.pause_reason = null;
+    bookingItem.timer_claimed_at = null;
+    bookingItem.timer_claim_token = null;
+    booking.markModified('booking_items');
+
+    return bookingItem;
+};
+
+const resolveBookingIncidentDecision = async (
+    user,
+    bookingId,
+    incidentId,
+    payload,
+    decisionSource,
+    auditContext = {}
+) => {
+    const session = await mongoose.startSession();
+    let booking;
+    let incident;
+    let releasedBookingItemKeys = [];
+    let shouldOfferWaitlist = false;
+
+    try {
+        await session.withTransaction(async () => {
+            booking = await getRawBookingDocumentById(bookingId, session);
+
+            if (decisionSource === BOOKING_INCIDENT_DECISION_SOURCES.CUSTOMER) {
+                assertCustomerOwnsIncidentBooking(user._id, booking);
+            } else {
+                await assertStaffCanAccessBooking(user, booking);
+            }
+
+            incident = await getBookingIncidentDocument(booking._id, incidentId, session);
+
+            if (
+                incident.status !== BOOKING_INCIDENT_STATUS.AWAITING_CUSTOMER_DECISION
+                || toObjectIdString(booking.active_incident_id) !== incident._id.toString()
+            ) {
+                throw new AppError(
+                    'Booking incident has already been resolved',
+                    409,
+                    'BOOKING_INCIDENT_ALREADY_RESOLVED'
+                );
+            }
+
+            const resolvedAt = new Date();
+            const decision = payload.decision;
+            const before = {
+                booking_status: booking.status,
+                operation_status: booking.operation_status,
+                start_time: booking.start_time,
+                end_time: booking.end_time,
+                incident_status: incident.status,
+            };
+
+            if (decision === BOOKING_INCIDENT_DECISIONS.REASSIGN_AND_CONTINUE) {
+                if (![BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.IN_PROGRESS].includes(booking.status)) {
+                    throw new AppError(
+                        'Booking cannot continue with reassignment in current status',
+                        400,
+                        'BOOKING_INCIDENT_REASSIGN_NOT_ALLOWED'
+                    );
+                }
+
+                await assignCareStaffToBookingIfNeeded(booking);
+                await assignWashBayToBookingIfNeeded(booking, session);
+
+                if (booking.status === BOOKING_STATUS.IN_PROGRESS) {
+                    resumeIncidentPausedItem(booking, resolvedAt);
+                }
+            } else if (
+                [
+                    BOOKING_INCIDENT_DECISIONS.RESCHEDULE_NEAREST,
+                    BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM,
+                ].includes(decision)
+            ) {
+                const options = await getIncidentResolutionOptionsInternal({
+                    booking,
+                    incident,
+                    days: 7,
+                });
+                const nearestSlot = options.suggested_slots[0] || null;
+                const requestedStartTime = decision === BOOKING_INCIDENT_DECISIONS.RESCHEDULE_NEAREST
+                    ? nearestSlot?.start_time
+                    : parseDateTime(payload.new_start_time, 'new_start_time');
+
+                if (!requestedStartTime) {
+                    throw new AppError(
+                        'No incident reschedule slot is currently available',
+                        409,
+                        'BOOKING_INCIDENT_NO_RESCHEDULE_SLOT'
+                    );
+                }
+
+                const selectedSlot = options.suggested_slots.find((slot) => (
+                    new Date(slot.start_time).getTime() === requestedStartTime.getTime()
+                ));
+
+                if (!selectedSlot) {
+                    throw new AppError(
+                        'Selected incident reschedule slot is no longer available',
+                        409,
+                        'BOOKING_INCIDENT_SLOT_NO_LONGER_AVAILABLE'
+                    );
+                }
+
+                await releaseWashBayForBooking(booking, session);
+                booking.wash_bay_id = null;
+                releasedBookingItemKeys = releaseActiveCareStaffAssignmentsForBooking(booking, resolvedAt);
+                applyIncidentRescheduledTimeline({
+                    booking,
+                    startTime: requestedStartTime,
+                    continuationPolicy: payload.continuation_policy
+                        || BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING,
+                    user,
+                    incident,
+                    resolvedAt,
+                });
+                shouldOfferWaitlist = true;
+            } else if (decision === BOOKING_INCIDENT_DECISIONS.CANCEL_BY_GARAGE) {
+                if (booking.payment_status !== BOOKING_PAYMENT_STATUS.UNPAID) {
+                    throw new AppError(
+                        'Garage incident cancellation requires an unpaid booking',
+                        409,
+                        'BOOKING_INCIDENT_PAYMENT_REFUND_REQUIRED'
+                    );
+                }
+
+                await releaseWashBayForBooking(booking, session);
+                releasedBookingItemKeys = releaseActiveCareStaffAssignmentsForBooking(booking, resolvedAt);
+                booking.status = BOOKING_STATUS.CANCELED;
+                booking.canceled_at = resolvedAt;
+                booking.canceled_by_id = user._id;
+                booking.cancel_reason = normalizeText(payload.customer_note)
+                    || `Garage incident: ${incident.incident_type}`;
+                booking.cancellation_source = BOOKING_CANCELLATION_SOURCES.GARAGE_INCIDENT;
+                booking.cancellation_incident_id = incident._id;
+
+                if (booking.customer_voucher_id) {
+                    await customerVoucherService.releaseVoucherForBooking({
+                        bookingId: booking._id,
+                        session,
+                    });
+                }
+                await loyaltyService.refundRedeemedPointsForBooking({
+                    booking,
+                    actorId: user._id,
+                    session,
+                });
+
+                if (booking.is_walk_in && booking.promotion_id) {
+                    await promotionUsageService.releaseReservedPromotionForBooking({
+                        bookingId: booking._id,
+                        session,
+                    });
+                }
+
+                shouldOfferWaitlist = true;
+            } else {
+                throw new AppError(
+                    'Booking incident decision is invalid',
+                    400,
+                    'BOOKING_INCIDENT_DECISION_INVALID'
+                );
+            }
+
+            booking.operation_status = BOOKING_OPERATION_STATUS.NORMAL;
+            booking.active_incident_id = null;
+            incident.status = BOOKING_INCIDENT_STATUS.RESOLVED;
+            incident.decision = decision;
+            incident.decision_source = decisionSource;
+            incident.contact_channel = decisionSource === BOOKING_INCIDENT_DECISION_SOURCES.CUSTOMER
+                ? BOOKING_INCIDENT_CONTACT_CHANNELS.APP
+                : payload.contact_channel;
+            incident.customer_note = normalizeText(payload.customer_note);
+            incident.new_start_time = [
+                BOOKING_INCIDENT_DECISIONS.RESCHEDULE_NEAREST,
+                BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM,
+            ].includes(decision)
+                ? booking.start_time
+                : null;
+            incident.continuation_policy = payload.continuation_policy || null;
+            incident.customer_confirmed_at = resolvedAt;
+            incident.decision_recorded_by_id = user._id;
+            incident.resolved_at = resolvedAt;
+            incident.resolved_by_id = user._id;
+
+            await booking.save({ session });
+            await incident.save({ session });
+
+            const outcomeAction = decision === BOOKING_INCIDENT_DECISIONS.CANCEL_BY_GARAGE
+                ? AUDIT_ACTIONS.BOOKING_CANCELED_BY_GARAGE
+                : [
+                    BOOKING_INCIDENT_DECISIONS.RESCHEDULE_NEAREST,
+                    BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM,
+                ].includes(decision)
+                    ? AUDIT_ACTIONS.BOOKING_RESCHEDULED_BY_GARAGE
+                    : AUDIT_ACTIONS.BOOKING_INCIDENT_RESOLVED;
+
+            await auditLogService.recordAuditEvent({
+                actorId: user._id,
+                action: outcomeAction,
+                resourceType: AUDIT_RESOURCE_TYPES.BOOKING_INCIDENT,
+                resourceId: incident._id,
+                before,
+                after: {
+                    booking_status: booking.status,
+                    operation_status: booking.operation_status,
+                    start_time: booking.start_time,
+                    end_time: booking.end_time,
+                    incident_status: incident.status,
+                    decision,
+                    decision_source: decisionSource,
+                },
+                ip: auditContext.ip,
+                userAgent: auditContext.userAgent,
+                session,
+            });
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    for (const bookingItemKey of releasedBookingItemKeys) {
+        await bookingServiceStepService.markResourceReleasedForBookingItem(
+            booking._id,
+            bookingItemKey,
+            incident.resolved_at
+        );
+    }
+
+    if (incident.decision === BOOKING_INCIDENT_DECISIONS.CANCEL_BY_GARAGE) {
+        await emitBookingCanceledNotification({
+            booking,
+            incidentId: incident._id,
+        });
+    }
+
+    await sendBookingIncidentResolvedNotifications({ booking, incident });
+
+    const [populatedBooking, populatedIncident] = await Promise.all([
+        getBookingDocumentById(booking._id),
+        populateBookingIncidentQuery(BookingIncident.findById(incident._id)),
+    ]);
+
+    return {
+        data: {
+            booking: BookingMapper.toBookingDto(populatedBooking),
+            incident: BookingIncidentMapper.toBookingIncidentDto(populatedIncident),
+        },
+        released_booking_snapshot: shouldOfferWaitlist
+            ? incident.reported_schedule_snapshot
+            : null,
+    };
+};
+
+const recordBookingIncidentCustomerDecision = async (
+    user,
+    bookingId,
+    incidentId,
+    payload,
+    auditContext = {}
+) => resolveBookingIncidentDecision(
+    user,
+    bookingId,
+    incidentId,
+    payload,
+    BOOKING_INCIDENT_DECISION_SOURCES.STAFF_RECORDED,
+    auditContext
+);
+
+const resolveMyBookingIncident = async (
+    user,
+    bookingId,
+    incidentId,
+    payload,
+    auditContext = {}
+) => resolveBookingIncidentDecision(
+    user,
+    bookingId,
+    incidentId,
+    payload,
+    BOOKING_INCIDENT_DECISION_SOURCES.CUSTOMER,
+    auditContext
+);
+
+const createIncidentCompensationVoucher = async (
+    user,
+    bookingId,
+    incidentId,
+    payload,
+    auditContext = {}
+) => {
+    const session = await mongoose.startSession();
+    let voucher;
+
+    try {
+        await session.withTransaction(async () => {
+            const booking = await getRawBookingDocumentById(bookingId, session);
+
+            await assertStaffCanAccessBooking(user, booking);
+
+            if (!booking.customer_id || booking.is_walk_in) {
+                throw new AppError(
+                    'Compensation voucher requires a registered customer booking',
+                    400,
+                    'BOOKING_INCIDENT_VOUCHER_CUSTOMER_REQUIRED'
+                );
+            }
+
+            const incident = await getBookingIncidentDocument(booking._id, incidentId, session);
+            const expiresAt = parseDateTime(payload.expires_at, 'expires_at');
+
+            if (expiresAt <= new Date()) {
+                throw new AppError(
+                    'Voucher expiration time must be in the future',
+                    400,
+                    'CUSTOMER_VOUCHER_EXPIRATION_INVALID'
+                );
+            }
+
+            voucher = await customerVoucherService.issueCompensationVoucher({
+                user,
+                customerId: booking.customer_id,
+                garageId: booking.garage_id,
+                bookingId: booking._id,
+                incidentId: incident._id,
+                voucherType: payload.voucher_type,
+                value: payload.value,
+                maxDiscountAmount: payload.max_discount_amount ?? null,
+                minOrderAmount: payload.min_order_amount || 0,
+                servicePackageId: payload.service_package_id || null,
+                expiresAt,
+                note: normalizeText(payload.note),
+                session,
+            });
+            incident.compensation_voucher_ids.push(voucher._id);
+            await incident.save({ session });
+
+            await auditLogService.recordAuditEvent({
+                actorId: user._id,
+                action: AUDIT_ACTIONS.COMPENSATION_VOUCHER_ISSUED,
+                resourceType: AUDIT_RESOURCE_TYPES.CUSTOMER_VOUCHER,
+                resourceId: voucher._id,
+                after: {
+                    booking_id: booking._id,
+                    incident_id: incident._id,
+                    customer_id: booking.customer_id,
+                    status: voucher.status,
+                    voucher_type: voucher.voucher_type,
+                    value: voucher.value,
+                },
+                ip: auditContext.ip,
+                userAgent: auditContext.userAgent,
+                session,
+            });
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    if (voucher.status === 'ISSUED') {
+        await notificationService.createInAppNotification({
+            userId: voucher.customer_id,
+            type: NOTIFICATION_TYPES.COMPENSATION_VOUCHER_ISSUED,
+            title: 'Compensation voucher issued',
+            message: `The garage issued compensation voucher ${voucher.code}.`,
+            relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+            relatedId: bookingId,
+            metadata: {
+                voucher_id: voucher._id.toString(),
+                incident_id: incidentId,
+                code: voucher.code,
+                expires_at: voucher.expires_at,
+            },
+        });
+    }
+
+    return CustomerVoucherMapper.toCustomerVoucherDto(voucher);
+};
+
 
 const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED], 'BOOKING_CHECK_IN_NOT_ALLOWED');
 
     const garage = await getActiveGarage(booking.garage_id);
@@ -3376,6 +4534,7 @@ const getLateArrivalOptions = async (user, bookingId, { days = 1 } = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(
         booking,
         [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED],
@@ -3581,6 +4740,7 @@ const resolveLateArrival = async (
             const booking = await getRawBookingDocumentById(bookingId, session);
 
             await assertStaffCanAccessBooking(user, booking);
+            assertBookingHasNoActiveIncident(booking);
             assertBookingStatusIn(
                 booking,
                 [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED],
@@ -3733,6 +4893,7 @@ const assignWashBay = async (user, bookingId, { wash_bay_id } = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.IN_PROGRESS], 'BOOKING_ASSIGN_WASH_BAY_NOT_ALLOWED');
 
     await assignWashBayToBooking(booking, wash_bay_id || null);
@@ -3756,6 +4917,7 @@ const startService = async (
         : null;
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.CHECKED_IN], 'BOOKING_START_SERVICE_NOT_ALLOWED');
 
     try {
@@ -3904,6 +5066,7 @@ const markBookingServiceStepDone = async (user, bookingId, stepId, { note } = {}
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_STEP_DONE_NOT_ALLOWED');
 
     const currentBookingItem = getCurrentBookingItem(booking);
@@ -3962,10 +5125,14 @@ const buildServiceWorkflowDto = ({ booking, serviceSteps = [], serverTime = new 
             item.status === BOOKING_ITEM_STATUS.DONE
             || item.status === BOOKING_ITEM_STATUS.SKIPPED
         ));
+    const blockedByIncident = booking.operation_status === BOOKING_OPERATION_STATUS.AWAITING_CUSTOMER_DECISION
+        || Boolean(booking.active_incident_id);
 
     let workflowPhase = 'NOT_STARTED';
 
-    if (booking.status === BOOKING_STATUS.COMPLETED) {
+    if (blockedByIncident) {
+        workflowPhase = 'INCIDENT_HOLD';
+    } else if (booking.status === BOOKING_STATUS.COMPLETED) {
         workflowPhase = 'COMPLETED';
     } else if (currentBookingItem) {
         workflowPhase = 'SERVICE';
@@ -3979,14 +5146,17 @@ const buildServiceWorkflowDto = ({ booking, serviceSteps = [], serverTime = new 
         server_time: serverTime,
         booking_id: booking._id?.toString?.() || booking._id,
         booking_status: booking.status,
+        operation_status: booking.operation_status || BOOKING_OPERATION_STATUS.NORMAL,
+        blocked_by_incident: blockedByIncident,
+        active_incident_id: toObjectIdString(booking.active_incident_id),
         workflow_phase: workflowPhase,
         current_item: currentBookingItemDto,
         next_item: nextBookingItemDto,
         remaining_seconds: getRemainingServiceItemSeconds(currentBookingItem, serverTime),
         all_service_items_done: allServiceItemsDone,
-        can_pause: currentBookingItem?.status === BOOKING_ITEM_STATUS.IN_PROGRESS,
-        can_resume: currentBookingItem?.status === BOOKING_ITEM_STATUS.PAUSED,
-        can_complete_early: [
+        can_pause: !blockedByIncident && currentBookingItem?.status === BOOKING_ITEM_STATUS.IN_PROGRESS,
+        can_resume: !blockedByIncident && currentBookingItem?.status === BOOKING_ITEM_STATUS.PAUSED,
+        can_complete_early: !blockedByIncident && [
             BOOKING_ITEM_STATUS.IN_PROGRESS,
             BOOKING_ITEM_STATUS.PAUSED,
         ].includes(currentBookingItem?.status),
@@ -4045,6 +5215,7 @@ const completeServiceItemEarly = async (
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_ITEM_COMPLETE_NOT_ALLOWED');
 
     const bookingItem = assertCurrentBookingItem(
@@ -4077,6 +5248,7 @@ const confirmServiceItemComplete = async (
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_ITEM_CONFIRM_NOT_ALLOWED');
 
     const bookingItem = assertCurrentBookingItem(
@@ -4109,6 +5281,7 @@ const pauseServiceItem = async (
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_ITEM_PAUSE_NOT_ALLOWED');
 
     const bookingItem = assertCurrentBookingItem(
@@ -4169,6 +5342,7 @@ const resumeServiceItem = async (
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_ITEM_RESUME_NOT_ALLOWED');
 
     const bookingItem = assertCurrentBookingItem(
@@ -4415,6 +5589,7 @@ const markPaid = async (user, bookingId, { note } = {}) => {
             }
 
             await assertStaffCanAccessBooking(user, booking);
+            assertBookingHasNoActiveIncident(booking);
             assertBookingStatusIn(booking, [BOOKING_STATUS.COMPLETED], 'BOOKING_MARK_PAID_NOT_ALLOWED');
 
             if (
@@ -4461,6 +5636,7 @@ const completeService = async (user, bookingId, { note } = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_COMPLETE_SERVICE_NOT_ALLOWED');
 
     const unfinishedBookingItem = (booking.booking_items || []).find((item) => (
@@ -4580,6 +5756,13 @@ module.exports = {
     cancelMyBooking,
     cancelBooking,
     markNoShow,
+    reportBookingIncident,
+    getAdminActiveBookingIncident,
+    getMyActiveBookingIncident,
+    getAdminBookingIncidentOptions,
+    recordBookingIncidentCustomerDecision,
+    resolveMyBookingIncident,
+    createIncidentCompensationVoucher,
     checkInBooking,
     getLateArrivalOptions,
     resolveLateArrival,
