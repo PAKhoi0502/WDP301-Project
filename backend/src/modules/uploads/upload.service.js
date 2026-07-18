@@ -3,7 +3,7 @@ const UploadMapper = require('./upload.mapper');
 const { configureCloudinary } = require('../../config/cloudinary');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
-const { UPLOAD_PURPOSES } = require('../../shared/constants/upload.constant');
+const { UPLOAD_PURPOSES, UPLOAD_RELATED_TYPES } = require('../../shared/constants/upload.constant');
 const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
 const auditLogService = require('../audit-logs/auditLog.service');
 
@@ -268,6 +268,19 @@ const deleteUpload = async (user, uploadId, auditContext = {}) => {
     const upload = await getUploadDocumentById(uploadId);
 
     assertUserCanDeleteUpload(user, upload);
+
+    if (
+        upload.purpose === UPLOAD_PURPOSES.CUSTOMER_CASE_EVIDENCE
+        && upload.related_type === UPLOAD_RELATED_TYPES.CUSTOMER_CASE
+        && upload.related_id
+    ) {
+        throw new AppError(
+            'Evidence linked to a customer case cannot be deleted',
+            409,
+            'CUSTOMER_CASE_EVIDENCE_IMMUTABLE'
+        );
+    }
+
     const before = UploadMapper.toUploadDto(upload);
 
     try {

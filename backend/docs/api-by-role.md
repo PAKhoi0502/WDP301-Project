@@ -141,7 +141,20 @@ Neu source route cho ca STAFF va ADMIN cung truy cap, tai lieu nay lap lai endpo
 
 | Chuc nang | Role | APIs |
 | --- | --- | --- |
-| My notifications | CUSTOMER | `GET /api/v1/notifications`, `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/mark-all-read`, `PATCH /api/v1/notifications/:id/read`, `DELETE /api/v1/notifications`, `DELETE /api/v1/notifications/:id` |
+| My notifications | CUSTOMER, STAFF, ADMIN | `GET /api/v1/notifications`, `GET /api/v1/notifications/unread-count`, `PATCH /api/v1/notifications/mark-all-read`, `PATCH /api/v1/notifications/:id/read`, `DELETE /api/v1/notifications`, `DELETE /api/v1/notifications/:id` |
+
+### Vehicle handover and customer cases
+
+| Chuc nang | Role | APIs |
+| --- | --- | --- |
+| Review handover and report issue | CUSTOMER | `GET /api/v1/bookings/:id/handover`, `POST /api/v1/bookings/:id/handover/accept`, `POST /api/v1/bookings/:id/handover/report` |
+| My customer cases | CUSTOMER | `GET /api/v1/customer-cases`, `GET /api/v1/customer-cases/:id`, `POST /api/v1/customer-cases/:id/evidence`, `POST /api/v1/customer-cases/:id/messages`, `PATCH /api/v1/customer-cases/:id/resolution-response`, `POST /api/v1/customer-cases/:id/reopen` |
+| Handover operations | CUSTOMER_SERVICE_STAFF, ADMIN | `GET /api/v1/staff/bookings/:id/handover`, `PATCH /api/v1/staff/bookings/:id/handover/ready`, `PATCH /api/v1/staff/bookings/:id/handover/release` |
+| Customer case handling | CUSTOMER_SERVICE_STAFF, ADMIN | `GET /api/v1/staff/customer-cases`, `GET /api/v1/staff/customer-cases/:id`, `PATCH /api/v1/staff/customer-cases/:id/assign`, `PATCH /api/v1/staff/customer-cases/:id/acknowledge`, `POST /api/v1/staff/customer-cases/:id/evidence`, `POST /api/v1/staff/customer-cases/:id/messages` |
+| Walk-in case + SLA | CUSTOMER_SERVICE_STAFF, ADMIN | `GET /api/v1/staff/customer-cases/sla-dashboard`, `POST /api/v1/staff/customer-cases/walk-in/otp/request`, `POST /api/v1/staff/customer-cases/walk-in/otp/verify`, `POST /api/v1/staff/customer-cases/walk-in`, `PATCH /api/v1/staff/customer-cases/:id/walk-in-resolution-response` |
+| Technical case assessment | VEHICLE_INSPECTION_STAFF (assigned), ADMIN | `GET /api/v1/staff/customer-cases/:id/technical-assessment`, `PATCH /api/v1/staff/customer-cases/:id/technical-assessment/start`, `POST /api/v1/staff/customer-cases/:id/technical-assessment/submit` |
+| Assign technical assessment | CUSTOMER_SERVICE_STAFF, ADMIN | `PATCH /api/v1/staff/customer-cases/:id/technical-assessment/assign` |
+| Resolution, refund, rework and conclusion | ADMIN | `POST /api/v1/admin/customer-cases/:id/resolutions`, `POST /api/v1/admin/customer-cases/:id/resolutions/:resolutionId/apply`, `PATCH /api/v1/admin/customer-cases/:id/refunds/:refundId`, `POST /api/v1/admin/customer-cases/:id/reopen`, `PATCH /api/v1/admin/customer-cases/:id/conclude`, `PATCH /api/v1/admin/customer-cases/:id/close` |
 
 ### Wash histories
 

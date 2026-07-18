@@ -239,6 +239,8 @@ const issueCompensationVoucher = async ({
     garageId,
     bookingId,
     incidentId,
+    customerCaseId = null,
+    customerCaseResolutionId = null,
     voucherType,
     value,
     maxDiscountAmount = null,
@@ -265,6 +267,14 @@ const issueCompensationVoucher = async ({
             : await servicePackageQuery
         : null;
 
+    if (customerCaseResolutionId) {
+        const existingQuery = CustomerVoucher.findOne({
+            source_customer_case_resolution_id: customerCaseResolutionId,
+        });
+        const existing = session ? await existingQuery.session(session) : await existingQuery;
+        if (existing) return existing;
+    }
+
     if (
         voucherType === CUSTOMER_VOUCHER_TYPES.FREE_SERVICE
         && (!servicePackage || !servicePackage.is_active)
@@ -287,6 +297,8 @@ const issueCompensationVoucher = async ({
         garage_id: garageId,
         source_booking_id: bookingId,
         source_incident_id: incidentId,
+        source_customer_case_id: customerCaseId,
+        source_customer_case_resolution_id: customerCaseResolutionId,
         voucher_type: voucherType,
         value,
         max_discount_amount: maxDiscountAmount,
@@ -462,6 +474,7 @@ const approveVoucher = async (adminId, voucherId) => {
             status: voucher.status,
             customer_id: voucher.customer_id,
             source_incident_id: voucher.source_incident_id,
+            source_customer_case_id: voucher.source_customer_case_id,
         },
     });
     await notificationService.createInAppNotification({
@@ -473,7 +486,8 @@ const approveVoucher = async (adminId, voucherId) => {
         relatedId: voucher.source_booking_id,
         metadata: {
             voucher_id: voucher._id.toString(),
-            incident_id: voucher.source_incident_id.toString(),
+            incident_id: voucher.source_incident_id?.toString() || null,
+            customer_case_id: voucher.source_customer_case_id?.toString() || null,
             code: voucher.code,
             expires_at: voucher.expires_at,
         },

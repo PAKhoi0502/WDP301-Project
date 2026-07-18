@@ -280,6 +280,33 @@ unchanged.
 | `/admin/customer-vouchers` read operation | `voucher.read_garage` |
 | `/admin/wash-histories` | `wash_history.read_garage` |
 
+### Vehicle handover and customer case workspace
+
+Customer service staff now receive these capabilities:
+
+```text
+booking_handover.manage_garage
+customer_case.read_garage
+customer_case.assign_garage
+customer_case.acknowledge
+customer_case.communicate_assigned
+customer_case.create_walk_in
+customer_case.sla.read_garage
+```
+
+Canonical routes are `/staff/bookings/:id/handover...` and
+`/staff/customer-cases...`. The equivalent `/admin` prefixes remain available
+for compatibility. Case reads are garage-scoped; evidence and messages also
+require the case to be assigned to the acting customer service staff member.
+
+See `docs/customer-case-handover-workflow.md` for the full workflow and API
+payloads.
+
+Inspection staff additionally receive
+`customer_case.technical_assess_assigned`. This capability does not grant a
+garage-wide case list: assessment detail/start/submit still verify that the
+case is assigned to the current inspector.
+
 ## 6. New response and persistence fields
 
 Booking responses may now contain:

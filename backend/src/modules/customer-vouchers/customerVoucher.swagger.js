@@ -11,7 +11,9 @@ const customerVoucherSchema = {
         customer_id: { type: 'string' },
         garage_id: { type: 'string' },
         source_booking_id: { type: 'string' },
-        source_incident_id: { type: 'string' },
+        source_incident_id: { type: 'string', nullable: true },
+        source_customer_case_id: { type: 'string', nullable: true },
+        source_customer_case_resolution_id: { type: 'string', nullable: true },
         voucher_type: {
             type: 'string',
             enum: ['FIXED_AMOUNT', 'PERCENTAGE', 'FREE_SERVICE'],

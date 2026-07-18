@@ -228,6 +228,18 @@ const assertTargetPhoneAllowed = async ({ phone, purpose, userId }) => {
         return;
     }
 
+    if (purpose === PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE) {
+        if (![USER_ROLES.STAFF, USER_ROLES.ADMIN].includes(user.role)) {
+            throw new AppError(
+                'Only garage staff can verify a walk-in reporter',
+                403,
+                'WALK_IN_CASE_VERIFICATION_NOT_ALLOWED'
+            );
+        }
+
+        return;
+    }
+
     if (normalizePhone(user.phone) === phone) {
         throw new AppError(
             'New phone must be different from current phone',
@@ -263,6 +275,7 @@ const requestVerification = async ({
     const effectiveUserId = [
         PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
         PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION,
+        PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE,
     ].includes(purpose) ? userId : null;
 
     await assertTargetPhoneAllowed({
@@ -375,6 +388,7 @@ const verifyOtp = async ({
         [
             PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
             PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION,
+            PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE,
         ].includes(challenge.purpose)
         && (!userId || challenge.user_id?.toString() !== userId.toString())
     ) {
@@ -530,6 +544,7 @@ const getVerifiedChallenge = async ({
         [
             PHONE_VERIFICATION_PURPOSES.CHANGE_PHONE,
             PHONE_VERIFICATION_PURPOSES.STAFF_ACTIVATION,
+            PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE,
         ].includes(purpose)
         && (!userId || challenge.user_id?.toString() !== userId.toString())
     ) {

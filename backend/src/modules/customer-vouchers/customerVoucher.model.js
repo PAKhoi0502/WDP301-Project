@@ -40,7 +40,19 @@ const customerVoucherSchema = new mongoose.Schema(
         source_incident_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'BookingIncident',
-            required: [true, 'Voucher source incident is required'],
+            default: null,
+        },
+
+        source_customer_case_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'CustomerCase',
+            default: null,
+        },
+
+        source_customer_case_resolution_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'CustomerCaseResolution',
+            default: null,
         },
 
         voucher_type: {
@@ -148,9 +160,18 @@ customerVoucherSchema.index({ code: 1 }, { unique: true });
 customerVoucherSchema.index({ customer_id: 1, status: 1, expires_at: 1 });
 customerVoucherSchema.index({ garage_id: 1, status: 1, created_at: -1 });
 customerVoucherSchema.index({ source_incident_id: 1, created_at: -1 });
+customerVoucherSchema.index({ source_customer_case_id: 1, created_at: -1 });
+customerVoucherSchema.index(
+    { source_customer_case_resolution_id: 1 },
+    { unique: true, partialFilterExpression: { source_customer_case_resolution_id: { $type: 'objectId' } } }
+);
 customerVoucherSchema.index({ reserved_booking_id: 1 });
 
 customerVoucherSchema.pre('validate', function (next) {
+    if (Boolean(this.source_incident_id) === Boolean(this.source_customer_case_id)) {
+        this.invalidate('source_incident_id', 'Voucher must reference exactly one compensation source');
+    }
+
     if (this.voucher_type === CUSTOMER_VOUCHER_TYPES.PERCENTAGE && this.value > 100) {
         this.invalidate('value', 'Percentage voucher value must not exceed 100');
     }

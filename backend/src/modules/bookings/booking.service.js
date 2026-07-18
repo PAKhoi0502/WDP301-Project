@@ -5010,6 +5010,87 @@ const assignWashBay = async (user, bookingId, { wash_bay_id } = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
+const createReworkBooking = async ({
+    user,
+    originalBooking,
+    customerCaseId,
+    resolutionId,
+    servicePackageId,
+    startTime: rawStartTime,
+    note = null,
+}) => {
+    const existingRework = await Booking.findOne({ customer_case_resolution_id: resolutionId });
+    if (existingRework) return existingRework;
+
+    const now = new Date();
+    const [garage, servicePackage] = await Promise.all([
+        getActiveGarage(originalBooking.garage_id),
+        getActiveServicePackage(servicePackageId),
+    ]);
+    const startTime = parseDateTime(rawStartTime, 'rework_start_time');
+    assertServicePackageMatchesVehicleType(servicePackage, originalBooking.vehicle_type);
+    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+        servicePackage,
+        addOnServiceIds: [],
+        vehicleType: originalBooking.vehicle_type,
+    });
+    const bookingPlan = buildBookingPlan({ startTime, servicePackage, serviceItems, addOnServices, garage });
+    const basePayload = buildBookingBasePayload({
+        garage,
+        servicePackage,
+        bookingPlan,
+        startTime,
+        vehicleType: originalBooking.vehicle_type,
+        note: normalizeText(note) || `Rework for customer case ${customerCaseId}`,
+    });
+    assertBookingStartTimeInFuture(startTime, now);
+    assertBookingStartTimeAligned(garage, startTime);
+    assertBookingInsideGarageBusinessHours(garage, basePayload.start_time, getLatestPlannedEnd(basePayload));
+    await assertVehicleNoOverlap({
+        ...(originalBooking.vehicle_id
+            ? { vehicleId: originalBooking.vehicle_id }
+            : {
+                normalizedLicensePlate: originalBooking.normalized_license_plate,
+                vehicleType: originalBooking.vehicle_type,
+            }),
+        startTime: basePayload.start_time,
+        endTime: basePayload.end_time,
+    });
+    await assertGarageCapacityAvailable({
+        garageId: garage._id,
+        vehicleType: originalBooking.vehicle_type,
+        bookingItems: basePayload.booking_items,
+    });
+    const payload = {
+        ...basePayload,
+        customer_id: originalBooking.customer_id,
+        vehicle_id: originalBooking.vehicle_id,
+        is_walk_in: originalBooking.is_walk_in,
+        guest_name: originalBooking.guest_name,
+        guest_phone: originalBooking.guest_phone,
+        normalized_guest_phone: originalBooking.normalized_guest_phone,
+        guest_email: originalBooking.guest_email,
+        license_plate: originalBooking.license_plate,
+        normalized_license_plate: originalBooking.normalized_license_plate,
+        created_by_staff_id: user._id,
+        is_rework: true,
+        original_booking_id: originalBooking._id,
+        customer_case_id: customerCaseId,
+        customer_case_resolution_id: resolutionId,
+        original_price: 0,
+        promotion_discount_amount: 0,
+        voucher_discount_amount: 0,
+        points_discount_amount: 0,
+        discount_amount: 0,
+        final_price: 0,
+        payment_status: BOOKING_PAYMENT_STATUS.PAID,
+        paid_at: now,
+        reward_processed: true,
+        reward_processed_at: now,
+    };
+    return createBookingDocument(payload);
+};
+
 const getEligibleStaffProfileForAssignment = async (
     staffProfileId,
     garageId,
@@ -6116,6 +6197,7 @@ module.exports = {
     getBookingById,
     createCustomerBooking,
     createWalkInBooking,
+    createReworkBooking,
     cancelMyBooking,
     cancelBooking,
     markNoShow,

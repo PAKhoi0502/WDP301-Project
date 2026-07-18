@@ -51,4 +51,38 @@ describe('staff authorization constants', () => {
 
         expect(getStaffCapabilities(STAFF_TYPES.CUSTOMER_SERVICE_STAFF).length).toBeGreaterThan(0);
     });
+
+    it('limits handover and customer case management to customer service staff', () => {
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.CUSTOMER_SERVICE_STAFF,
+            STAFF_CAPABILITIES.CUSTOMER_CASE_ACKNOWLEDGE
+        )).toBe(true);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.WASH_OPERATOR,
+            STAFF_CAPABILITIES.CUSTOMER_CASE_ACKNOWLEDGE
+        )).toBe(false);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.VEHICLE_INSPECTION_STAFF,
+            STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE
+        )).toBe(false);
+    });
+
+    it('separates walk-in/SLA handling from assigned technical assessment', () => {
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.CUSTOMER_SERVICE_STAFF,
+            STAFF_CAPABILITIES.CUSTOMER_CASE_CREATE_WALK_IN
+        )).toBe(true);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.VEHICLE_INSPECTION_STAFF,
+            STAFF_CAPABILITIES.CUSTOMER_CASE_CREATE_WALK_IN
+        )).toBe(false);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.VEHICLE_INSPECTION_STAFF,
+            STAFF_CAPABILITIES.CUSTOMER_CASE_TECHNICAL_ASSESS_ASSIGNED
+        )).toBe(true);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.VEHICLE_INSPECTION_STAFF,
+            STAFF_CAPABILITIES.CUSTOMER_CASE_READ_GARAGE
+        )).toBe(false);
+    });
 });

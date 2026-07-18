@@ -3,6 +3,8 @@ const express = require('express');
 const bookingController = require('./booking.controller');
 const bookingServiceStepController = require('../booking-service-steps/bookingServiceStep.controller');
 const vehicleInspectionController = require('../vehicle-inspections/vehicleInspection.controller');
+const bookingHandoverController = require('../booking-handovers/bookingHandover.controller');
+const customerCaseController = require('../customer-cases/customerCase.controller');
 const {
     idParamSchema,
     getAvailableSlotsSchema,
@@ -36,6 +38,11 @@ const {
     createVehicleInspectionSchema,
     getVehicleInspectionsSchema,
 } = require('../vehicle-inspections/vehicleInspection.validator');
+const {
+    bookingParamSchema: handoverBookingParamSchema,
+    handoverOperationSchema,
+    createCustomerCaseSchema,
+} = require('../customer-cases/customerCase.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
 const { authenticate, optionalAuthenticate, authorize } = require('../../shared/middlewares/auth.middleware');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
@@ -115,6 +122,24 @@ staffTaskRouter.get(
     requireStaffCapabilities(STAFF_CAPABILITIES.SERVICE_TASK_READ_ASSIGNED),
     validate(getAdminBookingsSchema),
     bookingController.getAllBookings
+);
+
+customerRouter.get(
+    '/:id/handover',
+    validate(handoverBookingParamSchema),
+    bookingHandoverController.getMyHandover
+);
+
+customerRouter.post(
+    '/:id/handover/accept',
+    validate(handoverOperationSchema),
+    bookingHandoverController.acceptMyHandover
+);
+
+customerRouter.post(
+    '/:id/handover/report',
+    validate(createCustomerCaseSchema),
+    customerCaseController.createFromHandover
 );
 
 staffTaskRouter.get(
@@ -413,6 +438,27 @@ adminRouter.patch(
     requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_SERVICE_COMPLETE),
     validate(bookingOperationSchema),
     bookingController.completeService
+);
+
+adminRouter.patch(
+    '/:id/handover/ready',
+    requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE),
+    validate(handoverOperationSchema),
+    bookingHandoverController.markReady
+);
+
+adminRouter.get(
+    '/:id/handover',
+    requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE),
+    validate(handoverBookingParamSchema),
+    bookingHandoverController.getStaffHandover
+);
+
+adminRouter.patch(
+    '/:id/handover/release',
+    requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE),
+    validate(handoverOperationSchema),
+    bookingHandoverController.release
 );
 
 adminRouter.patch(

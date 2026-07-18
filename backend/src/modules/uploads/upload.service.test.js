@@ -174,6 +174,22 @@ describe('upload service', () => {
         expect(result.id).toBe(upload._id);
     });
 
+    it('prevents deleting evidence after it is linked to a customer case', async () => {
+        const upload = createUploadDocument({
+            purpose: 'CUSTOMER_CASE_EVIDENCE',
+            related_type: 'CUSTOMER_CASE',
+            related_id: '507f1f77bcf86cd799439099',
+        });
+        Upload.findById.mockResolvedValue(upload);
+
+        await expect(uploadService.deleteUpload(user, upload._id)).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'CUSTOMER_CASE_EVIDENCE_IMMUTABLE',
+        });
+
+        expect(Upload.deleteOne).not.toHaveBeenCalled();
+    });
+
     it('allows admin to list uploads with pagination', async () => {
         const uploads = [
             createUploadDocument({
