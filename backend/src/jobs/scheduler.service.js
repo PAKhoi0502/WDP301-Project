@@ -2,6 +2,7 @@ const bookingWaitlistService = require('../modules/booking-waitlists/bookingWait
 const notificationService = require('../modules/notifications/notification.service');
 const loyaltyService = require('../modules/loyalty/loyalty.service');
 const bookingService = require('../modules/bookings/booking.service');
+const paymentService = require('../modules/payments/payment.service');
 
 const JOB_NAMES = Object.freeze({
     WAITLIST_EXPIRE: 'waitlist-expire',
@@ -9,6 +10,7 @@ const JOB_NAMES = Object.freeze({
     POINT_EXPIRATION: 'point-expiration',
     TIER_INACTIVITY_DOWNGRADE: 'tier-inactivity-downgrade',
     SERVICE_ITEM_TIMER: 'service-item-timer',
+    PAYMENT_EXPIRE: 'payment-expire',
 });
 
 const DEFAULT_INTERVALS = Object.freeze({
@@ -17,6 +19,7 @@ const DEFAULT_INTERVALS = Object.freeze({
     POINT_EXPIRATION_JOB_INTERVAL_MS: 24 * 60 * 60 * 1000,
     TIER_INACTIVITY_DOWNGRADE_JOB_INTERVAL_MS: 24 * 60 * 60 * 1000,
     SERVICE_ITEM_TIMER_JOB_INTERVAL_MS: 1000,
+    PAYMENT_EXPIRE_JOB_INTERVAL_MS: 60 * 1000,
 });
 
 let activeJobs = [];
@@ -90,6 +93,17 @@ const buildJobDefinitions = () => [
         ),
         handler: () => loyaltyService.downgradeInactiveCustomerTiers({
             limit: getPositiveIntegerEnv('TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE', 50, 200),
+        }),
+    },
+    {
+        name: JOB_NAMES.PAYMENT_EXPIRE,
+        intervalMs: getPositiveIntegerEnv(
+            'PAYMENT_EXPIRE_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.PAYMENT_EXPIRE_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => paymentService.expireDuePayosPayments({
+            limit: getPositiveIntegerEnv('PAYMENT_EXPIRE_BATCH_SIZE', 50, 200),
         }),
     },
     {

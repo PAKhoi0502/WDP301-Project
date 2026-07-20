@@ -46,6 +46,7 @@ router.use('/notifications', notificationRoutes);
 router.use('/customer-vouchers', customerVoucherRoutes.customerRouter);
 router.use('/wash-histories', washHistoryRoutes.customerRouter);
 router.use('/payments', paymentRoutes.publicRouter);
+router.use('/payments', paymentRoutes.customerRouter);
 router.use('/uploads', uploadRoutes.publicRouter);
 router.use('/surveys', surveyRoutes.customerRouter);
 router.use('/admin/customers', customerRoutes.adminRouter);

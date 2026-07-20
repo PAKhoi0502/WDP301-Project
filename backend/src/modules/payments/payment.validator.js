@@ -39,6 +39,23 @@ const createPayosPaymentSchema = z.object({
         .default({}),
 });
 
+const customerCreatePayosPaymentSchema = z.object({
+    params: z
+        .object({
+            bookingId: objectIdField,
+        })
+        .strict(),
+    body: z.object({}).strict().default({}),
+});
+
+const bookingIdParamSchema = z.object({
+    params: z
+        .object({
+            bookingId: objectIdField,
+        })
+        .strict(),
+});
+
 const paymentIdParamSchema = z.object({
     params: z
         .object({
@@ -76,6 +93,8 @@ const payosWebhookSchema = z.object({
 module.exports = {
     emptySchema,
     createPayosPaymentSchema,
+    customerCreatePayosPaymentSchema,
+    bookingIdParamSchema,
     paymentIdParamSchema,
     cancelPaymentSchema,
     payosWebhookSchema,

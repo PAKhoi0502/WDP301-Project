@@ -1,4 +1,5 @@
 const paymentService = require('./payment.service');
+const { getAuditRequestContext } = require('../audit-logs/auditLog.service');
 const { asyncHandler } = require('../../shared/utils/asyncHandler');
 const { sendSuccess, sendCreated } = require('../../shared/utils/apiResponse');
 
@@ -6,7 +7,12 @@ const createPayosPayment = asyncHandler(async (req, res) => {
     const { bookingId } = req.validated.params;
     const { body } = req.validated;
 
-    const result = await paymentService.createPayosPayment(req.user, bookingId, body || {});
+    const result = await paymentService.createPayosPayment(
+        req.user,
+        bookingId,
+        body || {},
+        getAuditRequestContext(req)
+    );
 
     if (result.reused) {
         return sendSuccess(res, {
@@ -17,6 +23,16 @@ const createPayosPayment = asyncHandler(async (req, res) => {
 
     return sendCreated(res, {
         message: 'Create PayOS payment successfully',
+        data: result,
+    });
+});
+
+const getPayosPaymentForBooking = asyncHandler(async (req, res) => {
+    const { bookingId } = req.validated.params;
+    const result = await paymentService.getPayosPaymentForBooking(req.user, bookingId);
+
+    return sendSuccess(res, {
+        message: 'Get booking PayOS payment successfully',
         data: result,
     });
 });
@@ -36,7 +52,12 @@ const cancelPayosPayment = asyncHandler(async (req, res) => {
     const { paymentId } = req.validated.params;
     const { body } = req.validated;
 
-    const result = await paymentService.cancelPayosPayment(req.user, paymentId, body || {});
+    const result = await paymentService.cancelPayosPayment(
+        req.user,
+        paymentId,
+        body || {},
+        getAuditRequestContext(req)
+    );
 
     return sendSuccess(res, {
         message: 'Cancel PayOS payment successfully',
@@ -47,7 +68,11 @@ const cancelPayosPayment = asyncHandler(async (req, res) => {
 const expirePayosPayment = asyncHandler(async (req, res) => {
     const { paymentId } = req.validated.params;
 
-    const result = await paymentService.expirePayosPayment(req.user, paymentId);
+    const result = await paymentService.expirePayosPayment(
+        req.user,
+        paymentId,
+        getAuditRequestContext(req)
+    );
 
     return sendSuccess(res, {
         message: 'Expire PayOS payment successfully',
@@ -68,6 +93,7 @@ const handlePayosWebhook = asyncHandler(async (req, res) => {
 
 module.exports = {
     createPayosPayment,
+    getPayosPaymentForBooking,
     getPaymentById,
     cancelPayosPayment,
     expirePayosPayment,

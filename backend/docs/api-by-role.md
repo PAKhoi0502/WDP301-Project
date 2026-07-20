@@ -34,7 +34,7 @@ Neu source route cho ca STAFF va ADMIN cung truy cap, tai lieu nay lap lai endpo
 | Loyalty | - | - | Xem diem/hang, transactions, redeem preview, tier rules active | - | Quan ly loyalty, tier rules, expire points |
 | Notifications | - | - | Quan ly notification cua minh | - | - |
 | Wash histories | - | - | Xem/claim history cua minh | Xem wash histories | Xem wash histories |
-| Payments | PayOS webhook | - | - | Tao/xem/huy/expire payment | Tao/xem/huy/expire payment |
+| Payments | PayOS webhook | - | Tao/lấy QR và polling payment của booking thuộc sở hữu | Tao/xem/huy/expire payment | Tao/xem/huy/expire payment, analytics theo kênh |
 | Uploads | - | Upload/delete owned file | Upload/delete owned file | Upload/delete owned file | Upload/delete owned file; list uploads |
 | Surveys | - | - | Xem survey available va submit response | - | Quan ly survey va xem responses |
 | Analytics | - | - | - | - | Xem analytics dashboard |
@@ -156,8 +156,9 @@ Neu source route cho ca STAFF va ADMIN cung truy cap, tai lieu nay lap lai endpo
 | Chuc nang | Role | APIs |
 | --- | --- | --- |
 | PayOS webhook | Public | `POST /api/v1/payments/payos/webhook` |
-| PayOS payment operations | STAFF | `POST /api/v1/admin/payments/bookings/:bookingId/payos`, `GET /api/v1/admin/payments/:paymentId`, `PATCH /api/v1/admin/payments/:paymentId/cancel`, `PATCH /api/v1/admin/payments/:paymentId/expire` |
-| PayOS payment operations | ADMIN | `POST /api/v1/admin/payments/bookings/:bookingId/payos`, `GET /api/v1/admin/payments/:paymentId`, `PATCH /api/v1/admin/payments/:paymentId/cancel`, `PATCH /api/v1/admin/payments/:paymentId/expire` |
+| My PayOS payment | CUSTOMER | `POST /api/v1/payments/bookings/:bookingId/payos`, `GET /api/v1/payments/bookings/:bookingId/payos` |
+| PayOS payment operations | STAFF | `POST /api/v1/admin/payments/bookings/:bookingId/payos`, `GET /api/v1/admin/payments/bookings/:bookingId/payos`, `GET /api/v1/admin/payments/:paymentId`, `PATCH /api/v1/admin/payments/:paymentId/cancel`, `PATCH /api/v1/admin/payments/:paymentId/expire` |
+| PayOS payment operations | ADMIN | `POST /api/v1/admin/payments/bookings/:bookingId/payos`, `GET /api/v1/admin/payments/bookings/:bookingId/payos`, `GET /api/v1/admin/payments/:paymentId`, `PATCH /api/v1/admin/payments/:paymentId/cancel`, `PATCH /api/v1/admin/payments/:paymentId/expire` |
 
 ### Uploads
 
@@ -178,6 +179,6 @@ Neu source route cho ca STAFF va ADMIN cung truy cap, tai lieu nay lap lai endpo
 
 | Chuc nang | Role | APIs |
 | --- | --- | --- |
-| Analytics | ADMIN | `GET /api/v1/admin/analytics/overview`, `GET /api/v1/admin/analytics/bookings`, `GET /api/v1/admin/analytics/revenue`, `GET /api/v1/admin/analytics/garages`, `GET /api/v1/admin/analytics/services`, `GET /api/v1/admin/analytics/promotions`, `GET /api/v1/admin/analytics/wash-bays`, `GET /api/v1/admin/analytics/surveys/:surveyId` |
+| Analytics | ADMIN | `GET /api/v1/admin/analytics/overview`, `GET /api/v1/admin/analytics/bookings`, `GET /api/v1/admin/analytics/revenue`, `GET /api/v1/admin/analytics/garages`, `GET /api/v1/admin/analytics/services`, `GET /api/v1/admin/analytics/promotions`, `GET /api/v1/admin/analytics/wash-bays`, `GET /api/v1/admin/analytics/payments`, `GET /api/v1/admin/analytics/surveys/:surveyId` |
 | Research reports | ADMIN | `GET /api/v1/admin/research`, `POST /api/v1/admin/research`, `GET /api/v1/admin/research/:id`, `PATCH /api/v1/admin/research/:id`, `DELETE /api/v1/admin/research/:id`, `POST /api/v1/admin/research/:id/run`, `POST /api/v1/admin/research/:id/retry` |
 | Audit logs | ADMIN | `GET /api/v1/admin/audit-logs` |

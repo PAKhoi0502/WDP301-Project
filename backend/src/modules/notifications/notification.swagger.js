@@ -34,6 +34,7 @@ const notificationSchema = {
                 'SERVICE_STARTED',
                 'SERVICE_STEP_DONE',
                 'SERVICE_COMPLETED',
+                'PAYMENT_READY',
                 'PAYMENT_CONFIRMED',
                 'REWARD_EARNED',
                 'POINTS_EXPIRING',

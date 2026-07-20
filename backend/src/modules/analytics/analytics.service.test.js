@@ -19,10 +19,15 @@ jest.mock('../surveys/surveyResponse.model', () => ({
     aggregate: jest.fn(),
 }));
 
+jest.mock('../payments/paymentTransaction.model', () => ({
+    aggregate: jest.fn(),
+}));
+
 const Booking = require('../bookings/booking.model');
 const WashHistory = require('../wash-histories/washHistory.model');
 const Survey = require('../surveys/survey.model');
 const SurveyResponse = require('../surveys/surveyResponse.model');
+const PaymentTransaction = require('../payments/paymentTransaction.model');
 const analyticsService = require('./analytics.service');
 
 describe('analytics service', () => {
@@ -220,5 +225,46 @@ describe('analytics service', () => {
             eligible_booking_count: 0,
             response_rate: 0,
         });
+    });
+
+    it('calculates payment analytics by initiated channel', async () => {
+        PaymentTransaction.aggregate.mockResolvedValue([{
+            metrics: [{
+                total_transactions: 10,
+                paid_transactions: 8,
+                active_transactions: 1,
+                paid_amount: 1200000,
+            }],
+            by_initiated_channel: [
+                {
+                    _id: 'CUSTOMER_SELF_SERVICE',
+                    transaction_count: 6,
+                    paid_count: 5,
+                    paid_amount: 750000,
+                },
+                {
+                    _id: 'STAFF_ASSISTED',
+                    transaction_count: 4,
+                    paid_count: 3,
+                    paid_amount: 450000,
+                },
+            ],
+            by_status: [{ _id: 'PAID', count: 8, amount: 1200000 }],
+            trend: [{ _id: '2026-07-21', count: 10, paid_count: 8, paid_amount: 1200000 }],
+        }]);
+
+        const result = await analyticsService.getPaymentAnalytics({ group_by: 'DAY' });
+
+        expect(result.metrics).toEqual({
+            total_transactions: 10,
+            paid_transactions: 8,
+            active_transactions: 1,
+            paid_amount: 1200000,
+            success_rate: 80,
+        });
+        expect(result.by_initiated_channel).toEqual([
+            expect.objectContaining({ channel: 'CUSTOMER_SELF_SERVICE', success_rate: 83.33 }),
+            expect.objectContaining({ channel: 'STAFF_ASSISTED', success_rate: 75 }),
+        ]);
     });
 });

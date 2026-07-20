@@ -58,6 +58,7 @@ const paths = {
     '/admin/analytics/services': createAnalyticsPath('Get service performance analytics'),
     '/admin/analytics/promotions': createAnalyticsPath('Get promotion analytics'),
     '/admin/analytics/wash-bays': createAnalyticsPath('Get wash bay analytics'),
+    '/admin/analytics/payments': createAnalyticsPath('Get payment channel analytics'),
     '/admin/analytics/surveys/{surveyId}': {
         get: {
             tags: ['Admin Analytics'],

@@ -15,10 +15,15 @@ jest.mock('../modules/bookings/booking.service', () => ({
     processDueServiceItemTimers: jest.fn(),
 }));
 
+jest.mock('../modules/payments/payment.service', () => ({
+    expireDuePayosPayments: jest.fn(),
+}));
+
 const bookingWaitlistService = require('../modules/booking-waitlists/bookingWaitlist.service');
 const notificationService = require('../modules/notifications/notification.service');
 const loyaltyService = require('../modules/loyalty/loyalty.service');
 const bookingService = require('../modules/bookings/booking.service');
+const paymentService = require('../modules/payments/payment.service');
 const schedulerService = require('./scheduler.service');
 
 describe('scheduler service', () => {
@@ -31,6 +36,7 @@ describe('scheduler service', () => {
         delete process.env.EMAIL_RETRY_BATCH_SIZE;
         delete process.env.TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE;
         delete process.env.SERVICE_ITEM_TIMER_BATCH_SIZE;
+        delete process.env.PAYMENT_EXPIRE_BATCH_SIZE;
     });
 
     afterEach(() => {
@@ -61,6 +67,7 @@ describe('scheduler service', () => {
             expect.objectContaining({ name: schedulerService.JOB_NAMES.POINT_EXPIRATION }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.TIER_INACTIVITY_DOWNGRADE }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.SERVICE_ITEM_TIMER }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.PAYMENT_EXPIRE }),
         ]));
     });
 
@@ -119,6 +126,26 @@ describe('scheduler service', () => {
             processed: 2,
             auto_completed: 1,
             awaiting_confirmation: 1,
+            failed: 0,
+        });
+    });
+
+    it('runs payment expiration job on demand', async () => {
+        process.env.PAYMENT_EXPIRE_BATCH_SIZE = '15';
+        paymentService.expireDuePayosPayments.mockResolvedValue({
+            processed: 2,
+            expired: 2,
+            failed: 0,
+        });
+
+        const result = await schedulerService.runSchedulerJobNow(
+            schedulerService.JOB_NAMES.PAYMENT_EXPIRE
+        );
+
+        expect(paymentService.expireDuePayosPayments).toHaveBeenCalledWith({ limit: 15 });
+        expect(result).toEqual({
+            processed: 2,
+            expired: 2,
             failed: 0,
         });
     });

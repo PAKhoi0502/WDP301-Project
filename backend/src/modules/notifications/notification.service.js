@@ -309,17 +309,66 @@ const deleteAllNotifications = async (userId) => {
     };
 };
 
+const emitPaymentReady = async ({ booking, session = null }) => {
+    if (!booking.customer_id || booking.is_walk_in) {
+        return null;
+    }
+
+    const notification = await Notification.findOneAndUpdate(
+        {
+            user_id: booking.customer_id,
+            type: NOTIFICATION_TYPES.PAYMENT_READY,
+            related_type: NOTIFICATION_RELATED_TYPES.BOOKING,
+            related_id: booking._id,
+        },
+        {
+            $set: {
+                title: 'Payment ready',
+                message: 'Your service is complete. You can now pay by PayOS or at the garage counter.',
+                channels: [NOTIFICATION_CHANNELS.IN_APP],
+                in_app_status: IN_APP_STATUSES.UNREAD,
+                read_at: null,
+                email_status: EMAIL_STATUSES.NOT_REQUIRED,
+                metadata: {
+                    booking_id: booking._id.toString(),
+                    final_price: booking.final_price,
+                    completed_at: booking.completed_at,
+                },
+            },
+            $setOnInsert: {
+                user_id: booking.customer_id,
+                type: NOTIFICATION_TYPES.PAYMENT_READY,
+                related_type: NOTIFICATION_RELATED_TYPES.BOOKING,
+                related_id: booking._id,
+            },
+        },
+        {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+            session: session || undefined,
+        }
+    );
+
+    return NotificationMapper.toNotificationDto(notification);
+};
+
 const emitPaymentConfirmed = async ({ booking, session = null }) => {
+    const isPayos = booking.payment_method === 'PAYOS';
+
     return createInAppNotification({
         userId: booking.customer_id,
         type: NOTIFICATION_TYPES.PAYMENT_CONFIRMED,
         title: 'Payment confirmed',
-        message: 'Your cash payment has been confirmed at the garage.',
+        message: isPayos
+            ? 'Your PayOS payment has been confirmed.'
+            : 'Your cash payment has been confirmed at the garage.',
         relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
         relatedId: booking._id,
         metadata: {
             booking_id: booking._id.toString(),
             final_price: booking.final_price,
+            payment_method: booking.payment_method,
             paid_at: booking.paid_at,
         },
         session,
@@ -358,6 +407,7 @@ module.exports = {
     markAllAsRead,
     deleteNotification,
     deleteAllNotifications,
+    emitPaymentReady,
     emitPaymentConfirmed,
     emitRewardEarned,
 };

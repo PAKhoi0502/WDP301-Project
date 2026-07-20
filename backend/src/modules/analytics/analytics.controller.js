@@ -46,6 +46,11 @@ const getWashBayAnalytics = createAnalyticsHandler(
     'Get wash bay analytics successfully'
 );
 
+const getPaymentAnalytics = createAnalyticsHandler(
+    analyticsService.getPaymentAnalytics,
+    'Get payment analytics successfully'
+);
+
 const getSurveyAnalytics = asyncHandler(async (req, res) => {
     const result = await analyticsService.getSurveyAnalytics(
         req.validated.params.surveyId,
@@ -66,5 +71,6 @@ module.exports = {
     getServiceAnalytics,
     getPromotionAnalytics,
     getWashBayAnalytics,
+    getPaymentAnalytics,
     getSurveyAnalytics,
 };

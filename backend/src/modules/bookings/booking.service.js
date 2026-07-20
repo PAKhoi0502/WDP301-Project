@@ -5666,6 +5666,7 @@ const completeService = async (user, bookingId, { note } = {}) => {
     }
 
     await booking.save();
+    await notificationService.emitPaymentReady({ booking });
 
     for (const bookingItemKey of releasedBookingItemKeys) {
         await bookingServiceStepService.markResourceReleasedForBookingItem(

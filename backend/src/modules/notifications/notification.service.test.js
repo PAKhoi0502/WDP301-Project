@@ -17,6 +17,7 @@ jest.mock('./notification.model', () => ({
     find: jest.fn(),
     countDocuments: jest.fn(),
     findOne: jest.fn(),
+    findOneAndUpdate: jest.fn(),
     updateMany: jest.fn(),
     deleteOne: jest.fn(),
     deleteMany: jest.fn(),
@@ -97,6 +98,57 @@ describe('notification service customer operations', () => {
             type: NOTIFICATION_TYPES.PAYMENT_CONFIRMED,
             metadata: { final_price: 150000 },
         });
+    });
+
+    it('upserts a payment ready notification for a registered booking', async () => {
+        const completedAt = new Date('2026-07-21T08:00:00.000Z');
+
+        Notification.findOneAndUpdate.mockResolvedValue({
+            _id: notificationId,
+            user_id: userId,
+            type: NOTIFICATION_TYPES.PAYMENT_READY,
+            title: 'Payment ready',
+            message: 'Your service is complete. You can now pay by PayOS or at the garage counter.',
+            channels: [NOTIFICATION_CHANNELS.IN_APP],
+            related_type: NOTIFICATION_RELATED_TYPES.BOOKING,
+            related_id: bookingId,
+            in_app_status: IN_APP_STATUSES.UNREAD,
+            read_at: null,
+            email_status: EMAIL_STATUSES.NOT_REQUIRED,
+            metadata: {
+                booking_id: bookingId.toString(),
+                final_price: 150000,
+                completed_at: completedAt,
+            },
+        });
+
+        const result = await notificationService.emitPaymentReady({
+            booking: {
+                _id: bookingId,
+                customer_id: userId,
+                is_walk_in: false,
+                final_price: 150000,
+                completed_at: completedAt,
+            },
+        });
+
+        expect(Notification.findOneAndUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                user_id: userId,
+                type: NOTIFICATION_TYPES.PAYMENT_READY,
+                related_id: bookingId,
+            }),
+            expect.objectContaining({
+                $set: expect.objectContaining({
+                    in_app_status: IN_APP_STATUSES.UNREAD,
+                }),
+            }),
+            expect.objectContaining({
+                upsert: true,
+                new: true,
+            })
+        );
+        expect(result.type).toBe(NOTIFICATION_TYPES.PAYMENT_READY);
     });
 
     it('marks all unread notifications as read for current customer', async () => {

@@ -17,7 +17,9 @@
     "migrate:legacy-onboarding:dry-run": "node src/scripts/migrateLegacyUserOnboarding.js --dry-run",
     "migrate:walk-in-promotions": "node src/scripts/migrateWalkInPromotionClaims.js",
     "migrate:service-countdowns": "node src/scripts/migrateServiceCountdowns.js",
-    "migrate:service-countdowns:dry-run": "node src/scripts/migrateServiceCountdowns.js --dry-run"
+    "migrate:service-countdowns:dry-run": "node src/scripts/migrateServiceCountdowns.js --dry-run",
+    "migrate:payment-initiators": "node src/scripts/migratePaymentInitiators.js",
+    "migrate:payment-initiators:dry-run": "node src/scripts/migratePaymentInitiators.js --dry-run"
   },
   "keywords": [],
   "author": "Pham Anh Khoi",
