@@ -113,6 +113,15 @@ notificationSchema.index({ related_type: 1, related_id: 1 });
 notificationSchema.index({ in_app_status: 1 });
 notificationSchema.index({ email_status: 1 });
 notificationSchema.index({ created_at: -1 });
+notificationSchema.index(
+    { user_id: 1, type: 1, related_type: 1, related_id: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            type: 'PAYMENT_READY',
+        },
+    }
+);
 
 notificationSchema.pre('validate', function (next) {
     if (!this.channels || this.channels.length === 0) {

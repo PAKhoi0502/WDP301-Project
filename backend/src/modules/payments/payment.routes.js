@@ -3,6 +3,8 @@ const express = require('express');
 const paymentController = require('./payment.controller');
 const {
     createPayosPaymentSchema,
+    customerCreatePayosPaymentSchema,
+    bookingIdParamSchema,
     paymentIdParamSchema,
     cancelPaymentSchema,
     payosWebhookSchema,
@@ -14,12 +16,27 @@ const { STAFF_CAPABILITIES } = require('../../shared/constants/staff.constant');
 const { requireStaffCapabilities } = require('../../shared/middlewares/staffCapability.middleware');
 
 const publicRouter = express.Router();
+const customerRouter = express.Router();
 const adminRouter = express.Router();
 
 publicRouter.post(
     '/payos/webhook',
     validate(payosWebhookSchema),
     paymentController.handlePayosWebhook
+);
+
+customerRouter.use(authenticate, authorize(USER_ROLES.CUSTOMER));
+
+customerRouter.post(
+    '/bookings/:bookingId/payos',
+    validate(customerCreatePayosPaymentSchema),
+    paymentController.createPayosPayment
+);
+
+customerRouter.get(
+    '/bookings/:bookingId/payos',
+    validate(bookingIdParamSchema),
+    paymentController.getPayosPaymentForBooking
 );
 
 adminRouter.use(authenticate, authorize(USER_ROLES.STAFF, USER_ROLES.ADMIN));
@@ -29,6 +46,12 @@ adminRouter.post(
     '/bookings/:bookingId/payos',
     validate(createPayosPaymentSchema),
     paymentController.createPayosPayment
+);
+
+adminRouter.get(
+    '/bookings/:bookingId/payos',
+    validate(bookingIdParamSchema),
+    paymentController.getPayosPaymentForBooking
 );
 
 adminRouter.get(
@@ -51,5 +74,6 @@ adminRouter.patch(
 
 module.exports = {
     publicRouter,
+    customerRouter,
     adminRouter,
 };

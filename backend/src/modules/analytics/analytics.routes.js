@@ -20,6 +20,7 @@ adminRouter.get('/garages', validate(analyticsQuerySchema), analyticsController.
 adminRouter.get('/services', validate(analyticsQuerySchema), analyticsController.getServiceAnalytics);
 adminRouter.get('/promotions', validate(analyticsQuerySchema), analyticsController.getPromotionAnalytics);
 adminRouter.get('/wash-bays', validate(analyticsQuerySchema), analyticsController.getWashBayAnalytics);
+adminRouter.get('/payments', validate(analyticsQuerySchema), analyticsController.getPaymentAnalytics);
 adminRouter.get('/surveys/:surveyId', validate(surveyAnalyticsSchema), analyticsController.getSurveyAnalytics);
 
 module.exports = {

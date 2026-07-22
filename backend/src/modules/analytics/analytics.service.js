@@ -5,6 +5,7 @@ const WashHistory = require('../wash-histories/washHistory.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
 const Survey = require('../surveys/survey.model');
 const SurveyResponse = require('../surveys/surveyResponse.model');
+const PaymentTransaction = require('../payments/paymentTransaction.model');
 const {
     BOOKING_STATUS,
 } = require('../../shared/constants/booking.constant');
@@ -17,6 +18,10 @@ const {
 const {
     ANALYTICS_GROUP_BY,
 } = require('../../shared/constants/analytics.constant');
+const {
+    PAYMENT_TRANSACTION_STATUS,
+    PAYMENT_INITIATED_CHANNEL,
+} = require('../../shared/constants/payment.constant');
 const { AppError } = require('../../shared/utils/appError');
 
 const round = (value, precision = 2) => {
@@ -1173,6 +1178,160 @@ const getSurveyAnalytics = async (surveyId, filters = {}) => {
     };
 };
 
+const getPaymentAnalytics = async (filters = {}) => {
+    const paymentMatch = {};
+    const createdAtRange = {};
+
+    if (filters.from) {
+        createdAtRange.$gte = filters.from;
+    }
+
+    if (filters.to) {
+        createdAtRange.$lte = filters.to;
+    }
+
+    if (Object.keys(createdAtRange).length > 0) {
+        paymentMatch.created_at = createdAtRange;
+    }
+
+    const bookingMatch = {};
+
+    if (filters.garage_id) {
+        bookingMatch['booking.garage_id'] = toObjectId(filters.garage_id);
+    }
+
+    if (filters.service_package_id) {
+        bookingMatch['booking.service_package_id'] = toObjectId(filters.service_package_id);
+    }
+
+    if (filters.vehicle_type) {
+        bookingMatch['booking.vehicle_type'] = filters.vehicle_type;
+    }
+
+    const initiatedChannelExpression = {
+        $ifNull: [
+            '$initiated_channel',
+            {
+                $cond: [
+                    { $ne: ['$created_by_staff_id', null] },
+                    PAYMENT_INITIATED_CHANNEL.STAFF_ASSISTED,
+                    'UNKNOWN',
+                ],
+            },
+        ],
+    };
+    const paidCondition = {
+        $eq: ['$status', PAYMENT_TRANSACTION_STATUS.PAID],
+    };
+    const activeCondition = {
+        $in: [
+            '$status',
+            [
+                PAYMENT_TRANSACTION_STATUS.INITIATED,
+                PAYMENT_TRANSACTION_STATUS.PENDING,
+                PAYMENT_TRANSACTION_STATUS.CANCELING,
+            ],
+        ],
+    };
+    const pipeline = [
+        { $match: paymentMatch },
+        {
+            $lookup: {
+                from: 'bookings',
+                localField: 'booking_id',
+                foreignField: '_id',
+                as: 'booking',
+            },
+        },
+        { $unwind: '$booking' },
+    ];
+
+    if (Object.keys(bookingMatch).length > 0) {
+        pipeline.push({ $match: bookingMatch });
+    }
+
+    pipeline.push({
+        $facet: {
+            metrics: [
+                {
+                    $group: {
+                        _id: null,
+                        total_transactions: { $sum: 1 },
+                        paid_transactions: { $sum: { $cond: [paidCondition, 1, 0] } },
+                        active_transactions: { $sum: { $cond: [activeCondition, 1, 0] } },
+                        paid_amount: { $sum: { $cond: [paidCondition, '$amount', 0] } },
+                    },
+                },
+            ],
+            by_initiated_channel: [
+                {
+                    $group: {
+                        _id: initiatedChannelExpression,
+                        transaction_count: { $sum: 1 },
+                        paid_count: { $sum: { $cond: [paidCondition, 1, 0] } },
+                        paid_amount: { $sum: { $cond: [paidCondition, '$amount', 0] } },
+                    },
+                },
+                { $sort: { transaction_count: -1, _id: 1 } },
+            ],
+            by_status: [
+                {
+                    $group: {
+                        _id: '$status',
+                        count: { $sum: 1 },
+                        amount: { $sum: '$amount' },
+                    },
+                },
+                { $sort: { count: -1, _id: 1 } },
+            ],
+            trend: [
+                {
+                    $group: {
+                        _id: getDateGroupExpression('$created_at', filters.group_by),
+                        count: { $sum: 1 },
+                        paid_count: { $sum: { $cond: [paidCondition, 1, 0] } },
+                        paid_amount: { $sum: { $cond: [paidCondition, '$amount', 0] } },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ],
+        },
+    });
+
+    const [result = {}] = await PaymentTransaction.aggregate(pipeline);
+    const metrics = result.metrics?.[0] || {};
+
+    return {
+        period: getPeriod(filters),
+        metrics: {
+            total_transactions: metrics.total_transactions || 0,
+            paid_transactions: metrics.paid_transactions || 0,
+            active_transactions: metrics.active_transactions || 0,
+            paid_amount: round(metrics.paid_amount),
+            success_rate: percentage(metrics.paid_transactions, metrics.total_transactions),
+        },
+        by_initiated_channel: (result.by_initiated_channel || []).map((row) => ({
+            channel: row._id,
+            transaction_count: row.transaction_count || 0,
+            paid_count: row.paid_count || 0,
+            paid_amount: round(row.paid_amount),
+            success_rate: percentage(row.paid_count, row.transaction_count),
+        })),
+        by_status: (result.by_status || []).map((row) => ({
+            status: row._id,
+            count: row.count || 0,
+            amount: round(row.amount),
+        })),
+        trend: (result.trend || []).map((row) => ({
+            period: row._id,
+            count: row.count || 0,
+            paid_count: row.paid_count || 0,
+            paid_amount: round(row.paid_amount),
+        })),
+        generated_at: new Date(),
+    };
+};
+
 module.exports = {
     getOverview,
     getBookingAnalytics,
@@ -1182,6 +1341,7 @@ module.exports = {
     getPromotionAnalytics,
     getWashBayAnalytics,
     getSurveyAnalytics,
+    getPaymentAnalytics,
     buildSurveyResponsePipeline,
     round,
     percentage,

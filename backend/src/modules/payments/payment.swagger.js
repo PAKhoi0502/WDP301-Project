@@ -4,6 +4,10 @@ const tags = [
         description: 'Public payment APIs',
     },
     {
+        name: 'Customer Payments',
+        description: 'Customer-owned booking payment APIs',
+    },
+    {
         name: 'Admin Payments',
         description: 'Staff and admin payment APIs',
     },
@@ -29,6 +33,32 @@ const paymentTransactionSchema = {
         canceled_at: { type: 'string', format: 'date-time', nullable: true },
         expired_at: { type: 'string', format: 'date-time', nullable: true },
         created_by_staff_id: { type: 'string', nullable: true },
+        initiated_by_user_id: { type: 'string', nullable: true },
+        initiated_by_role: { type: 'string', enum: ['CUSTOMER', 'STAFF', 'ADMIN'], nullable: true },
+        initiated_channel: { type: 'string', enum: ['CUSTOMER_SELF_SERVICE', 'STAFF_ASSISTED'], nullable: true },
+        created_at: { type: 'string', format: 'date-time' },
+        updated_at: { type: 'string', format: 'date-time' },
+    },
+};
+
+const customerPaymentTransactionSchema = {
+    type: 'object',
+    properties: {
+        id: { type: 'string' },
+        booking_id: { type: 'string' },
+        provider: { type: 'string', enum: ['PAYOS'] },
+        method: { type: 'string', enum: ['QR'] },
+        order_code: { type: 'number' },
+        checkout_url: { type: 'string', nullable: true },
+        qr_code: { type: 'string', nullable: true },
+        amount: { type: 'number' },
+        currency: { type: 'string', enum: ['VND'] },
+        description: { type: 'string' },
+        status: { type: 'string', enum: ['INITIATED', 'PENDING', 'CANCELING', 'PAID', 'CANCELED', 'EXPIRED', 'FAILED'] },
+        paid_at: { type: 'string', format: 'date-time', nullable: true },
+        expires_at: { type: 'string', format: 'date-time', nullable: true },
+        canceled_at: { type: 'string', format: 'date-time', nullable: true },
+        expired_at: { type: 'string', format: 'date-time', nullable: true },
         created_at: { type: 'string', format: 'date-time' },
         updated_at: { type: 'string', format: 'date-time' },
     },
@@ -75,6 +105,22 @@ const createPayosPaymentResponse = {
                 booking: { $ref: '#/components/schemas/Booking' },
                 payment: paymentTransactionSchema,
                 reused: { type: 'boolean' },
+            },
+        },
+    },
+};
+
+const customerPayosPaymentResponse = {
+    type: 'object',
+    properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string' },
+        data: {
+            type: 'object',
+            properties: {
+                payment: customerPaymentTransactionSchema,
+                reused: { type: 'boolean' },
+                poll_after_ms: { type: 'integer', nullable: true, example: 3000 },
             },
         },
     },
@@ -155,6 +201,42 @@ const paths = {
             },
         },
     },
+    '/payments/bookings/{bookingId}/payos': {
+        post: {
+            tags: ['Customer Payments'],
+            summary: 'Create or reuse PayOS payment for an owned completed booking',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'bookingId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Existing active PayOS payment returned',
+                    content: { 'application/json': { schema: customerPayosPaymentResponse } },
+                },
+                201: {
+                    description: 'PayOS payment created',
+                    content: { 'application/json': { schema: customerPayosPaymentResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+        get: {
+            tags: ['Customer Payments'],
+            summary: 'Poll the latest PayOS payment for an owned booking',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'bookingId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Latest PayOS payment returned',
+                    content: { 'application/json': { schema: customerPayosPaymentResponse } },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/payments/bookings/{bookingId}/payos': {
         post: {
             tags: ['Admin Payments'],
@@ -187,6 +269,21 @@ const paths = {
                             schema: createPayosPaymentResponse,
                         },
                     },
+                },
+                ...commonErrorResponses,
+            },
+        },
+        get: {
+            tags: ['Admin Payments'],
+            summary: 'Poll the latest PayOS payment for an accessible booking',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'bookingId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Latest PayOS payment returned',
+                    content: { 'application/json': { schema: paymentDetailResponse } },
                 },
                 ...commonErrorResponses,
             },
@@ -267,6 +364,7 @@ const paths = {
 
 const schemas = {
     PaymentTransaction: paymentTransactionSchema,
+    CustomerPaymentTransaction: customerPaymentTransactionSchema,
     CreatePayosPaymentRequest: createPayosPaymentRequest,
     CancelPaymentRequest: cancelPaymentRequest,
     PayosWebhookRequest: payosWebhookRequest,

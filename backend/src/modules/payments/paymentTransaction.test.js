@@ -13,6 +13,10 @@ describe('payment transaction model', () => {
             amount: 120000,
             description: 'Booking #123456',
             created_by_staff_id: new mongoose.Types.ObjectId(),
+            initiated_by_user_id: new mongoose.Types.ObjectId(),
+            initiated_by_role: 'STAFF',
+            initiated_channel: 'STAFF_ASSISTED',
+            active_payment_key: `PAYOS:${new mongoose.Types.ObjectId().toString()}`,
             ...overrides,
         });
     };
@@ -99,5 +103,21 @@ describe('payment transaction model', () => {
         const json = transaction.toJSON();
 
         expect(json.__v).toBeUndefined();
+    });
+
+    it('defines a unique partial index for the active payment key', () => {
+        const activeKeyIndex = PaymentTransaction.schema.indexes().find(([fields]) => (
+            fields.active_payment_key === 1
+        ));
+
+        expect(activeKeyIndex).toEqual([
+            { active_payment_key: 1 },
+            expect.objectContaining({
+                unique: true,
+                partialFilterExpression: {
+                    active_payment_key: { $type: 'string' },
+                },
+            }),
+        ]);
     });
 });

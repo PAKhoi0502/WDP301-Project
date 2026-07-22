@@ -22,9 +22,14 @@ jest.mock('../staff-profiles/staffProfile.model', () => ({
 jest.mock('./paymentTransaction.model', () => ({
     findById: jest.fn(),
     findOne: jest.fn(),
+    find: jest.fn(),
     updateMany: jest.fn(),
     exists: jest.fn(),
     create: jest.fn(),
+}));
+
+jest.mock('../audit-logs/auditLog.service', () => ({
+    recordAuditEvent: jest.fn(),
 }));
 
 jest.mock('./payos.service', () => ({
@@ -39,6 +44,7 @@ const bookingPaymentService = require('../bookings/bookingPayment.service');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const PaymentTransaction = require('./paymentTransaction.model');
 const payosService = require('./payos.service');
+const auditLogService = require('../audit-logs/auditLog.service');
 const paymentService = require('./payment.service');
 
 describe('payment service createPayosPayment', () => {
@@ -67,12 +73,19 @@ describe('payment service createPayosPayment', () => {
         session: jest.fn().mockResolvedValue(value),
     });
 
+    const createLimitedQueryMock = (value) => ({
+        sort: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue(value),
+        }),
+    });
+
     beforeEach(() => {
         jest.clearAllMocks();
         Booking.findById.mockReset();
         StaffProfile.findOne.mockReset();
         PaymentTransaction.findById.mockReset();
         PaymentTransaction.findOne.mockReset();
+        PaymentTransaction.find.mockReset();
         PaymentTransaction.updateMany.mockReset();
         PaymentTransaction.exists.mockReset();
         PaymentTransaction.create.mockReset();
@@ -87,7 +100,9 @@ describe('payment service createPayosPayment', () => {
         jest.spyOn(Date, 'now').mockReturnValue(1780826400000);
         jest.spyOn(Math, 'random').mockReturnValue(0.12);
         PaymentTransaction.updateMany.mockResolvedValue({ modifiedCount: 0 });
+        PaymentTransaction.find.mockReturnValue(createLimitedQueryMock([]));
         PaymentTransaction.exists.mockResolvedValue(null);
+        auditLogService.recordAuditEvent.mockResolvedValue({ id: 'audit-id' });
         payosService.cancelPaymentLink.mockResolvedValue({ status: 'CANCELLED' });
         payosService.getPaymentLinkInformation.mockResolvedValue({ status: 'PENDING' });
         bookingPaymentService.confirmBookingPaid.mockImplementation(async ({
@@ -230,6 +245,10 @@ describe('payment service createPayosPayment', () => {
                 amount: 120000,
                 status: 'INITIATED',
                 created_by_staff_id: adminUser._id,
+                initiated_by_user_id: adminUser._id,
+                initiated_by_role: 'ADMIN',
+                initiated_channel: 'STAFF_ASSISTED',
+                active_payment_key: `PAYOS:${bookingId}`,
             })]
         );
         expect(initiatedPayment.payment_link_id).toBe('payos-link-id');
@@ -300,6 +319,109 @@ describe('payment service createPayosPayment', () => {
         });
     });
 
+    it('lets a customer reuse the active payment for an owned booking', async () => {
+        const customerUser = {
+            _id: '507f1f77bcf86cd799439021',
+            role: 'CUSTOMER',
+        };
+        const booking = createBooking({
+            customer_id: customerUser._id,
+            is_walk_in: false,
+        });
+        const pendingPayment = {
+            _id: '507f1f77bcf86cd799439014',
+            booking_id: bookingId,
+            provider: 'PAYOS',
+            method: 'QR',
+            order_code: 178082640000012,
+            payment_link_id: 'payos-link-id',
+            checkout_url: 'https://pay.payos.vn/web/checkout/123',
+            qr_code: '000201010212',
+            amount: 120000,
+            currency: 'VND',
+            description: 'AWP 178082640000012',
+            status: 'PENDING',
+            initiated_by_user_id: adminUser._id,
+            initiated_by_role: 'ADMIN',
+            initiated_channel: 'STAFF_ASSISTED',
+        };
+
+        Booking.findById.mockResolvedValue(booking);
+        PaymentTransaction.findOne.mockReturnValue(createQueryMock(pendingPayment));
+
+        const result = await paymentService.createPayosPayment(customerUser, bookingId);
+
+        expect(result.reused).toBe(true);
+        expect(result.poll_after_ms).toBe(3000);
+        expect(result.booking).toBeUndefined();
+        expect(result.payment.qr_code).toBe('000201010212');
+        expect(result.payment.initiated_by_user_id).toBeUndefined();
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+                actorId: customerUser._id,
+                action: 'PAYMENT_REUSED',
+            })
+        );
+    });
+
+    it('hides another customer booking as not found', async () => {
+        const customerUser = {
+            _id: '507f1f77bcf86cd799439021',
+            role: 'CUSTOMER',
+        };
+
+        Booking.findById.mockResolvedValue(createBooking({
+            customer_id: '507f1f77bcf86cd799439022',
+            is_walk_in: false,
+        }));
+
+        await expect(
+            paymentService.createPayosPayment(customerUser, bookingId)
+        ).rejects.toMatchObject({
+            statusCode: 404,
+            errorCode: 'BOOKING_NOT_FOUND',
+        });
+
+        expect(PaymentTransaction.find).not.toHaveBeenCalled();
+    });
+
+    it('reuses the winner when concurrent creation hits the active payment key', async () => {
+        const booking = createBooking();
+        const concurrentPayment = {
+            _id: '507f1f77bcf86cd799439023',
+            booking_id: bookingId,
+            provider: 'PAYOS',
+            method: 'QR',
+            order_code: 178082640000013,
+            amount: 120000,
+            currency: 'VND',
+            description: 'AWP 178082640000013',
+            status: 'INITIATED',
+            initiated_by_user_id: adminUser._id,
+            initiated_by_role: 'ADMIN',
+            initiated_channel: 'STAFF_ASSISTED',
+        };
+        const duplicateError = Object.assign(new Error('duplicate key'), {
+            code: 11000,
+            keyPattern: { active_payment_key: 1 },
+        });
+
+        Booking.findById.mockResolvedValue(booking);
+        PaymentTransaction.findOne
+            .mockReturnValueOnce(createQueryMock(null))
+            .mockReturnValueOnce(createQueryMock(concurrentPayment));
+        payosService.buildCreatePaymentLinkPayload.mockReturnValue({
+            expiredAt: 1780827300,
+        });
+        PaymentTransaction.create.mockRejectedValue(duplicateError);
+
+        const result = await paymentService.createPayosPayment(adminUser, bookingId);
+
+        expect(result.reused).toBe(true);
+        expect(result.payment.id).toBe('507f1f77bcf86cd799439023');
+        expect(payosService.createPaymentLink).not.toHaveBeenCalled();
+    });
+
     it('gets payment detail for accessible booking', async () => {
         const booking = createBooking({
             payment_method: 'PAYOS',
@@ -323,6 +445,42 @@ describe('payment service createPayosPayment', () => {
 
         expect(result.payment.id).toBe('507f1f77bcf86cd799439014');
         expect(result.booking.payment_status).toBe('PENDING');
+    });
+
+    it('lets a customer poll the latest payment for an owned booking', async () => {
+        const customerUser = {
+            _id: '507f1f77bcf86cd799439021',
+            role: 'CUSTOMER',
+        };
+        const booking = createBooking({
+            customer_id: customerUser._id,
+            is_walk_in: false,
+            payment_method: 'PAYOS',
+            payment_status: 'PENDING',
+        });
+        const payment = {
+            _id: '507f1f77bcf86cd799439014',
+            booking_id: bookingId,
+            provider: 'PAYOS',
+            method: 'QR',
+            order_code: 178082640000012,
+            checkout_url: 'https://pay.payos.vn/web/checkout/123',
+            qr_code: '000201010212',
+            amount: 120000,
+            currency: 'VND',
+            description: 'AWP 178082640000012',
+            status: 'PENDING',
+        };
+
+        Booking.findById.mockResolvedValue(booking);
+        PaymentTransaction.findOne.mockReturnValue(createQueryMock(payment));
+
+        const result = await paymentService.getPayosPaymentForBooking(customerUser, bookingId);
+
+        expect(result.payment.id).toBe('507f1f77bcf86cd799439014');
+        expect(result.payment.qr_code).toBe('000201010212');
+        expect(result.poll_after_ms).toBe(3000);
+        expect(result.booking).toBeUndefined();
     });
 
     it('cancels pending PayOS payment and resets booking to cash unpaid', async () => {
@@ -500,6 +658,7 @@ describe('payment service createPayosPayment', () => {
         });
 
         Booking.findById.mockResolvedValueOnce(booking);
+        PaymentTransaction.findOne.mockReturnValue(createQueryMock(null));
 
         const result = await paymentService.resolvePendingPayosPaymentForCash(
             adminUser,
@@ -508,7 +667,7 @@ describe('payment service createPayosPayment', () => {
 
         expect(result.resolution).toBe('NONE');
         expect(result.payment).toBeNull();
-        expect(PaymentTransaction.findOne).not.toHaveBeenCalled();
+        expect(PaymentTransaction.findOne).toHaveBeenCalledTimes(1);
         expect(payosService.cancelPaymentLink).not.toHaveBeenCalled();
     });
 
@@ -710,6 +869,50 @@ describe('payment service createPayosPayment', () => {
         expect(booking.save).not.toHaveBeenCalled();
     });
 
+    it('automatically expires due PayOS payments and releases the booking', async () => {
+        const booking = createBooking({
+            payment_method: 'PAYOS',
+            payment_status: 'PENDING',
+        });
+        const payment = {
+            _id: '507f1f77bcf86cd799439014',
+            booking_id: bookingId,
+            provider: 'PAYOS',
+            method: 'QR',
+            order_code: 178082640000012,
+            payment_link_id: 'payos-link-id',
+            amount: 120000,
+            status: 'PENDING',
+            active_payment_key: `PAYOS:${bookingId}`,
+            expires_at: new Date('2026-01-01T00:00:00.000Z'),
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+
+        PaymentTransaction.find.mockReturnValue(createLimitedQueryMock([payment]));
+        PaymentTransaction.findById.mockReturnValue(createSessionQueryMock(payment));
+        Booking.findById.mockReturnValue(createSessionQueryMock(booking));
+
+        const result = await paymentService.expireDuePayosPayments({
+            now: new Date('2026-07-21T00:00:00.000Z'),
+        });
+
+        expect(result).toMatchObject({
+            processed: 1,
+            expired: 1,
+            failed: 0,
+        });
+        expect(payment.status).toBe('EXPIRED');
+        expect(payment.active_payment_key).toBeNull();
+        expect(booking.payment_method).toBe('CASH');
+        expect(booking.payment_status).toBe('UNPAID');
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+                action: 'PAYMENT_EXPIRED',
+                actorId: null,
+            })
+        );
+    });
+
     it('handles successful PayOS webhook and confirms booking paid once', async () => {
         const booking = createBooking({
             payment_method: 'PAYOS',
@@ -765,6 +968,12 @@ describe('payment service createPayosPayment', () => {
         });
         expect(result.received).toBe(true);
         expect(result.already_processed).toBe(false);
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+                action: 'PAYMENT_CONFIRMED',
+                actorId: null,
+            })
+        );
     });
 
     it('returns idempotent response when PayOS webhook is repeated second time', async () => {
@@ -971,6 +1180,10 @@ describe('payment service createPayosPayment', () => {
     });
 
     it('marks payment failed when PayOS webhook is not successful', async () => {
+        const booking = createBooking({
+            payment_method: 'PAYOS',
+            payment_status: 'PENDING',
+        });
         const payment = {
             _id: '507f1f77bcf86cd799439014',
             booking_id: bookingId,
@@ -988,6 +1201,7 @@ describe('payment service createPayosPayment', () => {
             code: '01',
         });
         PaymentTransaction.findOne.mockReturnValue(createSessionQueryMock(payment));
+        Booking.findById.mockReturnValue(createSessionQueryMock(booking));
 
         const result = await paymentService.handlePayosWebhook({
             code: '01',
@@ -999,6 +1213,8 @@ describe('payment service createPayosPayment', () => {
         expect(payment.status).toBe('FAILED');
         expect(payment.raw_webhook).toMatchObject({ code: '01' });
         expect(payment.save).toHaveBeenCalledWith({ session: mockSession });
+        expect(booking.payment_method).toBe('CASH');
+        expect(booking.payment_status).toBe('UNPAID');
         expect(result.ignored).toBe(true);
     });
 });

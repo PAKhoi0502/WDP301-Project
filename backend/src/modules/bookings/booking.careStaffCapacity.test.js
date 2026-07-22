@@ -60,6 +60,7 @@ jest.mock('../booking-violations/bookingViolation.service', () => ({
 }));
 jest.mock('../notifications/notification.service', () => ({
     createInAppNotification: jest.fn().mockResolvedValue({}),
+    emitPaymentReady: jest.fn().mockResolvedValue({}),
 }));
 jest.mock('../customer-vouchers/customerVoucher.service', () => ({
     previewVoucherForBooking: jest.fn().mockResolvedValue(null),

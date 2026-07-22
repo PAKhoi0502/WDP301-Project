@@ -4,6 +4,7 @@ const Booking = require('../bookings/booking.model');
 const BookingMapper = require('../bookings/booking.mapper');
 const bookingPaymentService = require('../bookings/bookingPayment.service');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
+const auditLogService = require('../audit-logs/auditLog.service');
 const PaymentTransaction = require('./paymentTransaction.model');
 const PaymentMapper = require('./payment.mapper');
 const payosService = require('./payos.service');
@@ -17,9 +18,37 @@ const {
 const {
     PAYMENT_PROVIDER,
     PAYMENT_METHOD,
+    PAYMENT_INITIATED_CHANNEL,
     PAYMENT_TRANSACTION_STATUS,
     PAYMENT_CURRENCY,
 } = require('../../shared/constants/payment.constant');
+const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
+
+const ACTIVE_PAYMENT_STATUSES = Object.freeze([
+    PAYMENT_TRANSACTION_STATUS.INITIATED,
+    PAYMENT_TRANSACTION_STATUS.PENDING,
+    PAYMENT_TRANSACTION_STATUS.CANCELING,
+]);
+
+const PAYMENT_POLL_AFTER_MS = 3000;
+
+const buildActivePaymentKey = (bookingId) => `${PAYMENT_PROVIDER.PAYOS}:${bookingId.toString()}`;
+
+const getInitiatedChannel = (user) => (
+    user.role === USER_ROLES.CUSTOMER
+        ? PAYMENT_INITIATED_CHANNEL.CUSTOMER_SELF_SERVICE
+        : PAYMENT_INITIATED_CHANNEL.STAFF_ASSISTED
+);
+
+const assertCustomerOwnsBooking = (user, booking) => {
+    if (
+        booking.is_walk_in
+        || !booking.customer_id
+        || booking.customer_id.toString() !== user._id.toString()
+    ) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    }
+};
 
 const getActiveStaffProfile = async (staffUserId) => {
     const staffProfile = await StaffProfile.findOne({
@@ -50,6 +79,15 @@ const assertStaffCanAccessBooking = async (user, booking) => {
     }
 };
 
+const assertActorCanAccessBooking = async (user, booking) => {
+    if (user.role === USER_ROLES.CUSTOMER) {
+        assertCustomerOwnsBooking(user, booking);
+        return;
+    }
+
+    await assertStaffCanAccessBooking(user, booking);
+};
+
 const assertBookingCanCreatePayosPayment = (booking) => {
     if (booking.status !== BOOKING_STATUS.COMPLETED) {
         throw new AppError('Booking cannot be processed in current status', 400, 'BOOKING_PAYOS_PAYMENT_NOT_ALLOWED');
@@ -73,7 +111,12 @@ const findActivePayosPayment = async (bookingId, now = new Date()) => {
                 status: PAYMENT_TRANSACTION_STATUS.CANCELING,
             },
             {
-                status: PAYMENT_TRANSACTION_STATUS.PENDING,
+                status: {
+                    $in: [
+                        PAYMENT_TRANSACTION_STATUS.INITIATED,
+                        PAYMENT_TRANSACTION_STATUS.PENDING,
+                    ],
+                },
                 $or: [
                     { expires_at: null },
                     { expires_at: { $gt: now } },
@@ -85,21 +128,11 @@ const findActivePayosPayment = async (bookingId, now = new Date()) => {
     return payment;
 };
 
-const expireOldPendingPayments = async (bookingId, now = new Date()) => {
-    await PaymentTransaction.updateMany(
-        {
-            booking_id: bookingId,
-            provider: PAYMENT_PROVIDER.PAYOS,
-            status: PAYMENT_TRANSACTION_STATUS.PENDING,
-            expires_at: { $lte: now },
-        },
-        {
-            $set: {
-                status: PAYMENT_TRANSACTION_STATUS.EXPIRED,
-                expired_at: now,
-            },
-        }
-    );
+const findLatestPayosPayment = async (bookingId) => {
+    return PaymentTransaction.findOne({
+        booking_id: bookingId,
+        provider: PAYMENT_PROVIDER.PAYOS,
+    }).sort({ created_at: -1 });
 };
 
 const generateOrderCode = async () => {
@@ -152,11 +185,59 @@ const buildCreatePaymentResponse = (booking, payment, reused = false) => {
     };
 };
 
+const buildCustomerPaymentResponse = (payment, reused = false) => {
+    return {
+        payment: PaymentMapper.toCustomerPaymentTransactionDto(payment),
+        reused,
+        poll_after_ms: ACTIVE_PAYMENT_STATUSES.includes(payment.status)
+            ? PAYMENT_POLL_AFTER_MS
+            : null,
+    };
+};
+
+const buildPaymentResponseForActor = (user, booking, payment, reused = false) => {
+    if (user.role === USER_ROLES.CUSTOMER) {
+        return buildCustomerPaymentResponse(payment, reused);
+    }
+
+    return buildCreatePaymentResponse(booking, payment, reused);
+};
+
 const buildPaymentDetailResponse = (booking, payment) => {
     return {
         booking: BookingMapper.toBookingDto(booking),
         payment: PaymentMapper.toPaymentTransactionDto(payment),
     };
+};
+
+const recordPaymentAuditEvent = async ({
+    actorId = null,
+    action,
+    payment,
+    booking,
+    before = null,
+    after = null,
+    auditContext = {},
+    metadata = {},
+    session = null,
+}) => {
+    return auditLogService.recordAuditEvent({
+        actorId,
+        action,
+        resourceType: AUDIT_RESOURCE_TYPES.PAYMENT,
+        resourceId: payment._id,
+        before,
+        after,
+        ip: auditContext.ip,
+        userAgent: auditContext.userAgent,
+        metadata: {
+            booking_id: booking?._id?.toString?.() || payment.booking_id?.toString?.() || null,
+            provider: payment.provider,
+            initiated_channel: payment.initiated_channel,
+            ...metadata,
+        },
+        session,
+    });
 };
 
 const buildWebhookResponse = ({
@@ -202,35 +283,62 @@ const createInitiatedPayosPayment = async ({
         description,
         status: PAYMENT_TRANSACTION_STATUS.INITIATED,
         expires_at: toExpiresAt(expiredAt),
-        created_by_staff_id: user._id,
+        created_by_staff_id: user.role === USER_ROLES.CUSTOMER ? null : user._id,
+        initiated_by_user_id: user._id,
+        initiated_by_role: user.role,
+        initiated_channel: getInitiatedChannel(user),
+        active_payment_key: buildActivePaymentKey(booking._id),
     }]);
 
     return payments[0];
 };
 
-const markPaymentCreateFailed = async (payment, error) => {
+const markPaymentCreateFailed = async ({ payment, error, booking, user, auditContext = {} }) => {
+    const before = PaymentMapper.toPaymentTransactionDto(payment);
     payment.status = PAYMENT_TRANSACTION_STATUS.FAILED;
+    payment.active_payment_key = null;
     payment.raw_webhook = {
         source: 'CREATE_PAYMENT_LINK',
         message: error.message,
         error_code: error.errorCode || null,
     };
     await payment.save();
+
+    await recordPaymentAuditEvent({
+        actorId: user._id,
+        action: AUDIT_ACTIONS.PAYMENT_FAILED,
+        payment,
+        booking,
+        before,
+        after: PaymentMapper.toPaymentTransactionDto(payment),
+        auditContext,
+        metadata: {
+            source: 'CREATE_PAYMENT_LINK',
+            error_code: error.errorCode || null,
+        },
+    });
 };
 
-const createPayosPayment = async (user, bookingId, payload = {}) => {
+const isPaymentDuplicateError = (error) => error?.code === 11000;
+
+const createPayosPayment = async (user, bookingId, payload = {}, auditContext = {}) => {
     const booking = await Booking.findById(bookingId);
 
     if (!booking) {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
     }
 
-    await assertStaffCanAccessBooking(user, booking);
+    await assertActorCanAccessBooking(user, booking);
     assertBookingCanCreatePayosPayment(booking);
 
     const now = new Date();
 
-    await expireOldPendingPayments(booking._id, now);
+    await expireDuePayosPayments({
+        bookingId: booking._id,
+        now,
+        limit: 10,
+        source: 'CREATE_OR_REUSE',
+    });
 
     const pendingPayment = await findActivePayosPayment(booking._id, now);
 
@@ -239,33 +347,82 @@ const createPayosPayment = async (user, bookingId, payload = {}) => {
             throw new AppError('Payment cancel is already in progress', 409, 'PAYMENT_CANCEL_IN_PROGRESS');
         }
 
-        if (booking.payment_method !== BOOKING_PAYMENT_METHOD.PAYOS
-            || booking.payment_status !== BOOKING_PAYMENT_STATUS.PENDING) {
+        if (
+            pendingPayment.status === PAYMENT_TRANSACTION_STATUS.PENDING
+            && (
+                booking.payment_method !== BOOKING_PAYMENT_METHOD.PAYOS
+                || booking.payment_status !== BOOKING_PAYMENT_STATUS.PENDING
+            )
+        ) {
             booking.payment_method = BOOKING_PAYMENT_METHOD.PAYOS;
             booking.payment_status = BOOKING_PAYMENT_STATUS.PENDING;
             await booking.save();
         }
 
-        return buildCreatePaymentResponse(booking, pendingPayment, true);
+        await recordPaymentAuditEvent({
+            actorId: user._id,
+            action: AUDIT_ACTIONS.PAYMENT_REUSED,
+            payment: pendingPayment,
+            booking,
+            auditContext,
+            metadata: {
+                source: 'CREATE_OR_REUSE',
+            },
+        });
+
+        return buildPaymentResponseForActor(user, booking, pendingPayment, true);
     }
 
     const orderCode = await generateOrderCode();
     const description = buildPaymentDescription(orderCode);
+    const returnUrl = user.role === USER_ROLES.CUSTOMER
+        ? process.env.PAYOS_CUSTOMER_RETURN_URL || undefined
+        : payload.return_url;
+    const cancelUrl = user.role === USER_ROLES.CUSTOMER
+        ? process.env.PAYOS_CUSTOMER_CANCEL_URL || undefined
+        : payload.cancel_url;
     const expiredAt = payosService.buildCreatePaymentLinkPayload({
         orderCode,
         amount: booking.final_price,
         description,
-        returnUrl: payload.return_url,
-        cancelUrl: payload.cancel_url,
+        returnUrl,
+        cancelUrl,
     }).expiredAt;
 
-    const initiatedPayment = await createInitiatedPayosPayment({
-        booking,
-        orderCode,
-        description,
-        expiredAt,
-        user,
-    });
+    let initiatedPayment;
+
+    try {
+        initiatedPayment = await createInitiatedPayosPayment({
+            booking,
+            orderCode,
+            description,
+            expiredAt,
+            user,
+        });
+    } catch (error) {
+        if (!isPaymentDuplicateError(error)) {
+            throw error;
+        }
+
+        const concurrentPayment = await findActivePayosPayment(booking._id, now);
+
+        if (!concurrentPayment) {
+            throw error;
+        }
+
+        await recordPaymentAuditEvent({
+            actorId: user._id,
+            action: AUDIT_ACTIONS.PAYMENT_REUSED,
+            payment: concurrentPayment,
+            booking,
+            auditContext,
+            metadata: {
+                source: 'CONCURRENT_CREATE',
+            },
+        });
+
+        return buildPaymentResponseForActor(user, booking, concurrentPayment, true);
+    }
 
     let paymentLink;
 
@@ -274,12 +431,18 @@ const createPayosPayment = async (user, bookingId, payload = {}) => {
             orderCode,
             amount: booking.final_price,
             description,
-            returnUrl: payload.return_url,
-            cancelUrl: payload.cancel_url,
+            returnUrl,
+            cancelUrl,
             expiredAt,
         });
     } catch (error) {
-        await markPaymentCreateFailed(initiatedPayment, error);
+        await markPaymentCreateFailed({
+            payment: initiatedPayment,
+            error,
+            booking,
+            user,
+            auditContext,
+        });
         throw error;
     }
 
@@ -315,10 +478,33 @@ const createPayosPayment = async (user, bookingId, payload = {}) => {
             payment.status = PAYMENT_TRANSACTION_STATUS.PENDING;
             await payment.save({ session });
 
-            response = buildCreatePaymentResponse(freshBooking, payment, false);
+            await recordPaymentAuditEvent({
+                actorId: user._id,
+                action: AUDIT_ACTIONS.PAYMENT_CREATED,
+                payment,
+                booking: freshBooking,
+                after: PaymentMapper.toPaymentTransactionDto(payment),
+                auditContext,
+                metadata: {
+                    source: 'CREATE_PAYMENT_LINK',
+                },
+                session,
+            });
+
+            response = buildPaymentResponseForActor(user, freshBooking, payment, false);
         });
 
         return response;
+    } catch (error) {
+        await payosService.cancelPaymentLink(orderCode, 'Local payment finalization failed').catch(() => null);
+        await markPaymentCreateFailed({
+            payment: initiatedPayment,
+            error,
+            booking,
+            user,
+            auditContext,
+        });
+        throw error;
     } finally {
         await session.endSession();
     }
@@ -338,6 +524,41 @@ const getPaymentById = async (user, paymentId) => {
     }
 
     await assertStaffCanAccessBooking(user, booking);
+
+    return buildPaymentDetailResponse(booking, payment);
+};
+
+const getPayosPaymentForBooking = async (user, bookingId) => {
+    let booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    }
+
+    await assertActorCanAccessBooking(user, booking);
+    await expireDuePayosPayments({
+        bookingId: booking._id,
+        limit: 10,
+        source: 'PAYMENT_POLL',
+    });
+
+    booking = await Booking.findById(bookingId);
+
+    if (!booking) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    }
+
+    await assertActorCanAccessBooking(user, booking);
+
+    const payment = await findLatestPayosPayment(booking._id);
+
+    if (!payment) {
+        throw new AppError('Payment transaction not found', 404, 'PAYMENT_TRANSACTION_NOT_FOUND');
+    }
+
+    if (user.role === USER_ROLES.CUSTOMER) {
+        return buildCustomerPaymentResponse(payment, true);
+    }
 
     return buildPaymentDetailResponse(booking, payment);
 };
@@ -413,7 +634,12 @@ const rollbackPayosPaymentCancel = async (paymentId, error) => {
     await payment.save();
 };
 
-const finishPayosPaymentCancel = async (user, paymentId) => {
+const finishPayosPaymentCancel = async (
+    user,
+    paymentId,
+    auditContext = {},
+    metadata = {}
+) => {
     const session = await mongoose.startSession();
 
     try {
@@ -442,8 +668,10 @@ const finishPayosPaymentCancel = async (user, paymentId) => {
                 throw new AppError('Payment cannot be canceled in current status', 400, 'PAYMENT_CANCEL_NOT_ALLOWED');
             }
 
+            const before = PaymentMapper.toPaymentTransactionDto(payment);
             payment.status = PAYMENT_TRANSACTION_STATUS.CANCELED;
             payment.canceled_at = new Date();
+            payment.active_payment_key = null;
             await payment.save({ session });
 
             if (
@@ -456,6 +684,18 @@ const finishPayosPaymentCancel = async (user, paymentId) => {
                 await booking.save({ session });
             }
 
+            await recordPaymentAuditEvent({
+                actorId: user._id,
+                action: AUDIT_ACTIONS.PAYMENT_CANCELED,
+                payment,
+                booking,
+                before,
+                after: PaymentMapper.toPaymentTransactionDto(payment),
+                auditContext,
+                metadata,
+                session,
+            });
+
             response = buildPaymentDetailResponse(booking, payment);
         });
 
@@ -465,7 +705,7 @@ const finishPayosPaymentCancel = async (user, paymentId) => {
     }
 };
 
-const cancelPayosPayment = async (user, paymentId, { reason } = {}) => {
+const cancelPayosPayment = async (user, paymentId, { reason } = {}, auditContext = {}) => {
     const cancelContext = await beginPayosPaymentCancel(user, paymentId);
 
     try {
@@ -475,7 +715,9 @@ const cancelPayosPayment = async (user, paymentId, { reason } = {}) => {
         throw error;
     }
 
-    return finishPayosPaymentCancel(user, paymentId);
+    return finishPayosPaymentCancel(user, paymentId, auditContext, {
+        reason: reason || null,
+    });
 };
 
 const finishPayosPaymentCanceledAtProvider = async (user, paymentId) => {
@@ -509,7 +751,10 @@ const assertPaymentCanBeExpired = (payment, now) => {
         throw new AppError('Payment cancel is already in progress', 409, 'PAYMENT_CANCEL_IN_PROGRESS');
     }
 
-    if (payment.status !== PAYMENT_TRANSACTION_STATUS.PENDING) {
+    if (![
+        PAYMENT_TRANSACTION_STATUS.INITIATED,
+        PAYMENT_TRANSACTION_STATUS.PENDING,
+    ].includes(payment.status)) {
         throw new AppError('Payment cannot be expired in current status', 400, 'PAYMENT_EXPIRE_NOT_ALLOWED');
     }
 
@@ -522,9 +767,14 @@ const assertPaymentCanBeExpired = (payment, now) => {
     }
 };
 
-const expirePayosPayment = async (user, paymentId) => {
+const expirePayosPaymentInternal = async ({
+    user = null,
+    paymentId,
+    now = new Date(),
+    auditContext = {},
+    source = 'MANUAL',
+}) => {
     const session = await mongoose.startSession();
-    const now = new Date();
 
     try {
         let response;
@@ -542,13 +792,30 @@ const expirePayosPayment = async (user, paymentId) => {
                 throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
             }
 
-            await assertStaffCanAccessBooking(user, booking);
+            if (user) {
+                await assertStaffCanAccessBooking(user, booking);
+            }
+
             assertPaymentCanBeExpired(payment, now);
 
             if (payment.status !== PAYMENT_TRANSACTION_STATUS.EXPIRED) {
+                const before = PaymentMapper.toPaymentTransactionDto(payment);
                 payment.status = PAYMENT_TRANSACTION_STATUS.EXPIRED;
                 payment.expired_at = now;
+                payment.active_payment_key = null;
                 await payment.save({ session });
+
+                await recordPaymentAuditEvent({
+                    actorId: user?._id || null,
+                    action: AUDIT_ACTIONS.PAYMENT_EXPIRED,
+                    payment,
+                    booking,
+                    before,
+                    after: PaymentMapper.toPaymentTransactionDto(payment),
+                    auditContext,
+                    metadata: { source },
+                    session,
+                });
             }
 
             if (
@@ -570,6 +837,72 @@ const expirePayosPayment = async (user, paymentId) => {
     }
 };
 
+const expirePayosPayment = async (user, paymentId, auditContext = {}) => {
+    return expirePayosPaymentInternal({
+        user,
+        paymentId,
+        auditContext,
+        source: 'MANUAL',
+    });
+};
+
+const expireDuePayosPayments = async ({
+    limit = 50,
+    bookingId = null,
+    now = new Date(),
+    source = 'SCHEDULER',
+} = {}) => {
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+    const filter = {
+        provider: PAYMENT_PROVIDER.PAYOS,
+        status: {
+            $in: [
+                PAYMENT_TRANSACTION_STATUS.INITIATED,
+                PAYMENT_TRANSACTION_STATUS.PENDING,
+            ],
+        },
+        expires_at: { $lte: now },
+    };
+
+    if (bookingId) {
+        filter.booking_id = bookingId;
+    }
+
+    const duePayments = await PaymentTransaction.find(filter)
+        .sort({ expires_at: 1 })
+        .limit(safeLimit);
+    const results = [];
+
+    for (const payment of duePayments) {
+        try {
+            const result = await expirePayosPaymentInternal({
+                paymentId: payment._id,
+                now,
+                source,
+            });
+
+            results.push({
+                payment_id: payment._id.toString(),
+                status: result.payment.status,
+            });
+        } catch (error) {
+            results.push({
+                payment_id: payment._id.toString(),
+                status: 'FAILED',
+                error_code: error.errorCode || null,
+                error: error.message,
+            });
+        }
+    }
+
+    return {
+        processed: results.length,
+        expired: results.filter((item) => item.status === PAYMENT_TRANSACTION_STATUS.EXPIRED).length,
+        failed: results.filter((item) => item.status === 'FAILED').length,
+        data: results,
+    };
+};
+
 const resolvePendingPayosPaymentForCash = async (
     user,
     bookingId,
@@ -585,10 +918,26 @@ const resolvePendingPayosPaymentForCash = async (
         );
     }
 
-    if (
+    await expireDuePayosPayments({
+        bookingId: booking._id,
+        limit: 10,
+        source: 'CASH_PAYMENT_RESOLUTION',
+    });
+
+    const payment = await findActivePayosPayment(booking._id);
+
+    if (payment?.status === PAYMENT_TRANSACTION_STATUS.INITIATED) {
+        throw new AppError(
+            'PayOS payment creation is in progress',
+            409,
+            'PAYMENT_CREATION_IN_PROGRESS'
+        );
+    }
+
+    if (!payment && (
         booking.payment_method !== BOOKING_PAYMENT_METHOD.PAYOS
         || booking.payment_status !== BOOKING_PAYMENT_STATUS.PENDING
-    ) {
+    )) {
         return {
             resolution: 'NONE',
             booking: BookingMapper.toBookingDto(booking),
@@ -596,23 +945,20 @@ const resolvePendingPayosPaymentForCash = async (
         };
     }
 
-    const payment = await PaymentTransaction.findOne({
-        booking_id: booking._id,
-        provider: PAYMENT_PROVIDER.PAYOS,
-        status: {
-            $in: [
-                PAYMENT_TRANSACTION_STATUS.PENDING,
-                PAYMENT_TRANSACTION_STATUS.CANCELING,
-            ],
-        },
-    }).sort({ created_at: -1 });
-
     if (!payment) {
         const currentBooking = await getCurrentBookingAfterPaymentRace(user, booking._id);
 
         if (currentBooking.payment_status === BOOKING_PAYMENT_STATUS.PAID) {
             return {
                 resolution: 'PAYOS_PAID',
+                booking: BookingMapper.toBookingDto(currentBooking),
+                payment: null,
+            };
+        }
+
+        if (currentBooking.payment_status === BOOKING_PAYMENT_STATUS.UNPAID) {
+            return {
+                resolution: 'NONE',
                 booking: BookingMapper.toBookingDto(currentBooking),
                 payment: null,
             };
@@ -722,16 +1068,48 @@ const markPayosPaymentFailed = async (payload, webhookData) => {
                 return;
             }
 
-            if (payment.status !== PAYMENT_TRANSACTION_STATUS.PAID) {
+            const booking = await Booking.findById(payment.booking_id).session(session);
+
+            const canFailPayment = ACTIVE_PAYMENT_STATUSES.includes(payment.status);
+
+            if (canFailPayment) {
+                const before = PaymentMapper.toPaymentTransactionDto(payment);
                 payment.status = PAYMENT_TRANSACTION_STATUS.FAILED;
+                payment.active_payment_key = null;
                 payment.raw_webhook = payload;
                 await payment.save({ session });
+
+                if (
+                    booking
+                    && booking.payment_method === BOOKING_PAYMENT_METHOD.PAYOS
+                    && booking.payment_status === BOOKING_PAYMENT_STATUS.PENDING
+                ) {
+                    booking.payment_method = BOOKING_PAYMENT_METHOD.CASH;
+                    booking.payment_status = BOOKING_PAYMENT_STATUS.UNPAID;
+                    booking.paid_at = null;
+                    await booking.save({ session });
+                }
+
+                await recordPaymentAuditEvent({
+                    action: AUDIT_ACTIONS.PAYMENT_FAILED,
+                    payment,
+                    booking,
+                    before,
+                    after: PaymentMapper.toPaymentTransactionDto(payment),
+                    metadata: {
+                        source: 'PAYOS_WEBHOOK',
+                        provider_code: webhookData.code || null,
+                    },
+                    session,
+                });
             }
 
             response = buildWebhookResponse({
                 payment,
+                booking,
                 ignored: true,
-                already_processed: payment.status === PAYMENT_TRANSACTION_STATUS.PAID,
+                already_processed: !canFailPayment,
+                reason: canFailPayment ? null : 'PAYMENT_ALREADY_TERMINAL',
             });
         });
 
@@ -808,16 +1186,33 @@ const handlePayosWebhook = async (payload = {}) => {
                 payment.payment_link_id = webhookData.paymentLinkId;
             }
 
+            const paymentBefore = PaymentMapper.toPaymentTransactionDto(payment);
             payment.status = PAYMENT_TRANSACTION_STATUS.PAID;
             payment.paid_at = paidAt;
+            payment.active_payment_key = null;
             payment.raw_webhook = payload;
             await payment.save({ session });
 
             const paidResult = await bookingPaymentService.confirmBookingPaid({
                 booking,
                 paymentMethod: BOOKING_PAYMENT_METHOD.PAYOS,
-                actorId: payment.created_by_staff_id,
+                actorId: payment.initiated_by_user_id || payment.created_by_staff_id,
                 paidAt,
+                session,
+            });
+
+            await recordPaymentAuditEvent({
+                action: AUDIT_ACTIONS.PAYMENT_CONFIRMED,
+                payment,
+                booking,
+                before: paymentBefore,
+                after: PaymentMapper.toPaymentTransactionDto(payment),
+                metadata: {
+                    source: 'PAYOS_WEBHOOK',
+                    initiated_by_user_id: payment.initiated_by_user_id?.toString?.()
+                        || payment.created_by_staff_id?.toString?.()
+                        || null,
+                },
                 session,
             });
 
@@ -838,8 +1233,10 @@ const handlePayosWebhook = async (payload = {}) => {
 module.exports = {
     createPayosPayment,
     getPaymentById,
+    getPayosPaymentForBooking,
     cancelPayosPayment,
     expirePayosPayment,
+    expireDuePayosPayments,
     resolvePendingPayosPaymentForCash,
     handlePayosWebhook,
 };

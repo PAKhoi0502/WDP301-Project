@@ -5,11 +5,13 @@ const {
     PAYMENT_PROVIDER_VALUES,
     PAYMENT_METHOD,
     PAYMENT_METHOD_VALUES,
+    PAYMENT_INITIATED_CHANNEL_VALUES,
     PAYMENT_TRANSACTION_STATUS,
     PAYMENT_TRANSACTION_STATUS_VALUES,
     PAYMENT_CURRENCY,
     PAYMENT_CURRENCY_VALUES,
 } = require('../../shared/constants/payment.constant');
+const { USER_ROLE_VALUES } = require('../../shared/constants/roles.constant');
 
 const paymentTransactionSchema = new mongoose.Schema(
     {
@@ -112,6 +114,30 @@ const paymentTransactionSchema = new mongoose.Schema(
             default: null,
         },
 
+        initiated_by_user_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        initiated_by_role: {
+            type: String,
+            enum: USER_ROLE_VALUES,
+            default: null,
+        },
+
+        initiated_channel: {
+            type: String,
+            enum: PAYMENT_INITIATED_CHANNEL_VALUES,
+            default: null,
+        },
+
+        active_payment_key: {
+            type: String,
+            trim: true,
+            default: null,
+        },
+
         raw_webhook: {
             type: mongoose.Schema.Types.Mixed,
             default: null,
@@ -132,6 +158,17 @@ paymentTransactionSchema.index({ status: 1, expires_at: 1 });
 paymentTransactionSchema.index({ provider: 1, status: 1 });
 paymentTransactionSchema.index({ order_code: 1, payment_link_id: 1 });
 paymentTransactionSchema.index({ created_by_staff_id: 1 });
+paymentTransactionSchema.index({ initiated_by_user_id: 1, created_at: -1 });
+paymentTransactionSchema.index({ initiated_channel: 1, created_at: -1 });
+paymentTransactionSchema.index(
+    { active_payment_key: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            active_payment_key: { $type: 'string' },
+        },
+    }
+);
 
 paymentTransactionSchema.pre('validate', function (next) {
     if (!Number.isSafeInteger(this.order_code)) {

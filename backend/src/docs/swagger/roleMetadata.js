@@ -539,11 +539,20 @@ const ROUTE_GROUPS = Object.freeze([
         ],
     },
     {
+        roles: ['CUSTOMER'],
+        feature: 'My PayOS payments',
+        operations: [
+            'POST /payments/bookings/{bookingId}/payos',
+            'GET /payments/bookings/{bookingId}/payos',
+        ],
+    },
+    {
         roles: ['STAFF', 'ADMIN'],
         feature: 'PayOS payment operations',
         scope: STAFF_GARAGE_SCOPE,
         operations: [
             'POST /admin/payments/bookings/{bookingId}/payos',
+            'GET /admin/payments/bookings/{bookingId}/payos',
             'GET /admin/payments/{paymentId}',
             'PATCH /admin/payments/{paymentId}/cancel',
             'PATCH /admin/payments/{paymentId}/expire',
@@ -603,6 +612,7 @@ const ROUTE_GROUPS = Object.freeze([
             'GET /admin/analytics/services',
             'GET /admin/analytics/promotions',
             'GET /admin/analytics/wash-bays',
+            'GET /admin/analytics/payments',
             'GET /admin/analytics/surveys/{surveyId}',
         ],
     },

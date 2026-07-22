@@ -87,6 +87,8 @@ npm run seed:reset
 npm run db:reset
 npm run migrate:phone-e164
 npm run migrate:walk-in-promotions
+npm run migrate:payment-initiators:dry-run
+npm run migrate:payment-initiators
 ```
 
 `seed:reset` runs seed with reset mode. `db:reset` drops configured collections through `src/scripts/resetDatabase.js`.
@@ -135,6 +137,8 @@ PAYOS_API_KEY
 PAYOS_CHECKSUM_KEY
 PAYOS_RETURN_URL
 PAYOS_CANCEL_URL
+PAYOS_CUSTOMER_RETURN_URL
+PAYOS_CUSTOMER_CANCEL_URL
 PAYOS_WEBHOOK_URL
 PAYOS_PAYMENT_EXPIRE_MINUTES
 
@@ -150,6 +154,8 @@ TIER_INACTIVITY_DOWNGRADE_JOB_INTERVAL_MS
 TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE
 SERVICE_ITEM_TIMER_JOB_INTERVAL_MS
 SERVICE_ITEM_TIMER_BATCH_SIZE
+PAYMENT_EXPIRE_JOB_INTERVAL_MS
+PAYMENT_EXPIRE_BATCH_SIZE
 WALK_IN_CLAIM_LOOKBACK_MONTHS
 
 SMTP_HOST
@@ -259,6 +265,8 @@ Development defaults to `SMS_PROVIDER=mock`. The request response includes `debu
 Run `npm run migrate:phone-e164` once before deploying this normalization change to a database that already contains local-format user phones. The migration stops on normalization collisions instead of merging accounts.
 
 Run `npm run migrate:walk-in-promotions` once before deploying walk-in promotion reservations and history claims to an existing database. The migration normalizes valid guest phones, marks legacy promotion usages as consumed, initializes promotion audience fields and synchronizes usage counters.
+
+Run `npm run migrate:payment-initiators:dry-run` before deploying shared customer/staff PayOS sessions, then run `npm run migrate:payment-initiators`. The migration backfills initiator metadata and active payment keys, and stops if an existing booking has multiple active PayOS transactions.
 
 Roles currently used:
 
@@ -530,17 +538,22 @@ Rules:
 Implemented payment flows:
 
 - Cash mark paid by Staff/Admin after booking is completed
-- PayOS payment link/QR creation
-- Reuse existing active PayOS transaction
+- Customer self-service PayOS payment link/QR creation for owned completed bookings
+- Staff/Admin assisted PayOS payment creation
+- Shared active PayOS transaction across customer and staff channels
+- Customer and staff polling by booking
+- Database-enforced active payment key
 - Cancel pending PayOS payment
-- Expire overdue PayOS payment
+- Automatic and manual expiration of overdue PayOS payment
 - PayOS webhook verification and processing
+- Payment audit events and initiated-channel analytics
 
 PayOS transaction lifecycle:
 
 ```txt
 INITIATED -> PENDING -> PAID
 INITIATED -> FAILED
+INITIATED -> EXPIRED
 PENDING -> CANCELING -> CANCELED
 PENDING -> EXPIRED
 PENDING -> FAILED
@@ -567,6 +580,7 @@ COMPLETED + PAID
 Implemented:
 
 - In-app notifications
+- `PAYMENT_READY` notification after a registered customer booking completes
 - Read/unread management
 - Delete notifications
 - Notification constants for booking, loyalty, promotion and waitlist-related events
