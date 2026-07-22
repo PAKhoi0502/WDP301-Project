@@ -1,3 +1,8 @@
+const {
+    STAFF_CAPABILITIES,
+    STAFF_CAPABILITY_VALUES,
+} = require('../../shared/constants/staff.constant');
+
 const HTTP_METHODS = Object.freeze(['get', 'post', 'put', 'patch', 'delete']);
 
 const ROLE_DETAILS = Object.freeze({
@@ -32,6 +37,286 @@ const ROLE_DETAILS = Object.freeze({
 });
 
 const STAFF_GARAGE_SCOPE = 'STAFF access is limited by assigned garage where the service enforces garage scope. ADMIN access is system-wide unless a request filter is provided.';
+
+const STAFF_OPERATION_POLICIES = new Map();
+
+const addStaffOperationPolicies = ({
+    operations,
+    capabilities,
+    match = 'all',
+    resourceScope,
+    selector,
+}) => {
+    const invalidCapabilities = capabilities.filter(
+        (capability) => !STAFF_CAPABILITY_VALUES.includes(capability)
+    );
+
+    if (invalidCapabilities.length > 0) {
+        throw new Error(`Invalid OpenAPI staff capabilities: ${invalidCapabilities.join(', ')}`);
+    }
+
+    operations.forEach((operation) => {
+        if (STAFF_OPERATION_POLICIES.has(operation)) {
+            throw new Error(`Duplicate OpenAPI staff capability policy for ${operation}`);
+        }
+
+        STAFF_OPERATION_POLICIES.set(operation, Object.freeze({
+            capabilities: Object.freeze([...capabilities]),
+            match,
+            resourceScope,
+            ...(selector ? { selector } : {}),
+        }));
+    });
+};
+
+addStaffOperationPolicies({
+    operations: ['GET /admin/customers'],
+    capabilities: [STAFF_CAPABILITIES.CUSTOMER_READ_GARAGE],
+    resourceScope: 'garage',
+});
+
+addStaffOperationPolicies({
+    operations: [
+        'GET /admin/bookings',
+        'GET /admin/bookings/{id}',
+    ],
+    capabilities: [
+        STAFF_CAPABILITIES.BOOKING_READ_GARAGE,
+        STAFF_CAPABILITIES.BOOKING_READ_ASSIGNED,
+    ],
+    match: 'any',
+    resourceScope: 'garage-or-assigned',
+});
+
+[
+    [['POST /admin/bookings/walk-in'], STAFF_CAPABILITIES.BOOKING_WALK_IN_CREATE],
+    [['PATCH /admin/bookings/{id}/cancel'], STAFF_CAPABILITIES.BOOKING_CANCEL_CUSTOMER_REQUEST],
+    [['PATCH /admin/bookings/{id}/mark-no-show'], STAFF_CAPABILITIES.BOOKING_ARRIVAL_MANAGE],
+    [['PATCH /admin/bookings/{id}/check-in'], STAFF_CAPABILITIES.BOOKING_CHECK_IN],
+    [
+        [
+            'GET /admin/bookings/{id}/late-arrival-options',
+            'PATCH /admin/bookings/{id}/resolve-late-arrival',
+        ],
+        STAFF_CAPABILITIES.BOOKING_LATE_ARRIVAL_MANAGE,
+    ],
+    [['PATCH /admin/bookings/{id}/assign-wash-bay'], STAFF_CAPABILITIES.BOOKING_WASH_BAY_ASSIGN],
+    [['PATCH /admin/bookings/{id}/start-service'], STAFF_CAPABILITIES.BOOKING_SERVICE_START],
+    [['PATCH /admin/bookings/{id}/complete-service'], STAFF_CAPABILITIES.BOOKING_SERVICE_COMPLETE],
+    [['PATCH /admin/bookings/{id}/mark-paid'], STAFF_CAPABILITIES.BOOKING_PAYMENT_COLLECT_CASH],
+    [
+        ['GET /admin/bookings/{id}/incidents/{incidentId}/resolution-options'],
+        STAFF_CAPABILITIES.INCIDENT_READ_GARAGE,
+    ],
+    [
+        ['PATCH /admin/bookings/{id}/incidents/{incidentId}/record-customer-decision'],
+        STAFF_CAPABILITIES.INCIDENT_RECORD_CUSTOMER_DECISION,
+    ],
+    [
+        ['POST /admin/bookings/{id}/incidents/{incidentId}/compensation-vouchers'],
+        STAFF_CAPABILITIES.INCIDENT_COMPENSATION_ISSUE,
+    ],
+].forEach(([operations, capability]) => {
+    addStaffOperationPolicies({
+        operations,
+        capabilities: [capability],
+        resourceScope: 'garage',
+    });
+});
+
+addStaffOperationPolicies({
+    operations: ['POST /admin/bookings/{id}/incidents'],
+    capabilities: [
+        STAFF_CAPABILITIES.INCIDENT_REPORT_WASH_BAY_FAILURE,
+        STAFF_CAPABILITIES.INCIDENT_REPORT_STAFF_UNAVAILABLE,
+        STAFF_CAPABILITIES.INCIDENT_REPORT_OTHER_GARAGE,
+    ],
+    match: 'resolved',
+    resourceScope: 'garage-or-assigned',
+    selector: 'request.body.incident_type',
+});
+
+addStaffOperationPolicies({
+    operations: ['GET /admin/bookings/{id}/incidents/active'],
+    capabilities: [
+        STAFF_CAPABILITIES.INCIDENT_READ_GARAGE,
+        STAFF_CAPABILITIES.INCIDENT_READ_ASSIGNED,
+    ],
+    match: 'any',
+    resourceScope: 'garage-or-assigned',
+});
+
+addStaffOperationPolicies({
+    operations: [
+        'GET /admin/bookings/{id}/service-steps',
+        'GET /admin/bookings/{id}/service-workflow',
+    ],
+    capabilities: [
+        STAFF_CAPABILITIES.BOOKING_SERVICE_READ_GARAGE,
+        STAFF_CAPABILITIES.SERVICE_TASK_READ_ASSIGNED,
+    ],
+    match: 'any',
+    resourceScope: 'garage-or-assigned',
+});
+
+addStaffOperationPolicies({
+    operations: [
+        'PATCH /admin/bookings/{id}/service-steps/{stepId}/done',
+        'PATCH /admin/bookings/{id}/service-items/{itemKey}/complete-early',
+        'PATCH /admin/bookings/{id}/service-items/{itemKey}/confirm-complete',
+        'PATCH /admin/bookings/{id}/service-items/{itemKey}/pause',
+        'PATCH /admin/bookings/{id}/service-items/{itemKey}/resume',
+    ],
+    capabilities: [
+        STAFF_CAPABILITIES.SERVICE_TASK_WASH_EXECUTE_ASSIGNED,
+        STAFF_CAPABILITIES.SERVICE_TASK_CARE_EXECUTE_ASSIGNED,
+    ],
+    match: 'any',
+    resourceScope: 'assigned',
+});
+
+addStaffOperationPolicies({
+    operations: ['GET /admin/bookings/{id}/inspections'],
+    capabilities: [
+        STAFF_CAPABILITIES.INSPECTION_READ_GARAGE,
+        STAFF_CAPABILITIES.INSPECTION_READ_ASSIGNED,
+    ],
+    match: 'any',
+    resourceScope: 'garage-or-assigned',
+});
+
+addStaffOperationPolicies({
+    operations: ['POST /admin/bookings/{id}/inspections'],
+    capabilities: [STAFF_CAPABILITIES.INSPECTION_CREATE_ASSIGNED],
+    resourceScope: 'assigned',
+});
+
+addStaffOperationPolicies({
+    operations: ['GET /staff/booking-arrivals/arrival-queue'],
+    capabilities: [STAFF_CAPABILITIES.BOOKING_ARRIVAL_QUEUE],
+    resourceScope: 'garage',
+});
+
+addStaffOperationPolicies({
+    operations: [
+        'GET /staff/booking-arrivals/plate-scans',
+        'POST /staff/booking-arrivals/plate-scans',
+        'GET /staff/booking-arrivals/plate-scans/{scanId}',
+        'POST /staff/booking-arrivals/plate-scans/{scanId}/retry',
+        'POST /staff/booking-arrivals/plate-scans/{scanId}/reject',
+    ],
+    capabilities: [STAFF_CAPABILITIES.BOOKING_PLATE_SCAN],
+    resourceScope: 'garage',
+});
+
+addStaffOperationPolicies({
+    operations: [
+        'POST /staff/booking-arrivals/plate-scans/{scanId}/confirm',
+        'POST /staff/booking-arrivals/plate-scans/{scanId}/alternate-vehicle',
+    ],
+    capabilities: [STAFF_CAPABILITIES.BOOKING_CHECK_IN],
+    resourceScope: 'garage',
+});
+
+addStaffOperationPolicies({
+    operations: [
+        'GET /admin/bookings/{id}/handover',
+        'PATCH /admin/bookings/{id}/handover/ready',
+        'PATCH /admin/bookings/{id}/handover/release',
+    ],
+    capabilities: [STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE],
+    resourceScope: 'garage',
+});
+
+[
+    [
+        ['GET /admin/customer-cases', 'GET /admin/customer-cases/{id}'],
+        STAFF_CAPABILITIES.CUSTOMER_CASE_READ_GARAGE,
+        'garage',
+    ],
+    [
+        [
+            'PATCH /admin/customer-cases/{id}/assign',
+            'PATCH /staff/customer-cases/{id}/technical-assessment/assign',
+        ],
+        STAFF_CAPABILITIES.CUSTOMER_CASE_ASSIGN_GARAGE,
+        'garage',
+    ],
+    [
+        ['PATCH /admin/customer-cases/{id}/acknowledge'],
+        STAFF_CAPABILITIES.CUSTOMER_CASE_ACKNOWLEDGE,
+        'assigned',
+    ],
+    [
+        [
+            'POST /admin/customer-cases/{id}/evidence',
+            'POST /admin/customer-cases/{id}/messages',
+            'PATCH /staff/customer-cases/{id}/walk-in-resolution-response',
+        ],
+        STAFF_CAPABILITIES.CUSTOMER_CASE_COMMUNICATE_ASSIGNED,
+        'assigned',
+    ],
+    [
+        ['GET /staff/customer-cases/sla-dashboard'],
+        STAFF_CAPABILITIES.CUSTOMER_CASE_SLA_READ_GARAGE,
+        'garage',
+    ],
+    [
+        [
+            'POST /staff/customer-cases/walk-in/otp/request',
+            'POST /staff/customer-cases/walk-in/otp/verify',
+            'POST /staff/customer-cases/walk-in',
+        ],
+        STAFF_CAPABILITIES.CUSTOMER_CASE_CREATE_WALK_IN,
+        'garage',
+    ],
+    [
+        [
+            'GET /staff/customer-cases/{id}/technical-assessment',
+            'PATCH /staff/customer-cases/{id}/technical-assessment/start',
+            'POST /staff/customer-cases/{id}/technical-assessment/submit',
+        ],
+        STAFF_CAPABILITIES.CUSTOMER_CASE_TECHNICAL_ASSESS_ASSIGNED,
+        'assigned',
+    ],
+    [
+        [
+            'GET /admin/waitlists',
+            'PATCH /admin/waitlists/{id}/cancel',
+            'PATCH /admin/waitlists/{id}/offer',
+            'PATCH /admin/waitlists/{id}/expire',
+        ],
+        STAFF_CAPABILITIES.WAITLIST_MANAGE_GARAGE,
+        'garage',
+    ],
+    [
+        ['GET /admin/customer-vouchers'],
+        STAFF_CAPABILITIES.VOUCHER_READ_GARAGE,
+        'garage',
+    ],
+    [
+        ['GET /admin/wash-histories', 'GET /admin/wash-histories/{id}'],
+        STAFF_CAPABILITIES.WASH_HISTORY_READ_GARAGE,
+        'garage',
+    ],
+    [
+        [
+            'POST /admin/payments/bookings/{bookingId}/payos',
+            'GET /admin/payments/bookings/{bookingId}/payos',
+            'GET /admin/payments/{paymentId}',
+            'PATCH /admin/payments/{paymentId}/cancel',
+            'PATCH /admin/payments/{paymentId}/expire',
+        ],
+        STAFF_CAPABILITIES.PAYMENT_MANAGE_GARAGE,
+        'garage',
+    ],
+].forEach(([operations, capability, resourceScope]) => {
+    addStaffOperationPolicies({
+        operations,
+        capabilities: [capability],
+        resourceScope,
+    });
+});
 
 const ROUTE_GROUPS = Object.freeze([
     {
@@ -661,11 +946,19 @@ const createMetadataByOperation = () => {
                 throw new Error(`Duplicate OpenAPI role metadata for ${key}`);
             }
 
+            const staffPolicy = STAFF_OPERATION_POLICIES.get(key);
+
             metadata.set(key, {
                 roles: group.roles,
                 feature: group.feature,
                 scope: group.scope,
                 auth: getAuthText(group.roles),
+                ...(staffPolicy ? {
+                    requiredCapabilities: staffPolicy.capabilities,
+                    capabilityMatch: staffPolicy.match,
+                    resourceScope: staffPolicy.resourceScope,
+                    capabilitySelector: staffPolicy.selector,
+                } : {}),
             });
         });
     });
@@ -707,6 +1000,16 @@ const buildDescription = (baseDescription, metadata) => {
         lines.push(`**Scope:** ${metadata.scope}`);
     }
 
+    if (metadata.requiredCapabilities) {
+        lines.push(`**Capabilities:** ${metadata.requiredCapabilities.join(', ')}`);
+        lines.push(`**Capability match:** ${metadata.capabilityMatch}`);
+        lines.push(`**Resource scope:** ${metadata.resourceScope}`);
+
+        if (metadata.capabilitySelector) {
+            lines.push(`**Capability selector:** ${metadata.capabilitySelector}`);
+        }
+    }
+
     if (baseDescription) {
         lines.push(baseDescription);
     }
@@ -725,6 +1028,17 @@ const enrichOperation = (operation, metadata) => {
     operation['x-roles'] = metadata.roles;
     operation['x-feature'] = metadata.feature;
     operation['x-auth'] = metadata.auth;
+
+    if (metadata.requiredCapabilities) {
+        operation['x-required-capabilities'] = metadata.requiredCapabilities;
+        operation['x-capability-match'] = metadata.capabilityMatch;
+        operation['x-resource-scope'] = metadata.resourceScope;
+
+        if (metadata.capabilitySelector) {
+            operation['x-capability-selector'] = metadata.capabilitySelector;
+        }
+    }
+
     operation.tags = metadata.roles.map((role) => createRoleTagName(role, metadata.feature));
     operation.summary = `[${getRoleLabels(metadata.roles).join(', ')}] ${metadata.feature} - ${originalSummary}`;
     operation.description = buildDescription(originalDescription, metadata);
@@ -759,6 +1073,7 @@ module.exports = {
     HTTP_METHODS,
     ROLE_DETAILS,
     ROUTE_GROUPS,
+    STAFF_OPERATION_POLICIES,
     enrichOpenApiRoles,
     metadataByOperation,
 };
