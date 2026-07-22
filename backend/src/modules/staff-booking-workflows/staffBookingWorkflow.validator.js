@@ -24,7 +24,14 @@ const getBookingWorkflowSchema = z.object({
     }).strict(),
 });
 
+const claimInspectionBookingSchema = z.object({
+    params: z.object({
+        bookingId: objectId,
+    }).strict(),
+});
+
 module.exports = {
     listBookingWorkflowsSchema,
     getBookingWorkflowSchema,
+    claimInspectionBookingSchema,
 };

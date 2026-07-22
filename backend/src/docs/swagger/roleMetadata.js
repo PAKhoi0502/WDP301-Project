@@ -85,6 +85,12 @@ addStaffOperationPolicies({
 });
 
 addStaffOperationPolicies({
+    operations: ['PATCH /staff/workspace/bookings/{bookingId}/claim-inspection'],
+    capabilities: [STAFF_CAPABILITIES.INSPECTION_CLAIM_GARAGE],
+    resourceScope: 'garage-unassigned',
+});
+
+addStaffOperationPolicies({
     operations: [
         'GET /admin/bookings',
         'GET /admin/bookings/{id}',
@@ -550,6 +556,14 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'GET /staff/workspace/bookings',
             'GET /staff/workspace/bookings/{bookingId}/workflow',
+        ],
+    },
+    {
+        roles: ['STAFF'],
+        feature: 'Inspection self-claim',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'PATCH /staff/workspace/bookings/{bookingId}/claim-inspection',
         ],
     },
     {

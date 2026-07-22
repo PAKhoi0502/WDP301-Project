@@ -31,8 +31,12 @@ not replace backend authorization.
 ## Assignment authorization
 
 - Customer service staff can read bookings in their assigned garage.
+- Inspection staff can view the same-garage workflow queue and atomically claim
+  an unassigned checked-in booking through
+  `PATCH /api/v1/staff/workspace/bookings/:bookingId/claim-inspection`.
 - Inspection staff can read and create inspections only for bookings whose
-  `assigned_inspection_staff_id` is their user id.
+  `assigned_inspection_staff_id` is their user id after self-claim or admin
+  assignment.
 - Wash and care staff can read bookings containing an active assignment for
   their staff profile.
 - Service-item mutations require the staff type expected by the item and an
@@ -42,6 +46,9 @@ Admin-only assignment commands:
 
 - `PATCH /api/v1/staff/bookings/:id/assign-inspection-staff`
 - `PATCH /api/v1/staff/bookings/:id/service-items/:itemKey/assign-staff`
+
+The inspection assignment command is an override for exceptional reassignment.
+Normal queue ownership is established by the inspection staff self-claim API.
 
 Wash execution staff are assigned when service starts when an active wash
 operator is available. Existing care-staff capacity assignments are also copied

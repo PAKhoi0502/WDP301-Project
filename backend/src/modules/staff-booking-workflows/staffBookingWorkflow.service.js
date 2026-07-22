@@ -17,7 +17,10 @@ const {
     BOOKING_HANDOVER_RESPONSES,
 } = require('../../shared/constants/customerCase.constant');
 const { BOOKING_SERVICE_STEP_STATUS } = require('../../shared/constants/bookingServiceStep.constant');
-const { STAFF_CAPABILITIES } = require('../../shared/constants/staff.constant');
+const {
+    STAFF_TYPES,
+    STAFF_CAPABILITIES,
+} = require('../../shared/constants/staff.constant');
 const {
     BOOKING_WORKFLOW_PHASES,
     BOOKING_WORKFLOW_ACTIONS,
@@ -242,6 +245,17 @@ const getAvailableActions = ({ booking, inspections, handover, serviceSteps, sta
         && [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED].includes(booking.status)
     ) {
         actions.push(BOOKING_WORKFLOW_ACTIONS.BOOKING_CHECK_IN);
+    }
+
+    if (
+        !staffContext.is_admin
+        && staffContext.staff_type === STAFF_TYPES.VEHICLE_INSPECTION_STAFF
+        && hasCapability(staffContext, STAFF_CAPABILITIES.INSPECTION_CLAIM_GARAGE)
+        && !booking.assigned_inspection_staff_id
+        && !beforeInspection
+        && booking.status === BOOKING_STATUS.CHECKED_IN
+    ) {
+        actions.push(BOOKING_WORKFLOW_ACTIONS.INSPECTION_CLAIM);
     }
 
     if (
@@ -527,12 +541,16 @@ const listBookingWorkflows = async (staffContext, query = {}) => {
     const inspectionQuery = VehicleInspection.find({ booking_id: { $in: bookingIds } })
         .sort({ inspected_at: 1 });
     const handoverQuery = BookingHandover.find({ booking_id: { $in: bookingIds } });
-    const [inspectionDocuments, handoverDocuments] = await Promise.all([
+    const serviceStepQuery = BookingServiceStep.find({ booking_id: { $in: bookingIds } })
+        .sort({ order: 1 });
+    const [inspectionDocuments, handoverDocuments, serviceStepDocuments] = await Promise.all([
         resolveLeanQuery(inspectionQuery),
         resolveLeanQuery(handoverQuery),
+        resolveLeanQuery(serviceStepQuery),
     ]);
     const inspectionsByBooking = new Map();
     const handoverByBooking = new Map();
+    const serviceStepsByBooking = new Map();
 
     inspectionDocuments.map(toPlainObject).forEach((inspection) => {
         const bookingId = toId(inspection.booking_id);
@@ -543,12 +561,19 @@ const listBookingWorkflows = async (staffContext, query = {}) => {
     handoverDocuments.map(toPlainObject).forEach((handover) => {
         handoverByBooking.set(toId(handover.booking_id), handover);
     });
+    serviceStepDocuments.map(toPlainObject).forEach((serviceStep) => {
+        const bookingId = toId(serviceStep.booking_id);
+        const current = serviceStepsByBooking.get(bookingId) || [];
+        current.push(serviceStep);
+        serviceStepsByBooking.set(bookingId, current);
+    });
 
     return {
         data: bookings.map((booking) => {
             const bookingId = toId(booking._id);
             const inspections = inspectionsByBooking.get(bookingId) || [];
             const handover = handoverByBooking.get(bookingId) || null;
+            const serviceSteps = serviceStepsByBooking.get(bookingId) || [];
 
             return {
                 booking_id: bookingId,
@@ -566,6 +591,13 @@ const listBookingWorkflows = async (staffContext, query = {}) => {
                 current_service_item_key: getCurrentServiceItem(booking)?.item_key || null,
                 payment_status: booking.payment_status,
                 blocked_by_incident: isIncidentHold(booking),
+                available_actions: getAvailableActions({
+                    booking,
+                    inspections,
+                    handover,
+                    serviceSteps,
+                    staffContext,
+                }),
             };
         }),
         meta: {
@@ -607,7 +639,135 @@ const getBookingWorkflow = async (staffContext, bookingId) => {
     });
 };
 
+const assertInspectionClaimContext = (staffContext) => {
+    if (
+        staffContext.is_admin
+        || staffContext.staff_type !== STAFF_TYPES.VEHICLE_INSPECTION_STAFF
+        || !hasCapability(staffContext, STAFF_CAPABILITIES.INSPECTION_CLAIM_GARAGE)
+    ) {
+        throw new AppError(
+            'Only vehicle inspection staff can claim inspection bookings',
+            403,
+            'INSPECTION_CLAIM_STAFF_ONLY'
+        );
+    }
+
+    if (!staffContext.garage_id) {
+        throw new AppError(
+            'Staff is not assigned to any garage',
+            403,
+            'STAFF_GARAGE_NOT_ASSIGNED'
+        );
+    }
+};
+
+const assertInspectionBookingClaimable = async (booking, staffContext) => {
+    assertWorkspaceGarageAccess(staffContext, booking.garage_id);
+
+    if (isIncidentHold(booking)) {
+        throw new AppError(
+            'Inspection booking cannot be claimed while an incident is on hold',
+            409,
+            'INSPECTION_CLAIM_ON_HOLD'
+        );
+    }
+
+    if (booking.status !== BOOKING_STATUS.CHECKED_IN) {
+        throw new AppError(
+            'Inspection booking can only be claimed after check-in',
+            409,
+            'INSPECTION_CLAIM_NOT_ALLOWED'
+        );
+    }
+
+    const beforeInspectionExists = await VehicleInspection.exists({
+        booking_id: booking._id,
+        type: VEHICLE_INSPECTION_TYPES.BEFORE_WASH,
+    });
+
+    if (beforeInspectionExists) {
+        throw new AppError(
+            'Before-wash inspection already exists for this booking',
+            409,
+            'BEFORE_WASH_INSPECTION_ALREADY_EXISTS'
+        );
+    }
+
+    if (
+        booking.assigned_inspection_staff_id
+        && !isSameId(booking.assigned_inspection_staff_id, staffContext.user_id)
+    ) {
+        throw new AppError(
+            'Inspection booking has already been claimed by another staff member',
+            409,
+            'INSPECTION_ALREADY_CLAIMED'
+        );
+    }
+};
+
+const claimInspectionBooking = async (staffContext, bookingId) => {
+    assertInspectionClaimContext(staffContext);
+
+    const currentBookingDocument = await resolveLeanQuery(Booking.findById(bookingId));
+
+    if (!currentBookingDocument) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    }
+
+    const currentBooking = toPlainObject(currentBookingDocument);
+    assertWorkspaceGarageAccess(staffContext, currentBooking.garage_id);
+
+    if (isSameId(currentBooking.assigned_inspection_staff_id, staffContext.user_id)) {
+        return getBookingWorkflow(staffContext, bookingId);
+    }
+
+    await assertInspectionBookingClaimable(currentBooking, staffContext);
+
+    const claimedBookingDocument = await resolveLeanQuery(Booking.findOneAndUpdate(
+        {
+            _id: bookingId,
+            garage_id: staffContext.garage_id,
+            status: BOOKING_STATUS.CHECKED_IN,
+            $or: [
+                { assigned_inspection_staff_id: null },
+                { assigned_inspection_staff_id: staffContext.user_id },
+            ],
+        },
+        {
+            $set: {
+                assigned_inspection_staff_id: staffContext.user_id,
+            },
+        },
+        { new: true }
+    ));
+
+    if (!claimedBookingDocument) {
+        const latestBookingDocument = await resolveLeanQuery(Booking.findById(bookingId));
+
+        if (!latestBookingDocument) {
+            throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+        }
+
+        const latestBooking = toPlainObject(latestBookingDocument);
+
+        if (isSameId(latestBooking.assigned_inspection_staff_id, staffContext.user_id)) {
+            return getBookingWorkflow(staffContext, bookingId);
+        }
+
+        await assertInspectionBookingClaimable(latestBooking, staffContext);
+
+        throw new AppError(
+            'Inspection booking could not be claimed because it changed concurrently',
+            409,
+            'INSPECTION_CLAIM_CONFLICT'
+        );
+    }
+
+    return getBookingWorkflow(staffContext, bookingId);
+};
+
 module.exports = {
     listBookingWorkflows,
     getBookingWorkflow,
+    claimInspectionBooking,
 };

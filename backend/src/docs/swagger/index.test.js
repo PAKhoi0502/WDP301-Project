@@ -50,9 +50,13 @@ describe('OpenAPI staff capability contract', () => {
 
     it('publishes a redacted shared booking workflow contract', () => {
         const detail = openApiSpec.components.schemas.StaffBookingWorkflowDetail;
+        const summary = openApiSpec.components.schemas.StaffBookingWorkflowSummary;
         const operation = openApiSpec.paths[
             '/staff/workspace/bookings/{bookingId}/workflow'
         ].get;
+        const claimOperation = openApiSpec.paths[
+            '/staff/workspace/bookings/{bookingId}/claim-inspection'
+        ].patch;
 
         expect(detail.properties).not.toHaveProperty('customer_id');
         expect(detail.properties).not.toHaveProperty('customer');
@@ -63,6 +67,7 @@ describe('OpenAPI staff capability contract', () => {
         expect(detail.properties.available_actions.items.enum).toEqual(
             expect.arrayContaining([
                 'inspection.before_wash.create',
+                'inspection.claim',
                 'booking.service.start',
                 'service_item.pause',
                 'handover.release',
@@ -72,6 +77,15 @@ describe('OpenAPI staff capability contract', () => {
             STAFF_CAPABILITIES.BOOKING_WORKFLOW_READ_GARAGE,
         ]);
         expect(operation['x-resource-scope']).toBe('garage');
+        expect(summary.properties.available_actions.items.enum).toContain('inspection.claim');
+        expect(claimOperation['x-required-capabilities']).toEqual([
+            STAFF_CAPABILITIES.INSPECTION_CLAIM_GARAGE,
+        ]);
+        expect(claimOperation['x-resource-scope']).toBe('garage-unassigned');
+        expect(claimOperation.responses[200].content['application/json'].schema
+            .properties.data).toEqual({
+            $ref: '#/components/schemas/StaffBookingWorkflowDetail',
+        });
     });
 });
 

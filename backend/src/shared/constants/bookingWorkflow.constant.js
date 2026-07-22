@@ -23,6 +23,7 @@ const BOOKING_WORKFLOW_ACTIONS = Object.freeze({
     BOOKING_CANCEL: 'booking.cancel',
     BOOKING_MARK_NO_SHOW: 'booking.mark_no_show',
     BOOKING_CHECK_IN: 'booking.check_in',
+    INSPECTION_CLAIM: 'inspection.claim',
     INSPECTION_BEFORE_WASH_CREATE: 'inspection.before_wash.create',
     BOOKING_SERVICE_START: 'booking.service.start',
     SERVICE_ITEM_PAUSE: 'service_item.pause',

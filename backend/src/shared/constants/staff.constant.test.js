@@ -62,6 +62,25 @@ describe('staff authorization constants', () => {
         }
     );
 
+    it('allows only vehicle inspection staff to self-claim inspection bookings', () => {
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.VEHICLE_INSPECTION_STAFF,
+            STAFF_CAPABILITIES.INSPECTION_CLAIM_GARAGE
+        )).toBe(true);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.CUSTOMER_SERVICE_STAFF,
+            STAFF_CAPABILITIES.INSPECTION_CLAIM_GARAGE
+        )).toBe(false);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.WASH_OPERATOR,
+            STAFF_CAPABILITIES.INSPECTION_CLAIM_GARAGE
+        )).toBe(false);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.VEHICLE_CARE_STAFF,
+            STAFF_CAPABILITIES.INSPECTION_CLAIM_GARAGE
+        )).toBe(false);
+    });
+
     it('limits handover and customer case management to customer service staff', () => {
         expect(staffTypeHasCapability(
             STAFF_TYPES.CUSTOMER_SERVICE_STAFF,

@@ -27,7 +27,20 @@ const getBookingWorkflow = asyncHandler(async (req, res) => {
     });
 });
 
+const claimInspectionBooking = asyncHandler(async (req, res) => {
+    const result = await staffBookingWorkflowService.claimInspectionBooking(
+        req.staffContext,
+        req.validated.params.bookingId
+    );
+
+    return sendSuccess(res, {
+        message: 'Claim inspection booking successfully',
+        data: result,
+    });
+});
+
 module.exports = {
     listBookingWorkflows,
     getBookingWorkflow,
+    claimInspectionBooking,
 };

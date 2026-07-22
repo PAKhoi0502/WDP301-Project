@@ -1,11 +1,13 @@
 jest.mock('../bookings/booking.model', () => ({
     find: jest.fn(),
     findById: jest.fn(),
+    findOneAndUpdate: jest.fn(),
     countDocuments: jest.fn(),
 }));
 
 jest.mock('../vehicle-inspections/vehicleInspection.model', () => ({
     find: jest.fn(),
+    exists: jest.fn(),
 }));
 
 jest.mock('../booking-handovers/bookingHandover.model', () => ({
@@ -133,6 +135,7 @@ describe('staff booking workflow service', () => {
         Booking.countDocuments.mockResolvedValue(1);
         VehicleInspection.find.mockReturnValue(createSortLeanQuery([beforeInspection]));
         BookingHandover.find.mockReturnValue(createLeanQuery([]));
+        BookingServiceStep.find.mockReturnValue(createSortLeanQuery([]));
 
         const result = await staffBookingWorkflowService.listBookingWorkflows(
             createStaffContext(STAFF_TYPES.WASH_OPERATOR),
@@ -149,6 +152,28 @@ describe('staff booking workflow service', () => {
         expect(result.data[0]).not.toHaveProperty('guest_phone');
         expect(result.data[0]).not.toHaveProperty('guest_email');
         expect(result.data[0]).not.toHaveProperty('final_price');
+        expect(result.data[0]).toHaveProperty('available_actions');
+    });
+
+    it('offers inspection self-claim in the shared queue for an eligible booking', async () => {
+        const booking = createBooking({ assigned_inspection_staff_id: null });
+        Booking.find.mockReturnValue(createBookingListQuery([booking]));
+        Booking.countDocuments.mockResolvedValue(1);
+        VehicleInspection.find.mockReturnValue(createSortLeanQuery([]));
+        BookingHandover.find.mockReturnValue(createLeanQuery([]));
+        BookingServiceStep.find.mockReturnValue(createSortLeanQuery([]));
+
+        const result = await staffBookingWorkflowService.listBookingWorkflows(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            { page: 1, limit: 20 }
+        );
+
+        expect(result.data[0].available_actions).toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_CLAIM
+        );
+        expect(result.data[0].available_actions).not.toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_BEFORE_WASH_CREATE
+        );
     });
 
     it('rejects workflow detail access outside the assigned garage', async () => {
@@ -201,6 +226,188 @@ describe('staff booking workflow service', () => {
         expect(result.available_actions).not.toContain(
             BOOKING_WORKFLOW_ACTIONS.BOOKING_SERVICE_START
         );
+    });
+
+    it('offers claim instead of inspection creation when the booking is unassigned', async () => {
+        mockDetailQueries({
+            booking: createBooking({ assigned_inspection_staff_id: null }),
+        });
+
+        const result = await staffBookingWorkflowService.getBookingWorkflow(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        );
+
+        expect(result.available_actions).toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_CLAIM
+        );
+        expect(result.available_actions).not.toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_BEFORE_WASH_CREATE
+        );
+    });
+
+    it('does not offer inspection actions when another inspector owns the booking', async () => {
+        mockDetailQueries({
+            booking: createBooking({
+                assigned_inspection_staff_id: '507f1f77bcf86cd799439030',
+            }),
+        });
+
+        const result = await staffBookingWorkflowService.getBookingWorkflow(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        );
+
+        expect(result.available_actions).not.toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_CLAIM
+        );
+        expect(result.available_actions).not.toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_BEFORE_WASH_CREATE
+        );
+    });
+
+    it('atomically claims an eligible booking and returns the updated workflow', async () => {
+        const unassignedBooking = createBooking({ assigned_inspection_staff_id: null });
+        const claimedBooking = createBooking({ assigned_inspection_staff_id: userId });
+        Booking.findById
+            .mockReturnValueOnce(createLeanQuery(unassignedBooking))
+            .mockReturnValueOnce(createLeanQuery(claimedBooking));
+        Booking.findOneAndUpdate.mockReturnValue(createLeanQuery(claimedBooking));
+        VehicleInspection.exists.mockResolvedValue(false);
+        VehicleInspection.find.mockReturnValue(createSortLeanQuery([]));
+        BookingHandover.findOne.mockReturnValue(createLeanQuery(null));
+        BookingServiceStep.find.mockReturnValue(createSortLeanQuery([]));
+
+        const result = await staffBookingWorkflowService.claimInspectionBooking(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        );
+
+        expect(Booking.findOneAndUpdate).toHaveBeenCalledWith(
+            expect.objectContaining({
+                _id: bookingId,
+                garage_id: garageId,
+                status: 'CHECKED_IN',
+            }),
+            {
+                $set: {
+                    assigned_inspection_staff_id: userId,
+                },
+            },
+            { new: true }
+        );
+        expect(result.assigned_inspection_staff_id).toBe(userId);
+        expect(result.available_actions).toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_BEFORE_WASH_CREATE
+        );
+        expect(result.available_actions).not.toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_CLAIM
+        );
+    });
+
+    it('returns the current workflow without writing when the caller already owns the claim', async () => {
+        const claimedBooking = createBooking({
+            assigned_inspection_staff_id: userId,
+            status: 'COMPLETED',
+        });
+        Booking.findById
+            .mockReturnValueOnce(createLeanQuery(claimedBooking))
+            .mockReturnValueOnce(createLeanQuery(claimedBooking));
+        VehicleInspection.find.mockReturnValue(createSortLeanQuery([
+            beforeInspection,
+            afterInspection,
+        ]));
+        BookingHandover.findOne.mockReturnValue(createLeanQuery(null));
+        BookingServiceStep.find.mockReturnValue(createSortLeanQuery([]));
+
+        const result = await staffBookingWorkflowService.claimInspectionBooking(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        );
+
+        expect(Booking.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(VehicleInspection.exists).not.toHaveBeenCalled();
+        expect(result.assigned_inspection_staff_id).toBe(userId);
+    });
+
+    it('returns a deterministic conflict when another inspector wins the claim', async () => {
+        const unassignedBooking = createBooking({ assigned_inspection_staff_id: null });
+        const competingBooking = createBooking({
+            assigned_inspection_staff_id: '507f1f77bcf86cd799439030',
+        });
+        Booking.findById
+            .mockReturnValueOnce(createLeanQuery(unassignedBooking))
+            .mockReturnValueOnce(createLeanQuery(competingBooking));
+        Booking.findOneAndUpdate.mockReturnValue(createLeanQuery(null));
+        VehicleInspection.exists.mockResolvedValue(false);
+
+        await expect(staffBookingWorkflowService.claimInspectionBooking(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        )).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'INSPECTION_ALREADY_CLAIMED',
+        });
+    });
+
+    it('rejects claims before check-in or after the before-wash inspection exists', async () => {
+        Booking.findById.mockReturnValueOnce(createLeanQuery(createBooking({
+            assigned_inspection_staff_id: null,
+            status: 'CONFIRMED',
+        })));
+
+        await expect(staffBookingWorkflowService.claimInspectionBooking(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        )).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'INSPECTION_CLAIM_NOT_ALLOWED',
+        });
+
+        Booking.findById.mockReturnValueOnce(createLeanQuery(createBooking({
+            assigned_inspection_staff_id: null,
+        })));
+        VehicleInspection.exists.mockResolvedValueOnce(true);
+
+        await expect(staffBookingWorkflowService.claimInspectionBooking(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        )).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'BEFORE_WASH_INSPECTION_ALREADY_EXISTS',
+        });
+
+        expect(Booking.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('rejects claims while the booking workflow is on incident hold', async () => {
+        Booking.findById.mockReturnValueOnce(createLeanQuery(createBooking({
+            assigned_inspection_staff_id: null,
+            active_incident_id: '507f1f77bcf86cd799439040',
+        })));
+
+        await expect(staffBookingWorkflowService.claimInspectionBooking(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        )).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'INSPECTION_CLAIM_ON_HOLD',
+        });
+
+        expect(VehicleInspection.exists).not.toHaveBeenCalled();
+        expect(Booking.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('rejects inspection claims from other staff types', async () => {
+        await expect(staffBookingWorkflowService.claimInspectionBooking(
+            createStaffContext(STAFF_TYPES.CUSTOMER_SERVICE_STAFF),
+            bookingId
+        )).rejects.toMatchObject({
+            statusCode: 403,
+            errorCode: 'INSPECTION_CLAIM_STAFF_ONLY',
+        });
+
+        expect(Booking.findById).not.toHaveBeenCalled();
     });
 
     it('offers service start to customer service after before-wash inspection', async () => {

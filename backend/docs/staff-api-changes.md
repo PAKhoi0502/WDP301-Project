@@ -78,6 +78,21 @@ Inspection operations:
 Inspection staff must also match `assigned_inspection_staff_id` for the
 booking.
 
+Inspection self-claim:
+
+| Method | Path | Required capability |
+| --- | --- | --- |
+| `PATCH` | `/staff/workspace/bookings/:bookingId/claim-inspection` | `inspection.claim_garage` |
+
+Active `VEHICLE_INSPECTION_STAFF` can atomically claim an unassigned booking in
+their garage after it reaches `CHECKED_IN` and before a `BEFORE_WASH`
+inspection exists, provided the workflow is not on incident hold. A successful
+claim stores the caller user id in
+`assigned_inspection_staff_id` and returns the updated workflow. Repeating the
+request by the same caller is idempotent. A competing claim returns
+`409 INSPECTION_ALREADY_CLAIMED`. The same assignment remains responsible for
+the after-wash inspection unless an admin overrides it.
+
 Shared operational workflow visibility:
 
 | Method | Path | Required capability |
@@ -89,7 +104,9 @@ All active staff types receive `booking.workflow.read_garage`. These endpoints
 return a same-garage operational DTO without customer contact details, booking
 prices, PayOS transaction details or compensation data. The detail response
 includes `workflow_phase`, lifecycle `milestones`, `blockers` and
-caller-specific `available_actions`. Mutation endpoints continue to enforce
+caller-specific `available_actions`. The list response also publishes
+`available_actions`, including `inspection.claim` for eligible unassigned
+checked-in bookings. Mutation endpoints continue to enforce
 their existing capability, assignment and booking-state requirements.
 
 Incident operations:
@@ -144,7 +161,9 @@ These APIs are available under both `/staff/bookings` and the legacy
 
 ### `PATCH /staff/bookings/:id/assign-inspection-staff`
 
-Assigns an active `VEHICLE_INSPECTION_STAFF` in the same garage.
+Assigns or overrides the active `VEHICLE_INSPECTION_STAFF` responsible for the
+booking in the same garage. Normal inspection flow uses the self-claim endpoint;
+this admin API remains available for operational intervention and reassignment.
 
 Request body:
 

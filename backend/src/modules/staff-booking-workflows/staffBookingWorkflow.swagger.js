@@ -10,6 +10,12 @@ const tags = [{
     description: 'Redacted same-garage booking workflow visibility for staff and admin',
 }];
 
+const availableActionsProperty = {
+    type: 'array',
+    uniqueItems: true,
+    items: { type: 'string', enum: BOOKING_WORKFLOW_ACTION_VALUES },
+};
+
 const workflowSummaryProperties = {
     booking_id: { type: 'string' },
     garage_id: { type: 'string' },
@@ -26,6 +32,7 @@ const workflowSummaryProperties = {
     current_service_item_key: { type: 'string', nullable: true },
     payment_status: { type: 'string', enum: ['UNPAID', 'PENDING', 'PAID'] },
     blocked_by_incident: { type: 'boolean' },
+    available_actions: availableActionsProperty,
 };
 
 const schemas = {
@@ -37,6 +44,7 @@ const schemas = {
             'booking_status',
             'workflow_phase',
             'blocked_by_incident',
+            'available_actions',
         ],
         properties: workflowSummaryProperties,
     },
@@ -117,11 +125,7 @@ const schemas = {
                 uniqueItems: true,
                 items: { type: 'string', enum: BOOKING_WORKFLOW_BLOCKER_VALUES },
             },
-            available_actions: {
-                type: 'array',
-                uniqueItems: true,
-                items: { type: 'string', enum: BOOKING_WORKFLOW_ACTION_VALUES },
-            },
+            available_actions: availableActionsProperty,
         },
     },
 };
@@ -193,6 +197,37 @@ const paths = {
                             },
                         },
                     },
+                },
+                ...errorResponses,
+            },
+        },
+    },
+    '/staff/workspace/bookings/{bookingId}/claim-inspection': {
+        patch: {
+            tags: ['Staff Booking Workspace'],
+            summary: 'Atomically claim a checked-in booking for vehicle inspection',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'bookingId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            responses: {
+                200: {
+                    description: 'Inspection booking claimed or already owned by the caller',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean' },
+                                    message: { type: 'string' },
+                                    data: { $ref: '#/components/schemas/StaffBookingWorkflowDetail' },
+                                },
+                            },
+                        },
+                    },
+                },
+                409: {
+                    description: 'Booking is not claimable, was already inspected, or was claimed concurrently',
                 },
                 ...errorResponses,
             },
