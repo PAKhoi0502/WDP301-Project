@@ -65,6 +65,9 @@ Customer service operations:
 | `PATCH` | `/staff/bookings/:id/complete-service` | `booking.service.complete` |
 | `PATCH` | `/staff/bookings/:id/mark-paid` | `booking.payment.collect_cash` |
 
+Starting service requires an existing `BEFORE_WASH` inspection for the booking.
+If it is missing, the API returns `409 BEFORE_WASH_INSPECTION_REQUIRED`.
+
 Inspection operations:
 
 | Method | Path | Required capability |

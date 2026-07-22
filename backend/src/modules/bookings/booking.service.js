@@ -10,6 +10,7 @@ const WashBay = require('../wash-bays/washBay.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const BookingIncident = require('../booking-incidents/bookingIncident.model');
+const VehicleInspection = require('../vehicle-inspections/vehicleInspection.model');
 const BookingIncidentMapper = require('../booking-incidents/bookingIncident.mapper');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const bookingPaymentService = require('./bookingPayment.service');
@@ -67,6 +68,9 @@ const {
     NOTIFICATION_TYPES,
     NOTIFICATION_RELATED_TYPES,
 } = require('../../shared/constants/notification.constant');
+const {
+    VEHICLE_INSPECTION_TYPES,
+} = require('../../shared/constants/vehicleInspection.constant');
 
 const DEFAULT_TIMEZONE_OFFSET = process.env.APP_TIMEZONE_OFFSET || '+07:00';
 const BOOKING_ITEM_HOLD_STATUSES = [
@@ -1818,6 +1822,21 @@ const assertStaffCanAccessBooking = async (user, booking) => {
 const assertBookingStatusIn = (booking, statuses, errorCode) => {
     if (!statuses.includes(booking.status)) {
         throw new AppError('Booking cannot be processed in current status', 400, errorCode);
+    }
+};
+
+const assertBeforeWashInspectionExists = async (bookingId) => {
+    const existedInspection = await VehicleInspection.exists({
+        booking_id: bookingId,
+        type: VEHICLE_INSPECTION_TYPES.BEFORE_WASH,
+    });
+
+    if (!existedInspection) {
+        throw new AppError(
+            'Before-wash inspection is required before starting service',
+            409,
+            'BEFORE_WASH_INSPECTION_REQUIRED'
+        );
     }
 };
 
@@ -5276,6 +5295,7 @@ const startService = async (
     await assertStaffCanAccessBooking(user, booking);
     assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.CHECKED_IN], 'BOOKING_START_SERVICE_NOT_ALLOWED');
+    await assertBeforeWashInspectionExists(booking._id);
 
     try {
         if (booking.start_time && startedAt < booking.start_time) {
