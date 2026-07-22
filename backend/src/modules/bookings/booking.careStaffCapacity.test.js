@@ -34,6 +34,9 @@ jest.mock('../service-packages/servicePackage.model', () => ({
     findById: jest.fn(),
     find: jest.fn(),
 }));
+jest.mock('../vehicle-inspections/vehicleInspection.model', () => ({
+    exists: jest.fn(),
+}));
 jest.mock('../booking-service-steps/bookingServiceStep.service', () => ({}));
 jest.mock('./bookingPayment.service', () => ({}));
 jest.mock('../audit-logs/auditLog.service', () => ({
@@ -75,6 +78,7 @@ const Garage = require('../garages/garage.model');
 const WashBay = require('../wash-bays/washBay.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
+const VehicleInspection = require('../vehicle-inspections/vehicleInspection.model');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const auditLogService = require('../audit-logs/auditLog.service');
 const washBayService = require('../wash-bays/washBay.service');
@@ -228,6 +232,7 @@ describe('booking care staff capacity', () => {
         StaffProfile.find.mockReturnValue(createFindSortLeanQuery([]));
         Booking.countDocuments.mockResolvedValue(0);
         Booking.exists.mockResolvedValue(null);
+        VehicleInspection.exists.mockResolvedValue(true);
         Booking.aggregate.mockResolvedValue([
             createCapacityReservation('507f1f77bcf86cd799439080'),
         ]);
@@ -357,6 +362,10 @@ describe('booking care staff capacity', () => {
             {}
         );
 
+        expect(VehicleInspection.exists).toHaveBeenCalledWith({
+            booking_id: bookingId,
+            type: 'BEFORE_WASH',
+        });
         expect(booking.booking_items[0].assigned_care_staff).toHaveLength(1);
         expect(booking.booking_items[0].assigned_care_staff[0]).toMatchObject({
             staff_profile_id: staffBId,
@@ -389,6 +398,36 @@ describe('booking care staff capacity', () => {
         expect(serializedPipeline).toContain('assigned_care_staff.released_at');
         expect(serializedPipeline).not.toContain('care_staff_start_time');
         expect(serializedPipeline).not.toContain('care_staff_reserved_until');
+    });
+
+    it('rejects starting service without a before-wash inspection', async () => {
+        const booking = {
+            _id: '507f1f77bcf86cd799439030',
+            garage_id: garageId,
+            status: 'CHECKED_IN',
+            start_time: new Date('2000-01-01T06:00:00.000Z'),
+            save: jest.fn(),
+        };
+
+        Booking.findById.mockResolvedValue(booking);
+        VehicleInspection.exists.mockResolvedValue(false);
+
+        await expect(bookingService.startService(
+            { _id: '507f1f77bcf86cd799439035', role: 'ADMIN' },
+            booking._id,
+            {}
+        )).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'BEFORE_WASH_INSPECTION_REQUIRED',
+        });
+
+        expect(VehicleInspection.exists).toHaveBeenCalledWith({
+            booking_id: booking._id,
+            type: 'BEFORE_WASH',
+        });
+        expect(booking.save).not.toHaveBeenCalled();
+        expect(StaffProfile.find).not.toHaveBeenCalled();
+        expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it('rejects starting service before the scheduled booking time', async () => {

@@ -987,6 +987,7 @@ const paths = {
         patch: {
             tags: ['Admin Bookings'],
             summary: 'Start booking service',
+            description: 'Requires an existing BEFORE_WASH inspection for the booking.',
             security: [{ bearerAuth: [] }],
             parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
             requestBody: {
@@ -999,6 +1000,9 @@ const paths = {
                     content: { 'application/json': { schema: startServiceResponse } },
                 },
                 ...commonErrorResponses,
+                409: {
+                    description: 'Conflict, including BEFORE_WASH_INSPECTION_REQUIRED when the pre-service inspection is missing',
+                },
             },
         },
     },

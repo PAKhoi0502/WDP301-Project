@@ -23,6 +23,7 @@ const researchRoutes = require('../modules/research/research.routes');
 const customerVoucherRoutes = require('../modules/customer-vouchers/customerVoucher.routes');
 const customerCaseRoutes = require('../modules/customer-cases/customerCase.routes');
 const bookingArrivalRoutes = require('../modules/booking-arrivals/bookingArrival.routes');
+const staffBookingWorkflowRoutes = require('../modules/staff-booking-workflows/staffBookingWorkflow.routes');
 
 const router = express.Router();
 
@@ -43,6 +44,7 @@ router.use('/bookings', bookingRoutes.customerRouter);
 router.use('/staff/bookings', bookingRoutes.staffRouter);
 router.use('/staff/tasks', bookingRoutes.staffTaskRouter);
 router.use('/staff/booking-arrivals', bookingArrivalRoutes.staffRouter);
+router.use('/staff/workspace/bookings', staffBookingWorkflowRoutes);
 router.use('/waitlists', bookingWaitlistRoutes.customerRouter);
 router.use('/promotions', promotionRoutes.publicRouter);
 router.use('/promotions', promotionRoutes.customerRouter);

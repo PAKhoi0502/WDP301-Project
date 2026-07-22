@@ -65,6 +65,9 @@ Customer service operations:
 | `PATCH` | `/staff/bookings/:id/complete-service` | `booking.service.complete` |
 | `PATCH` | `/staff/bookings/:id/mark-paid` | `booking.payment.collect_cash` |
 
+Starting service requires an existing `BEFORE_WASH` inspection for the booking.
+If it is missing, the API returns `409 BEFORE_WASH_INSPECTION_REQUIRED`.
+
 Inspection operations:
 
 | Method | Path | Required capability |
@@ -74,6 +77,20 @@ Inspection operations:
 
 Inspection staff must also match `assigned_inspection_staff_id` for the
 booking.
+
+Shared operational workflow visibility:
+
+| Method | Path | Required capability |
+| --- | --- | --- |
+| `GET` | `/staff/workspace/bookings` | `booking.workflow.read_garage` |
+| `GET` | `/staff/workspace/bookings/:bookingId/workflow` | `booking.workflow.read_garage` |
+
+All active staff types receive `booking.workflow.read_garage`. These endpoints
+return a same-garage operational DTO without customer contact details, booking
+prices, PayOS transaction details or compensation data. The detail response
+includes `workflow_phase`, lifecycle `milestones`, `blockers` and
+caller-specific `available_actions`. Mutation endpoints continue to enforce
+their existing capability, assignment and booking-state requirements.
 
 Incident operations:
 
