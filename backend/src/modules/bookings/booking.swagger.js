@@ -28,6 +28,10 @@ const bookingSchema = {
         customer_id: { type: 'string', nullable: true },
         vehicle_id: { type: 'string', nullable: true },
         is_walk_in: { type: 'boolean' },
+        is_rework: { type: 'boolean' },
+        original_booking_id: { type: 'string', nullable: true },
+        customer_case_id: { type: 'string', nullable: true },
+        customer_case_resolution_id: { type: 'string', nullable: true },
         guest_name: { type: 'string', nullable: true },
         guest_phone: { type: 'string', nullable: true },
         normalized_guest_phone: { type: 'string', nullable: true },
@@ -157,6 +161,14 @@ const bookingSchema = {
             enum: ['EARLY', 'ON_TIME', 'LATE'],
             nullable: true,
         },
+        arrival_detected_at: { type: 'string', format: 'date-time', nullable: true },
+        arrival_detection_scan_id: { type: 'string', nullable: true },
+        check_in_method: { type: 'string', enum: ['MANUAL', 'PLATE_SCAN'], nullable: true },
+        check_in_verification_id: { type: 'string', nullable: true },
+        check_in_detected_plate: { type: 'string', nullable: true },
+        check_in_match_type: { type: 'string', enum: ['EXACT', 'FUZZY', 'MANUAL', 'NONE'], nullable: true },
+        check_in_manual_override: { type: 'boolean' },
+        check_in_override_reason: { type: 'string', nullable: true },
         arrived_at: { type: 'string', format: 'date-time', nullable: true },
         arrival_reference_start_time: { type: 'string', format: 'date-time', nullable: true },
         late_minutes: { type: 'integer' },
@@ -466,6 +478,14 @@ const assignWashBayRequest = {
     type: 'object',
     properties: {
         wash_bay_id: { type: 'string', nullable: true },
+    },
+};
+
+const assignStaffRequest = {
+    type: 'object',
+    required: ['staff_profile_id'],
+    properties: {
+        staff_profile_id: { type: 'string' },
     },
 };
 
@@ -945,6 +965,24 @@ const paths = {
             },
         },
     },
+    '/admin/bookings/{id}/assign-inspection-staff': {
+        patch: {
+            tags: ['Bookings'],
+            summary: 'Assign inspection staff to booking',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: true,
+                content: { 'application/json': { schema: assignStaffRequest } },
+            },
+            responses: {
+                200: { description: 'Inspection staff assigned', content: { 'application/json': { schema: successBookingResponse } } },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/bookings/{id}/start-service': {
         patch: {
             tags: ['Admin Bookings'],
@@ -1107,6 +1145,25 @@ const paths = {
                     description: 'Service item resumed',
                     content: { 'application/json': { schema: serviceWorkflowResponse } },
                 },
+                ...commonErrorResponses,
+            },
+        },
+    },
+    '/admin/bookings/{id}/service-items/{itemKey}/assign-staff': {
+        patch: {
+            tags: ['Bookings'],
+            summary: 'Assign execution staff to service item',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'id', in: 'path', required: true, schema: { type: 'string' } },
+                { name: 'itemKey', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: true,
+                content: { 'application/json': { schema: assignStaffRequest } },
+            },
+            responses: {
+                200: { description: 'Execution staff assigned', content: { 'application/json': { schema: serviceWorkflowResponse } } },
                 ...commonErrorResponses,
             },
         },

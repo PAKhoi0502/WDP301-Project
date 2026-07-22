@@ -588,6 +588,14 @@ const createStaffProfile = async (payload = {}) => {
 };
 
 const updateStaffProfile = async (staffProfileId, payload = {}) => {
+    if (payload.staff_type !== undefined) {
+        throw new AppError(
+            'Staff type must be changed through the staff type change workflow',
+            409,
+            'STAFF_TYPE_CHANGE_WORKFLOW_REQUIRED'
+        );
+    }
+
     const updatePayload = normalizeUpdatePayload(
         StaffProfileMapper.toUpdatePayload(payload)
     );

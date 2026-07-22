@@ -230,6 +230,37 @@ describe('phone verification service', () => {
         expect(smsService.sendOtp).not.toHaveBeenCalled();
     });
 
+    it('binds a walk-in case OTP to the requesting garage staff user', async () => {
+        User.findById.mockResolvedValue({
+            _id: '665f1b7b2a5f9d0012a99999',
+            role: USER_ROLES.STAFF,
+        });
+
+        const result = await phoneVerificationService.requestVerification({
+            phone: '0901234567',
+            purpose: PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE,
+            userId: '665f1b7b2a5f9d0012a99999',
+            requestIp: '127.0.0.1',
+        });
+
+        expect(result.purpose).toBe(PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE);
+        expect(PhoneVerification.create.mock.calls[0][0].user_id)
+            .toBe('665f1b7b2a5f9d0012a99999');
+    });
+
+    it('does not allow a customer account to request a walk-in case OTP', async () => {
+        User.findById.mockResolvedValue({
+            _id: '665f1b7b2a5f9d0012a99999',
+            role: USER_ROLES.CUSTOMER,
+        });
+
+        await expect(phoneVerificationService.requestVerification({
+            phone: '0901234567',
+            purpose: PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE,
+            userId: '665f1b7b2a5f9d0012a99999',
+        })).rejects.toMatchObject({ errorCode: 'WALK_IN_CASE_VERIFICATION_NOT_ALLOWED' });
+    });
+
     it('does not expose debug OTP in production unless explicitly enabled', async () => {
         process.env.NODE_ENV = 'production';
 

@@ -16,6 +16,15 @@ describe('staff profile status validation', () => {
         expect(result.success).toBe(false);
     });
 
+    it('does not allow staff type changes through the general update API', () => {
+        const result = updateStaffProfileSchema.safeParse({
+            params: { id: staffProfileId },
+            body: { staff_type: 'WASH_OPERATOR' },
+        });
+
+        expect(result.success).toBe(false);
+    });
+
     it('does not allow the legacy create API to choose active status', () => {
         const result = createStaffProfileSchema.safeParse({
             body: {

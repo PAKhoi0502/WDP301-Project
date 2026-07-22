@@ -46,11 +46,6 @@ const schemas = {
                 type: 'string',
                 example: 'STF001',
             },
-            staff_type: {
-                type: 'string',
-                enum: staffTypeValues,
-                example: 'WASH_OPERATOR',
-            },
             garage_id: {
                 type: 'string',
                 nullable: true,
@@ -113,6 +108,16 @@ const schemas = {
                 type: 'string',
                 enum: staffTypeValues,
                 example: 'CUSTOMER_SERVICE_STAFF',
+            },
+            staff_group: {
+                type: 'string',
+                enum: ['BOOKING_OPERATIONS', 'SERVICE_EXECUTION'],
+                example: 'BOOKING_OPERATIONS',
+            },
+            capabilities: {
+                type: 'array',
+                items: { type: 'string' },
+                example: ['booking.read_garage', 'booking.check_in'],
             },
             garage_id: {
                 type: 'string',
@@ -296,6 +301,35 @@ const schemas = {
             },
         },
     },
+    StaffTypeChangeCreateRequest: {
+        type: 'object',
+        required: ['to_staff_type', 'reason'],
+        properties: {
+            to_staff_type: { type: 'string', enum: staffTypeValues },
+            reason: { type: 'string', minLength: 5, maxLength: 1000 },
+            effective_at: { type: 'string', format: 'date-time' },
+            handover_note: { type: 'string', maxLength: 2000 },
+        },
+    },
+    StaffTypeChangeRequest: {
+        type: 'object',
+        properties: {
+            id: { type: 'string' },
+            staff_profile_id: { type: 'string' },
+            from_staff_type: { type: 'string', enum: staffTypeValues },
+            to_staff_type: { type: 'string', enum: staffTypeValues },
+            reason: { type: 'string' },
+            effective_at: { type: 'string', format: 'date-time' },
+            status: {
+                type: 'string',
+                enum: ['REQUESTED', 'APPROVED', 'SCHEDULED', 'APPLIED', 'REJECTED', 'CANCELLED', 'FAILED'],
+            },
+            approved_at: { type: 'string', format: 'date-time', nullable: true },
+            applied_at: { type: 'string', format: 'date-time', nullable: true },
+            handover_note: { type: 'string', nullable: true },
+            impact_snapshot: { type: 'object', nullable: true, additionalProperties: true },
+        },
+    },
 };
 
 const unauthorizedResponse = {
@@ -363,7 +397,121 @@ const staffProfileIdParameter = {
     example: '665f1b7b2a5f9d0012a11111',
 };
 
+const staffTypeChangeRequestIdParameter = {
+    in: 'path',
+    name: 'requestId',
+    required: true,
+    schema: { type: 'string' },
+};
+
+const staffTypeChangeResponse = {
+    description: 'Staff type change request',
+    content: {
+        'application/json': {
+            schema: {
+                type: 'object',
+                properties: {
+                    success: { type: 'boolean' },
+                    message: { type: 'string' },
+                    data: { $ref: '#/components/schemas/StaffTypeChangeRequest' },
+                },
+            },
+        },
+    },
+};
+
 const paths = {
+    '/staff-profiles/me/capabilities': {
+        get: {
+            tags: ['Staff Profiles'],
+            summary: 'Get current staff workspace and capabilities',
+            security: [{ bearerAuth: [] }],
+            responses: {
+                200: { description: 'Get staff capabilities successfully' },
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+            },
+        },
+    },
+    '/staff-profiles/me/type-change-requests': {
+        get: {
+            tags: ['Staff Profiles'],
+            summary: 'Get current staff type change requests',
+            security: [{ bearerAuth: [] }],
+            responses: { 200: { description: 'Request list' }, 401: unauthorizedResponse, 403: forbiddenResponse },
+        },
+        post: {
+            tags: ['Staff Profiles'],
+            summary: 'Request a staff position change',
+            security: [{ bearerAuth: [] }],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: { $ref: '#/components/schemas/StaffTypeChangeCreateRequest' },
+                    },
+                },
+            },
+            responses: { 201: staffTypeChangeResponse, 400: validationErrorResponse, 409: conflictResponse },
+        },
+    },
+    '/staff-profiles/type-change-requests': {
+        get: {
+            tags: ['Staff Profiles'],
+            summary: 'List staff type change requests (admin)',
+            security: [{ bearerAuth: [] }],
+            responses: { 200: { description: 'Request list' }, 401: unauthorizedResponse, 403: forbiddenResponse },
+        },
+    },
+    '/staff-profiles/type-change-requests/{requestId}/approve': {
+        patch: {
+            tags: ['Staff Profiles'],
+            summary: 'Approve or schedule a staff type change (admin)',
+            security: [{ bearerAuth: [] }],
+            parameters: [staffTypeChangeRequestIdParameter],
+            responses: { 200: staffTypeChangeResponse, 409: conflictResponse },
+        },
+    },
+    '/staff-profiles/type-change-requests/{requestId}/reject': {
+        patch: {
+            tags: ['Staff Profiles'],
+            summary: 'Reject a staff type change (admin)',
+            security: [{ bearerAuth: [] }],
+            parameters: [staffTypeChangeRequestIdParameter],
+            responses: { 200: staffTypeChangeResponse, 409: conflictResponse },
+        },
+    },
+    '/staff-profiles/type-change-requests/{requestId}/cancel': {
+        patch: {
+            tags: ['Staff Profiles'],
+            summary: 'Cancel a staff type change',
+            security: [{ bearerAuth: [] }],
+            parameters: [staffTypeChangeRequestIdParameter],
+            responses: { 200: staffTypeChangeResponse, 403: forbiddenResponse, 409: conflictResponse },
+        },
+    },
+    '/staff-profiles/{id}/type-change-impact': {
+        get: {
+            tags: ['Staff Profiles'],
+            summary: 'Preview staff type change impact (admin)',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                staffProfileIdParameter,
+                { in: 'query', name: 'to_staff_type', required: true, schema: { type: 'string', enum: staffTypeValues } },
+                { in: 'query', name: 'effective_at', schema: { type: 'string', format: 'date-time' } },
+            ],
+            responses: { 200: { description: 'Impact preview' }, 404: notFoundResponse },
+        },
+    },
+    '/staff-profiles/{id}/type-change-history': {
+        get: {
+            tags: ['Staff Profiles'],
+            summary: 'Get applied staff type change history (admin)',
+            security: [{ bearerAuth: [] }],
+            parameters: [staffProfileIdParameter],
+            responses: { 200: { description: 'Applied change history' }, 404: notFoundResponse },
+        },
+    },
     '/staff-profiles/me': {
         get: {
             tags: ['Staff Profiles'],

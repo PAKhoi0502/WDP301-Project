@@ -45,4 +45,24 @@ describe('customer voucher model', () => {
             },
         });
     });
+
+    it('accepts a customer-case compensation source instead of an incident', async () => {
+        const voucher = createVoucher({
+            source_incident_id: null,
+            source_customer_case_id: new mongoose.Types.ObjectId(),
+            source_customer_case_resolution_id: new mongoose.Types.ObjectId(),
+        });
+
+        await expect(voucher.validate()).resolves.toBeUndefined();
+    });
+
+    it('rejects ambiguous compensation sources', async () => {
+        const voucher = createVoucher({
+            source_customer_case_id: new mongoose.Types.ObjectId(),
+        });
+
+        await expect(voucher.validate()).rejects.toMatchObject({
+            errors: { source_incident_id: expect.anything() },
+        });
+    });
 });

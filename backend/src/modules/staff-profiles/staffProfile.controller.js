@@ -12,6 +12,13 @@ const getMyStaffProfile = asyncHandler(async (req, res) => {
     });
 });
 
+const getMyCapabilities = asyncHandler(async (req, res) => {
+    return sendSuccess(res, {
+        message: 'Get my staff capabilities successfully',
+        data: req.staffContext,
+    });
+});
+
 const getAllStaffProfiles = asyncHandler(async (req, res) => {
     const { query } = req.validated;
 
@@ -129,6 +136,7 @@ const deactivateStaffProfile = asyncHandler(async (req, res) => {
 
 module.exports = {
     getMyStaffProfile,
+    getMyCapabilities,
     getAllStaffProfiles,
     getStaffProfileById,
     createStaffProfile,

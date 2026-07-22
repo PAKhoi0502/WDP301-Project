@@ -435,6 +435,33 @@ const pauseServiceItemSchema = z.object({
         .strict(),
 });
 
+const assignInspectionStaffSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object({
+            staff_profile_id: objectIdField,
+        })
+        .strict(),
+});
+
+const assignServiceItemStaffSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+            itemKey: bookingItemKeyField,
+        })
+        .strict(),
+    body: z
+        .object({
+            staff_profile_id: objectIdField,
+        })
+        .strict(),
+});
+
 module.exports = {
     idParamSchema,
     getAvailableSlotsSchema,
@@ -453,4 +480,6 @@ module.exports = {
     serviceItemParamSchema,
     serviceItemOperationSchema,
     pauseServiceItemSchema,
+    assignInspectionStaffSchema,
+    assignServiceItemStaffSchema,
 };

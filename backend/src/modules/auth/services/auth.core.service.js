@@ -318,6 +318,14 @@ const register = async (payload) => {
 };
 
 const requestPhoneVerification = async (payload) => {
+    if (payload.purpose === PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE) {
+        throw new AppError(
+            'Use the customer case walk-in OTP endpoint for this purpose',
+            400,
+            'WALK_IN_CASE_DEDICATED_OTP_ENDPOINT_REQUIRED'
+        );
+    }
+
     return phoneVerificationService.requestVerification({
         phone: payload.phone,
         purpose: payload.purpose,

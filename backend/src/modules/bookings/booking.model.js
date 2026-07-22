@@ -197,6 +197,11 @@ const bookingItemSchema = new mongoose.Schema(
             default: [],
         },
 
+        assigned_execution_staff: {
+            type: [bookingItemCareStaffAssignmentSchema],
+            default: [],
+        },
+
         status: {
             type: String,
             enum: BOOKING_ITEM_STATUS_VALUES,
@@ -309,6 +314,29 @@ const bookingSchema = new mongoose.Schema(
             default: false,
         },
 
+        is_rework: {
+            type: Boolean,
+            default: false,
+        },
+
+        original_booking_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Booking',
+            default: null,
+        },
+
+        customer_case_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'CustomerCase',
+            default: null,
+        },
+
+        customer_case_resolution_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'CustomerCaseResolution',
+            default: null,
+        },
+
         guest_name: {
             type: String,
             trim: true,
@@ -360,6 +388,12 @@ const bookingSchema = new mongoose.Schema(
         },
 
         created_by_staff_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        assigned_inspection_staff_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             default: null,
@@ -589,6 +623,15 @@ const bookingSchema = new mongoose.Schema(
             default: null,
         },
 
+        arrival_detected_at: { type: Date, default: null },
+        arrival_detection_scan_id: { type: mongoose.Schema.Types.ObjectId, ref: 'BookingPlateScan', default: null },
+        check_in_method: { type: String, enum: ['MANUAL', 'PLATE_SCAN'], default: null },
+        check_in_verification_id: { type: mongoose.Schema.Types.ObjectId, ref: 'BookingPlateScan', default: null },
+        check_in_detected_plate: { type: String, trim: true, uppercase: true, maxlength: 20, default: null },
+        check_in_match_type: { type: String, enum: ['EXACT', 'FUZZY', 'MANUAL', 'NONE'], default: null },
+        check_in_manual_override: { type: Boolean, default: false },
+        check_in_override_reason: { type: String, trim: true, maxlength: 1000, default: null },
+
         arrived_at: {
             type: Date,
             default: null,
@@ -775,9 +818,19 @@ bookingSchema.index({ status: 1 });
 bookingSchema.index({ status: 1, 'booking_items.status': 1, 'booking_items.countdown_ends_at': 1 });
 bookingSchema.index({ payment_status: 1 });
 bookingSchema.index({ is_walk_in: 1 });
+bookingSchema.index({ original_booking_id: 1, is_rework: 1 });
+bookingSchema.index({ customer_case_id: 1 });
+bookingSchema.index(
+    { customer_case_resolution_id: 1 },
+    { unique: true, partialFilterExpression: { customer_case_resolution_id: { $type: 'objectId' } } }
+);
 bookingSchema.index({ normalized_guest_phone: 1, is_walk_in: 1, claimed_customer_id: 1 });
 bookingSchema.index({ normalized_license_plate: 1, vehicle_type: 1, start_time: 1 });
+bookingSchema.index({ garage_id: 1, normalized_license_plate: 1, status: 1, start_time: 1 });
 bookingSchema.index({ created_by_staff_id: 1 });
+bookingSchema.index({ assigned_inspection_staff_id: 1, status: 1 });
+bookingSchema.index({ garage_id: 1, arrival_detected_at: -1 });
+bookingSchema.index({ 'booking_items.assigned_execution_staff.user_id': 1, status: 1 });
 bookingSchema.index({ created_at: -1 });
 
 bookingSchema.pre('validate', function (next) {
@@ -963,6 +1016,10 @@ bookingSchema.pre('validate', function (next) {
 
     if (this.is_walk_in && (!this.license_plate || !this.normalized_license_plate || !this.created_by_staff_id)) {
         this.invalidate('license_plate', 'Walk-in booking requires vehicle and staff information');
+    }
+
+    if (this.is_rework && (!this.original_booking_id || !this.customer_case_id || !this.customer_case_resolution_id)) {
+        this.invalidate('original_booking_id', 'Rework booking requires customer case traceability');
     }
 
     next();

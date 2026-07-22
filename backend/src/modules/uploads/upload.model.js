@@ -36,6 +36,9 @@ const uploadSchema = new mongoose.Schema(
             min: [0, 'Size must be greater than or equal to 0'],
         },
 
+        width: { type: Number, min: 1, default: null },
+        height: { type: Number, min: 1, default: null },
+
         purpose: {
             type: String,
             enum: UPLOAD_PURPOSE_VALUES,
@@ -59,6 +62,7 @@ const uploadSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             default: null,
         },
+        retained_until: { type: Date, default: null },
     },
     {
         timestamps: {

@@ -24,6 +24,8 @@ const analyticsSwagger = require('../../modules/analytics/analytics.swagger');
 const researchSwagger = require('../../modules/research/research.swagger');
 const bookingIncidentSwagger = require('../../modules/booking-incidents/bookingIncident.swagger');
 const customerVoucherSwagger = require('../../modules/customer-vouchers/customerVoucher.swagger');
+const customerCaseSwagger = require('../../modules/customer-cases/customerCase.swagger');
+const bookingArrivalSwagger = require('../../modules/booking-arrivals/bookingArrival.swagger');
 const { enrichOpenApiRoles } = require('./roleMetadata');
 
 const openApiSpec = enrichOpenApiRoles({
@@ -64,6 +66,8 @@ const openApiSpec = enrichOpenApiRoles({
         ...researchSwagger.tags,
         ...bookingIncidentSwagger.tags,
         ...customerVoucherSwagger.tags,
+        ...customerCaseSwagger.tags,
+        ...bookingArrivalSwagger.tags,
     ],
     paths,
     components: {
@@ -94,6 +98,8 @@ const openApiSpec = enrichOpenApiRoles({
             ...researchSwagger.schemas,
             ...bookingIncidentSwagger.schemas,
             ...customerVoucherSwagger.schemas,
+            ...customerCaseSwagger.schemas,
+            ...bookingArrivalSwagger.schemas,
         },
     },
 });

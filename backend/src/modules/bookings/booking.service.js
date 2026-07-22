@@ -27,7 +27,11 @@ const TierRule = require('../loyalty/tierRule.model');
 const { LOYALTY_TIERS } = require('../../shared/constants/loyalty.constant');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
-const { STAFF_TYPES } = require('../../shared/constants/staff.constant');
+const {
+    STAFF_TYPES,
+    STAFF_CAPABILITIES,
+    staffTypeHasCapability,
+} = require('../../shared/constants/staff.constant');
 const { WASH_BAY_STATUS } = require('../../shared/constants/washBay.constant');
 const {
     SERVICE_PACKAGE_TYPES,
@@ -319,6 +323,7 @@ const populateBookingQuery = (query) => {
             ],
         })
         .populate('created_by_staff_id', 'full_name email phone role is_active')
+        .populate('assigned_inspection_staff_id', 'full_name email phone role is_active')
         .populate('canceled_by_id', 'full_name email phone role is_active')
         .populate('no_show_by_id', 'full_name email phone role is_active')
         .populate('late_accepted_by_id', 'full_name email phone role is_active')
@@ -339,7 +344,16 @@ const populateBookingQuery = (query) => {
                 select: 'full_name email phone role is_active',
             },
         })
-        .populate('booking_items.assigned_care_staff.user_id', 'full_name email phone role is_active');
+        .populate('booking_items.assigned_care_staff.user_id', 'full_name email phone role is_active')
+        .populate({
+            path: 'booking_items.assigned_execution_staff.staff_profile_id',
+            select: 'user_id staff_code staff_type garage_id is_active created_at updated_at',
+            populate: {
+                path: 'user_id',
+                select: 'full_name email phone role is_active',
+            },
+        })
+        .populate('booking_items.assigned_execution_staff.user_id', 'full_name email phone role is_active');
 };
 
 const getBookingDocumentById = async (bookingId) => {
@@ -1705,6 +1719,50 @@ const assertStaffCanAccessGarage = async (user, garageId) => {
     return staffProfile;
 };
 
+const getStaffAssignmentFilter = (staffProfile) => ({
+    $or: [
+        { assigned_inspection_staff_id: staffProfile.user_id },
+        {
+            booking_items: {
+                $elemMatch: {
+                    'assigned_care_staff.staff_profile_id': staffProfile._id,
+                    'assigned_care_staff.released_at': null,
+                },
+            },
+        },
+        {
+            booking_items: {
+                $elemMatch: {
+                    'assigned_execution_staff.staff_profile_id': staffProfile._id,
+                    'assigned_execution_staff.released_at': null,
+                },
+            },
+        },
+    ],
+});
+
+const assignmentMatchesStaff = (assignment, staffProfile, user) => (
+    !assignment?.released_at
+    && (
+        toObjectIdString(assignment.staff_profile_id) === toObjectIdString(staffProfile._id)
+        || toObjectIdString(assignment.user_id) === toObjectIdString(user._id)
+    )
+);
+
+const isStaffAssignedToBooking = (staffProfile, user, booking) => {
+    if (
+        toObjectIdString(booking.assigned_inspection_staff_id)
+        === toObjectIdString(user._id)
+    ) {
+        return true;
+    }
+
+    return (booking.booking_items || []).some((item) => (
+        [...(item.assigned_care_staff || []), ...(item.assigned_execution_staff || [])]
+            .some((assignment) => assignmentMatchesStaff(assignment, staffProfile, user))
+    ));
+};
+
 const getAdminGarageFilter = async (user, requestedGarageId) => {
     if (user.role === USER_ROLES.ADMIN) {
         return requestedGarageId || undefined;
@@ -1737,7 +1795,24 @@ const getRawBookingDocumentById = async (bookingId, session = null) => {
 };
 
 const assertStaffCanAccessBooking = async (user, booking) => {
-    await assertStaffCanAccessGarage(user, booking.garage_id);
+    const staffProfile = await assertStaffCanAccessGarage(user, booking.garage_id);
+
+    if (!staffProfile || staffTypeHasCapability(
+        staffProfile.staff_type,
+        STAFF_CAPABILITIES.BOOKING_READ_GARAGE
+    )) {
+        return staffProfile;
+    }
+
+    if (!isStaffAssignedToBooking(staffProfile, user, booking)) {
+        throw new AppError(
+            'Staff can only access assigned bookings',
+            403,
+            'STAFF_BOOKING_ASSIGNMENT_REQUIRED'
+        );
+    }
+
+    return staffProfile;
 };
 
 const assertBookingStatusIn = (booking, statuses, errorCode) => {
@@ -1936,6 +2011,10 @@ const syncAssignedCareStaffIds = (booking) => {
 
     for (const item of booking.booking_items || []) {
         for (const assignment of item.assigned_care_staff || []) {
+            if (assignment.released_at) {
+                continue;
+            }
+
             const staffProfileId = getCareStaffAssignmentStaffProfileId(assignment);
             const staffProfileIdString = toObjectIdString(staffProfileId);
 
@@ -1958,10 +2037,15 @@ const syncAssignedCareStaffIds = (booking) => {
 const releaseCareStaffAssignmentsForBookingItem = (bookingItem, releasedAt) => {
     let released = false;
 
-    for (const assignment of bookingItem.assigned_care_staff || []) {
-        if (!assignment.released_at) {
-            assignment.released_at = releasedAt;
-            released = true;
+    for (const assignments of [
+        bookingItem.assigned_care_staff || [],
+        bookingItem.assigned_execution_staff || [],
+    ]) {
+        for (const assignment of assignments) {
+            if (!assignment.released_at) {
+                assignment.released_at = releasedAt;
+                released = true;
+            }
         }
     }
 
@@ -1982,6 +2066,7 @@ const releaseActiveCareStaffAssignmentsForBooking = (booking, releasedAt) => {
     }
 
     if (releasedBookingItemKeys.length > 0 && typeof booking.markModified === 'function') {
+        syncAssignedCareStaffIds(booking);
         booking.markModified('booking_items');
     }
 
@@ -2022,6 +2107,13 @@ const restoreCareStaffAssignmentsReleasedAt = async (booking, releasedAt) => {
 
             assignment.released_at = null;
             restored = true;
+        }
+
+        for (const assignment of bookingItem.assigned_execution_staff || []) {
+            if (isSameDateTime(assignment.released_at, releasedAt)) {
+                assignment.released_at = null;
+                restored = true;
+            }
         }
 
         if (restored) {
@@ -2823,6 +2915,21 @@ const getAllBookings = async (user, query = {}) => {
         ...query,
         garage_id: garageFilter,
     });
+
+    if (user.role !== USER_ROLES.ADMIN) {
+        const staffProfile = await getActiveStaffProfile(user._id);
+
+        if (!staffTypeHasCapability(
+            staffProfile.staff_type,
+            STAFF_CAPABILITIES.BOOKING_READ_GARAGE
+        )) {
+            filter.$and = [
+                ...(filter.$and || []),
+                getStaffAssignmentFilter(staffProfile),
+            ];
+        }
+    }
+
     const skip = (page - 1) * limit;
 
     const [bookings, total] = await Promise.all([
@@ -4475,7 +4582,7 @@ const createIncidentCompensationVoucher = async (
 };
 
 
-const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {}) => {
+const checkInBooking = async (user, bookingId, { note, verification = null } = {}, auditContext = {}) => {
     const booking = await getRawBookingDocumentById(bookingId);
 
     await assertStaffCanAccessBooking(user, booking);
@@ -4483,7 +4590,7 @@ const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {})
     assertBookingStatusIn(booking, [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED], 'BOOKING_CHECK_IN_NOT_ALLOWED');
 
     const garage = await getActiveGarage(booking.garage_id);
-    const arrivedAt = booking.arrived_at || new Date();
+    const arrivedAt = verification?.arrived_at || booking.arrived_at || new Date();
     const scheduledStartTime = booking.arrival_reference_start_time || booking.start_time;
     const classification = getArrivalClassification({
         arrivedAt,
@@ -4496,6 +4603,14 @@ const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {})
     booking.arrival_status = classification.arrivalStatus;
     booking.late_minutes = classification.lateMinutes;
     booking.grace_exceeded_minutes = classification.graceExceededMinutes;
+    booking.check_in_method = verification ? 'PLATE_SCAN' : (booking.check_in_method || 'MANUAL');
+    booking.check_in_verification_id = verification?.scan_id || booking.check_in_verification_id || null;
+    booking.check_in_detected_plate = verification?.detected_plate || booking.check_in_detected_plate || null;
+    booking.check_in_match_type = verification?.match_type || booking.check_in_match_type || 'MANUAL';
+    booking.check_in_manual_override = verification
+        ? !!verification.manual_override : !!booking.check_in_manual_override;
+    booking.check_in_override_reason = verification
+        ? normalizeText(verification.override_reason) : booking.check_in_override_reason;
 
     if (classification.arrivalStatus !== BOOKING_ARRIVAL_STATUS.LATE) {
         booking.status = BOOKING_STATUS.CHECKED_IN;
@@ -4522,9 +4637,17 @@ const checkInBooking = async (user, bookingId, { note } = {}, auditContext = {})
             arrived_at: result.arrived_at,
             late_minutes: result.late_minutes,
             grace_exceeded_minutes: result.grace_exceeded_minutes,
+            check_in_method: result.check_in_method,
+            check_in_verification_id: result.check_in_verification_id,
+            check_in_detected_plate: result.check_in_detected_plate,
+            check_in_match_type: result.check_in_match_type,
+            check_in_manual_override: result.check_in_manual_override,
         },
         ip: auditContext.ip,
         userAgent: auditContext.userAgent,
+        metadata: {
+            verification_scan_id: verification?.scan_id?.toString?.() || null,
+        },
     });
 
     return result;
@@ -4903,6 +5026,240 @@ const assignWashBay = async (user, bookingId, { wash_bay_id } = {}) => {
     return BookingMapper.toBookingDto(populatedBooking);
 };
 
+const createReworkBooking = async ({
+    user,
+    originalBooking,
+    customerCaseId,
+    resolutionId,
+    servicePackageId,
+    startTime: rawStartTime,
+    note = null,
+}) => {
+    const existingRework = await Booking.findOne({ customer_case_resolution_id: resolutionId });
+    if (existingRework) return existingRework;
+
+    const now = new Date();
+    const [garage, servicePackage] = await Promise.all([
+        getActiveGarage(originalBooking.garage_id),
+        getActiveServicePackage(servicePackageId),
+    ]);
+    const startTime = parseDateTime(rawStartTime, 'rework_start_time');
+    assertServicePackageMatchesVehicleType(servicePackage, originalBooking.vehicle_type);
+    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+        servicePackage,
+        addOnServiceIds: [],
+        vehicleType: originalBooking.vehicle_type,
+    });
+    const bookingPlan = buildBookingPlan({ startTime, servicePackage, serviceItems, addOnServices, garage });
+    const basePayload = buildBookingBasePayload({
+        garage,
+        servicePackage,
+        bookingPlan,
+        startTime,
+        vehicleType: originalBooking.vehicle_type,
+        note: normalizeText(note) || `Rework for customer case ${customerCaseId}`,
+    });
+    assertBookingStartTimeInFuture(startTime, now);
+    assertBookingStartTimeAligned(garage, startTime);
+    assertBookingInsideGarageBusinessHours(garage, basePayload.start_time, getLatestPlannedEnd(basePayload));
+    await assertVehicleNoOverlap({
+        ...(originalBooking.vehicle_id
+            ? { vehicleId: originalBooking.vehicle_id }
+            : {
+                normalizedLicensePlate: originalBooking.normalized_license_plate,
+                vehicleType: originalBooking.vehicle_type,
+            }),
+        startTime: basePayload.start_time,
+        endTime: basePayload.end_time,
+    });
+    await assertGarageCapacityAvailable({
+        garageId: garage._id,
+        vehicleType: originalBooking.vehicle_type,
+        bookingItems: basePayload.booking_items,
+    });
+    const payload = {
+        ...basePayload,
+        customer_id: originalBooking.customer_id,
+        vehicle_id: originalBooking.vehicle_id,
+        is_walk_in: originalBooking.is_walk_in,
+        guest_name: originalBooking.guest_name,
+        guest_phone: originalBooking.guest_phone,
+        normalized_guest_phone: originalBooking.normalized_guest_phone,
+        guest_email: originalBooking.guest_email,
+        license_plate: originalBooking.license_plate,
+        normalized_license_plate: originalBooking.normalized_license_plate,
+        created_by_staff_id: user._id,
+        is_rework: true,
+        original_booking_id: originalBooking._id,
+        customer_case_id: customerCaseId,
+        customer_case_resolution_id: resolutionId,
+        original_price: 0,
+        promotion_discount_amount: 0,
+        voucher_discount_amount: 0,
+        points_discount_amount: 0,
+        discount_amount: 0,
+        final_price: 0,
+        payment_status: BOOKING_PAYMENT_STATUS.PAID,
+        paid_at: now,
+        reward_processed: true,
+        reward_processed_at: now,
+    };
+    return createBookingDocument(payload);
+};
+
+const getEligibleStaffProfileForAssignment = async (
+    staffProfileId,
+    garageId,
+    staffType
+) => {
+    const staffProfile = await StaffProfile.findOne({
+        _id: staffProfileId,
+        garage_id: garageId,
+        staff_type: staffType,
+        is_active: true,
+    });
+
+    if (!staffProfile) {
+        throw new AppError(
+            'Eligible active staff profile not found in this garage',
+            400,
+            'STAFF_ASSIGNMENT_NOT_ELIGIBLE'
+        );
+    }
+
+    return staffProfile;
+};
+
+const assignInspectionStaff = async (user, bookingId, staffProfileId) => {
+    if (user.role !== USER_ROLES.ADMIN) {
+        throw new AppError(
+            'Only admin can assign inspection staff',
+            403,
+            'STAFF_ASSIGNMENT_ADMIN_ONLY'
+        );
+    }
+
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+
+    const staffProfile = await getEligibleStaffProfileForAssignment(
+        staffProfileId,
+        booking.garage_id,
+        STAFF_TYPES.VEHICLE_INSPECTION_STAFF
+    );
+
+    booking.assigned_inspection_staff_id = getStaffProfileUserId(staffProfile);
+    await booking.save();
+
+    return BookingMapper.toBookingDto(await getBookingDocumentById(booking._id));
+};
+
+const assignServiceItemStaff = async (
+    user,
+    bookingId,
+    bookingItemKey,
+    staffProfileId
+) => {
+    if (user.role !== USER_ROLES.ADMIN) {
+        throw new AppError(
+            'Only admin can assign service item staff',
+            403,
+            'STAFF_ASSIGNMENT_ADMIN_ONLY'
+        );
+    }
+
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+
+    const bookingItem = getBookingItemByKey(booking, bookingItemKey);
+
+    if (!bookingItem) {
+        throw new AppError(
+            'Booking service item not found',
+            404,
+            'BOOKING_SERVICE_ITEM_NOT_FOUND'
+        );
+    }
+
+    const requiredStaffType = bookingItem.requires_care_staff
+        ? bookingItem.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF
+        : (bookingItem.requires_wash_bay ? STAFF_TYPES.WASH_OPERATOR : null);
+
+    if (!requiredStaffType) {
+        throw new AppError(
+            'Booking service item does not require execution staff',
+            400,
+            'BOOKING_SERVICE_ITEM_STAFF_NOT_REQUIRED'
+        );
+    }
+
+    const staffProfile = await getEligibleStaffProfileForAssignment(
+        staffProfileId,
+        booking.garage_id,
+        requiredStaffType
+    );
+    const assignedAt = new Date();
+
+    if (bookingItem.requires_care_staff) {
+        const busyProfileIds = await getActiveAssignedCareStaffProfileIds(
+            booking.garage_id,
+            requiredStaffType,
+            booking._id
+        );
+
+        if (busyProfileIds.has(toObjectIdString(staffProfile._id))) {
+            throw new AppError(
+                'Staff is assigned to another active booking',
+                409,
+                'STAFF_ASSIGNMENT_CONFLICT'
+            );
+        }
+
+        bookingItem.assigned_care_staff = bookingItem.assigned_care_staff || [];
+
+        for (const assignment of bookingItem.assigned_care_staff) {
+            if (!assignment.released_at) {
+                assignment.released_at = assignedAt;
+            }
+        }
+
+        bookingItem.assigned_care_staff.push({
+            staff_profile_id: staffProfile._id,
+            user_id: getStaffProfileUserId(staffProfile),
+            assigned_at: assignedAt,
+            released_at: null,
+        });
+        syncAssignedCareStaffIds(booking);
+    }
+
+    bookingItem.assigned_execution_staff = bookingItem.assigned_execution_staff || [];
+
+    for (const assignment of bookingItem.assigned_execution_staff) {
+        if (!assignment.released_at) {
+            assignment.released_at = assignedAt;
+        }
+    }
+
+    bookingItem.assigned_execution_staff.push({
+        staff_profile_id: staffProfile._id,
+        user_id: getStaffProfileUserId(staffProfile),
+        assigned_at: assignedAt,
+        released_at: null,
+    });
+    booking.markModified('booking_items');
+    await booking.save();
+
+    await bookingServiceStepService.assignStaffForBookingItem(
+        booking._id,
+        bookingItem.item_key,
+        getStaffProfileUserId(staffProfile)
+    );
+
+    return getServiceWorkflow(user, booking._id);
+};
+
 const startService = async (
     user,
     bookingId,
@@ -4953,6 +5310,7 @@ const startService = async (
         });
 
         await assignCareStaffToBookingIfNeeded(booking);
+        await assignExecutionStaffToBookingItems(booking);
         await assignWashBayToBookingIfNeeded(booking);
 
         booking.status = BOOKING_STATUS.IN_PROGRESS;
@@ -5070,6 +5428,10 @@ const markBookingServiceStepDone = async (user, bookingId, stepId, { note } = {}
     assertBookingStatusIn(booking, [BOOKING_STATUS.IN_PROGRESS], 'BOOKING_SERVICE_STEP_DONE_NOT_ALLOWED');
 
     const currentBookingItem = getCurrentBookingItem(booking);
+
+    if (currentBookingItem) {
+        await assertStaffAssignedToBookingItem(user, currentBookingItem);
+    }
 
     const step = await bookingServiceStepService.markStepDone({
         bookingId: booking._id,
@@ -5205,6 +5567,98 @@ const assertCurrentBookingItem = (booking, bookingItemKey, allowedStatuses, erro
     return bookingItem;
 };
 
+const assignExecutionStaffToBookingItems = async (booking) => {
+    let washOperatorProfiles = null;
+    const assignedAt = new Date();
+
+    for (const bookingItem of booking.booking_items || []) {
+        if (!bookingItem.requires_wash_bay && !bookingItem.requires_care_staff) {
+            continue;
+        }
+
+        bookingItem.assigned_execution_staff = bookingItem.assigned_execution_staff || [];
+        const activeExecutionAssignments = bookingItem.assigned_execution_staff.filter(
+            (assignment) => !assignment.released_at
+        );
+
+        if (activeExecutionAssignments.length > 0) {
+            continue;
+        }
+
+        if (bookingItem.requires_care_staff) {
+            const careAssignments = getActiveCareStaffAssignments(bookingItem);
+
+            bookingItem.assigned_execution_staff.push(...careAssignments.map((assignment) => ({
+                staff_profile_id: getCareStaffAssignmentStaffProfileId(assignment),
+                user_id: assignment.user_id?._id || assignment.user_id,
+                assigned_at: assignedAt,
+                released_at: null,
+            })));
+            continue;
+        }
+
+        if (washOperatorProfiles === null) {
+            washOperatorProfiles = await findActiveCareStaffProfiles(
+                booking.garage_id,
+                STAFF_TYPES.WASH_OPERATOR
+            );
+        }
+
+        const selectedProfile = washOperatorProfiles[0];
+
+        if (selectedProfile) {
+            bookingItem.assigned_execution_staff.push({
+                staff_profile_id: selectedProfile._id,
+                user_id: getStaffProfileUserId(selectedProfile),
+                assigned_at: assignedAt,
+                released_at: null,
+            });
+        }
+    }
+
+    if (typeof booking.markModified === 'function') {
+        booking.markModified('booking_items');
+    }
+};
+
+const assertStaffAssignedToBookingItem = async (user, bookingItem) => {
+    if (user.role === USER_ROLES.ADMIN) {
+        return null;
+    }
+
+    const staffProfile = await getActiveStaffProfile(user._id);
+    const requiredStaffType = bookingItem.requires_care_staff
+        ? bookingItem.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF
+        : (bookingItem.requires_wash_bay ? STAFF_TYPES.WASH_OPERATOR : null);
+
+    if (!requiredStaffType || staffProfile.staff_type !== requiredStaffType) {
+        throw new AppError(
+            'Staff type is not eligible for this service item',
+            403,
+            'STAFF_SERVICE_ITEM_TYPE_MISMATCH'
+        );
+    }
+
+    const assignments = [
+        ...(bookingItem.assigned_execution_staff || []),
+        ...(bookingItem.assigned_care_staff || []),
+    ];
+
+    if (!assignments.some((assignment) => assignmentMatchesStaff(
+        assignment,
+        staffProfile,
+        user
+    ))) {
+        throw new AppError(
+            'Staff must be assigned to this service item',
+            403,
+            'STAFF_SERVICE_ITEM_ASSIGNMENT_REQUIRED'
+        );
+    }
+
+    return staffProfile;
+};
+
 const completeServiceItemEarly = async (
     user,
     bookingId,
@@ -5224,6 +5678,8 @@ const completeServiceItemEarly = async (
         [BOOKING_ITEM_STATUS.IN_PROGRESS, BOOKING_ITEM_STATUS.PAUSED],
         'BOOKING_SERVICE_ITEM_EARLY_COMPLETE_NOT_ALLOWED'
     );
+
+    await assertStaffAssignedToBookingItem(user, bookingItem);
 
     await completeBookingItemAndAdvance({
         booking,
@@ -5258,6 +5714,8 @@ const confirmServiceItemComplete = async (
         'BOOKING_SERVICE_ITEM_CONFIRM_NOT_ALLOWED'
     );
 
+    await assertStaffAssignedToBookingItem(user, bookingItem);
+
     await completeBookingItemAndAdvance({
         booking,
         bookingItem,
@@ -5290,6 +5748,7 @@ const pauseServiceItem = async (
         [BOOKING_ITEM_STATUS.IN_PROGRESS],
         'BOOKING_SERVICE_ITEM_PAUSE_NOT_ALLOWED'
     );
+    await assertStaffAssignedToBookingItem(user, bookingItem);
     const pausedAt = new Date();
     const remainingSeconds = getRemainingServiceItemSeconds(bookingItem, pausedAt);
 
@@ -5351,6 +5810,7 @@ const resumeServiceItem = async (
         [BOOKING_ITEM_STATUS.PAUSED],
         'BOOKING_SERVICE_ITEM_RESUME_NOT_ALLOWED'
     );
+    await assertStaffAssignedToBookingItem(user, bookingItem);
     const resumedAt = new Date();
     const remainingSeconds = bookingItem.remaining_seconds_at_pause;
 
@@ -5754,6 +6214,7 @@ module.exports = {
     getBookingById,
     createCustomerBooking,
     createWalkInBooking,
+    createReworkBooking,
     cancelMyBooking,
     cancelBooking,
     markNoShow,
@@ -5768,6 +6229,8 @@ module.exports = {
     getLateArrivalOptions,
     resolveLateArrival,
     assignWashBay,
+    assignInspectionStaff,
+    assignServiceItemStaff,
     startService,
     getBookingServiceSteps,
     getServiceWorkflow,

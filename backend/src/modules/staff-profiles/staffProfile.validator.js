@@ -139,7 +139,6 @@ const updateStaffProfileSchema = z.object({
     body: z
         .object({
             staff_code: optionalStaffCodeField,
-            staff_type: z.enum(STAFF_TYPE_VALUES).optional(),
             garage_id: optionalObjectIdField,
         })
         .strict()

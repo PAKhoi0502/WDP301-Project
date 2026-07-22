@@ -17,7 +17,10 @@ const uploadSchema = {
         public_id: { type: 'string' },
         mime_type: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'] },
         size: { type: 'number' },
-        purpose: { type: 'string', enum: ['GENERAL', 'USER_AVATAR', 'VEHICLE_INSPECTION', 'SURVEY_RESPONSE', 'RESEARCH_ATTACHMENT'] },
+        purpose: { type: 'string', enum: ['GENERAL', 'USER_AVATAR', 'VEHICLE_INSPECTION', 'SURVEY_RESPONSE', 'CUSTOMER_CASE_EVIDENCE', 'RESEARCH_ATTACHMENT', 'BOOKING_PLATE_SCAN'] },
+        width: { type: 'number', nullable: true },
+        height: { type: 'number', nullable: true },
+        retained_until: { type: 'string', format: 'date-time', nullable: true },
         owner_id: { type: 'string' },
         owner: { type: 'object', nullable: true },
         related_type: { type: 'string', nullable: true },
@@ -67,11 +70,11 @@ const uploadRequest = {
         },
         purpose: {
             type: 'string',
-            enum: ['GENERAL', 'USER_AVATAR', 'VEHICLE_INSPECTION', 'SURVEY_RESPONSE', 'RESEARCH_ATTACHMENT'],
+            enum: ['GENERAL', 'USER_AVATAR', 'VEHICLE_INSPECTION', 'SURVEY_RESPONSE', 'CUSTOMER_CASE_EVIDENCE', 'RESEARCH_ATTACHMENT', 'BOOKING_PLATE_SCAN'],
         },
         related_type: {
             type: 'string',
-            enum: ['USER', 'BOOKING', 'VEHICLE', 'VEHICLE_INSPECTION', 'SURVEY', 'SURVEY_RESPONSE', 'RESEARCH_REPORT', 'WASH_HISTORY', 'GARAGE', 'SERVICE_PACKAGE'],
+            enum: ['USER', 'BOOKING', 'VEHICLE', 'VEHICLE_INSPECTION', 'SURVEY', 'SURVEY_RESPONSE', 'CUSTOMER_CASE', 'RESEARCH_REPORT', 'WASH_HISTORY', 'GARAGE', 'SERVICE_PACKAGE', 'BOOKING_PLATE_SCAN'],
         },
         related_id: {
             type: 'string',

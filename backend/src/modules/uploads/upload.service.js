@@ -3,7 +3,7 @@ const UploadMapper = require('./upload.mapper');
 const { configureCloudinary } = require('../../config/cloudinary');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
-const { UPLOAD_PURPOSES } = require('../../shared/constants/upload.constant');
+const { UPLOAD_PURPOSES, UPLOAD_RELATED_TYPES } = require('../../shared/constants/upload.constant');
 const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
 const auditLogService = require('../audit-logs/auditLog.service');
 
@@ -110,6 +110,8 @@ const buildUploadPayload = ({ file, body, user, cloudinaryResult }) => {
         public_id: publicId,
         mime_type: file.mimetype,
         size: file.size,
+        width: cloudinaryResult?.width || null,
+        height: cloudinaryResult?.height || null,
         purpose: body.purpose || UPLOAD_PURPOSES.GENERAL,
         owner_id: user._id,
         related_type: normalizeText(body.related_type),
@@ -268,6 +270,32 @@ const deleteUpload = async (user, uploadId, auditContext = {}) => {
     const upload = await getUploadDocumentById(uploadId);
 
     assertUserCanDeleteUpload(user, upload);
+
+    if (
+        upload.purpose === UPLOAD_PURPOSES.CUSTOMER_CASE_EVIDENCE
+        && upload.related_type === UPLOAD_RELATED_TYPES.CUSTOMER_CASE
+        && upload.related_id
+    ) {
+        throw new AppError(
+            'Evidence linked to a customer case cannot be deleted',
+            409,
+            'CUSTOMER_CASE_EVIDENCE_IMMUTABLE'
+        );
+    }
+
+    if (
+        upload.purpose === UPLOAD_PURPOSES.BOOKING_PLATE_SCAN
+        && upload.related_type === UPLOAD_RELATED_TYPES.BOOKING_PLATE_SCAN
+        && upload.related_id
+        && (!upload.retained_until || upload.retained_until > new Date())
+    ) {
+        throw new AppError(
+            'Plate scan image is managed by the retention policy',
+            409,
+            'PLATE_SCAN_IMAGE_RETENTION_MANAGED'
+        );
+    }
+
     const before = UploadMapper.toUploadDto(upload);
 
     try {
@@ -309,4 +337,5 @@ module.exports = {
     createUpload,
     getAllUploads,
     deleteUpload,
+    deleteCloudinaryAsset,
 };

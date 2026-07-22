@@ -22,6 +22,8 @@ const analyticsSwagger = require('../../modules/analytics/analytics.swagger');
 const researchSwagger = require('../../modules/research/research.swagger');
 const bookingIncidentSwagger = require('../../modules/booking-incidents/bookingIncident.swagger');
 const customerVoucherSwagger = require('../../modules/customer-vouchers/customerVoucher.swagger');
+const customerCaseSwagger = require('../../modules/customer-cases/customerCase.swagger');
+const bookingArrivalSwagger = require('../../modules/booking-arrivals/bookingArrival.swagger');
 
 const paths = {
     ...authSwagger.paths,
@@ -48,6 +50,8 @@ const paths = {
     ...researchSwagger.paths,
     ...bookingIncidentSwagger.paths,
     ...customerVoucherSwagger.paths,
+    ...customerCaseSwagger.paths,
+    ...bookingArrivalSwagger.paths,
 };
 
 module.exports = paths;

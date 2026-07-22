@@ -19,11 +19,27 @@ jest.mock('../modules/payments/payment.service', () => ({
     expireDuePayosPayments: jest.fn(),
 }));
 
+jest.mock('../modules/staff-profiles/staffTypeChange.service', () => ({
+    processDueStaffTypeChanges: jest.fn(),
+}));
+
+jest.mock('../modules/customer-cases/customerCaseStage2.service', () => ({
+    processDueSlaEscalations: jest.fn(),
+}));
+
+jest.mock('../modules/booking-arrivals/bookingArrival.service', () => ({
+    purgeExpiredImages: jest.fn(),
+    expirePendingScans: jest.fn(),
+}));
+
 const bookingWaitlistService = require('../modules/booking-waitlists/bookingWaitlist.service');
 const notificationService = require('../modules/notifications/notification.service');
 const loyaltyService = require('../modules/loyalty/loyalty.service');
 const bookingService = require('../modules/bookings/booking.service');
 const paymentService = require('../modules/payments/payment.service');
+const staffTypeChangeService = require('../modules/staff-profiles/staffTypeChange.service');
+const customerCaseStage2Service = require('../modules/customer-cases/customerCaseStage2.service');
+const bookingArrivalService = require('../modules/booking-arrivals/bookingArrival.service');
 const schedulerService = require('./scheduler.service');
 
 describe('scheduler service', () => {
@@ -37,6 +53,10 @@ describe('scheduler service', () => {
         delete process.env.TIER_INACTIVITY_DOWNGRADE_BATCH_SIZE;
         delete process.env.SERVICE_ITEM_TIMER_BATCH_SIZE;
         delete process.env.PAYMENT_EXPIRE_BATCH_SIZE;
+        delete process.env.STAFF_TYPE_CHANGE_BATCH_SIZE;
+        delete process.env.CUSTOMER_CASE_SLA_BATCH_SIZE;
+        delete process.env.PLATE_SCAN_RETENTION_BATCH_SIZE;
+        delete process.env.PLATE_SCAN_EXPIRE_BATCH_SIZE;
     });
 
     afterEach(() => {
@@ -68,6 +88,10 @@ describe('scheduler service', () => {
             expect.objectContaining({ name: schedulerService.JOB_NAMES.TIER_INACTIVITY_DOWNGRADE }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.SERVICE_ITEM_TIMER }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.PAYMENT_EXPIRE }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.STAFF_TYPE_CHANGE }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.CUSTOMER_CASE_SLA }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.PLATE_SCAN_RETENTION }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.PLATE_SCAN_EXPIRE }),
         ]));
     });
 
@@ -148,5 +172,58 @@ describe('scheduler service', () => {
             expired: 2,
             failed: 0,
         });
+    });
+
+    it('runs due staff type changes on demand', async () => {
+        process.env.STAFF_TYPE_CHANGE_BATCH_SIZE = '15';
+        staffTypeChangeService.processDueStaffTypeChanges.mockResolvedValue({
+            processed: 1,
+            applied: 1,
+            deferred: 0,
+            failed: 0,
+        });
+
+        const result = await schedulerService.runSchedulerJobNow(
+            schedulerService.JOB_NAMES.STAFF_TYPE_CHANGE
+        );
+
+        expect(staffTypeChangeService.processDueStaffTypeChanges).toHaveBeenCalledWith({ limit: 15 });
+        expect(result.applied).toBe(1);
+    });
+
+    it('runs customer case SLA escalation on demand', async () => {
+        process.env.CUSTOMER_CASE_SLA_BATCH_SIZE = '12';
+        customerCaseStage2Service.processDueSlaEscalations.mockResolvedValue({ processed: 2, escalated: 2 });
+
+        const result = await schedulerService.runSchedulerJobNow(
+            schedulerService.JOB_NAMES.CUSTOMER_CASE_SLA
+        );
+
+        expect(customerCaseStage2Service.processDueSlaEscalations).toHaveBeenCalledWith({ limit: 12 });
+        expect(result).toEqual({ processed: 2, escalated: 2 });
+    });
+
+    it('runs plate scan image retention on demand', async () => {
+        process.env.PLATE_SCAN_RETENTION_BATCH_SIZE = '18';
+        bookingArrivalService.purgeExpiredImages.mockResolvedValue({ scanned: 3, purged: 3, failed: 0 });
+
+        const result = await schedulerService.runSchedulerJobNow(
+            schedulerService.JOB_NAMES.PLATE_SCAN_RETENTION
+        );
+
+        expect(bookingArrivalService.purgeExpiredImages).toHaveBeenCalledWith({ limit: 18 });
+        expect(result).toEqual({ scanned: 3, purged: 3, failed: 0 });
+    });
+
+    it('expires unresolved scans on demand', async () => {
+        process.env.PLATE_SCAN_EXPIRE_BATCH_SIZE = '21';
+        bookingArrivalService.expirePendingScans.mockResolvedValue({ processed: 2, expired: 2 });
+
+        const result = await schedulerService.runSchedulerJobNow(
+            schedulerService.JOB_NAMES.PLATE_SCAN_EXPIRE
+        );
+
+        expect(bookingArrivalService.expirePendingScans).toHaveBeenCalledWith({ limit: 21 });
+        expect(result).toEqual({ processed: 2, expired: 2 });
     });
 });

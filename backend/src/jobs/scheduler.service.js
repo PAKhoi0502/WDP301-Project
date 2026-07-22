@@ -3,6 +3,9 @@ const notificationService = require('../modules/notifications/notification.servi
 const loyaltyService = require('../modules/loyalty/loyalty.service');
 const bookingService = require('../modules/bookings/booking.service');
 const paymentService = require('../modules/payments/payment.service');
+const staffTypeChangeService = require('../modules/staff-profiles/staffTypeChange.service');
+const customerCaseStage2Service = require('../modules/customer-cases/customerCaseStage2.service');
+const bookingArrivalService = require('../modules/booking-arrivals/bookingArrival.service');
 
 const JOB_NAMES = Object.freeze({
     WAITLIST_EXPIRE: 'waitlist-expire',
@@ -11,6 +14,10 @@ const JOB_NAMES = Object.freeze({
     TIER_INACTIVITY_DOWNGRADE: 'tier-inactivity-downgrade',
     SERVICE_ITEM_TIMER: 'service-item-timer',
     PAYMENT_EXPIRE: 'payment-expire',
+    STAFF_TYPE_CHANGE: 'staff-type-change',
+    CUSTOMER_CASE_SLA: 'customer-case-sla',
+    PLATE_SCAN_RETENTION: 'plate-scan-retention',
+    PLATE_SCAN_EXPIRE: 'plate-scan-expire',
 });
 
 const DEFAULT_INTERVALS = Object.freeze({
@@ -20,6 +27,10 @@ const DEFAULT_INTERVALS = Object.freeze({
     TIER_INACTIVITY_DOWNGRADE_JOB_INTERVAL_MS: 24 * 60 * 60 * 1000,
     SERVICE_ITEM_TIMER_JOB_INTERVAL_MS: 1000,
     PAYMENT_EXPIRE_JOB_INTERVAL_MS: 60 * 1000,
+    STAFF_TYPE_CHANGE_JOB_INTERVAL_MS: 60 * 1000,
+    CUSTOMER_CASE_SLA_JOB_INTERVAL_MS: 60 * 1000,
+    PLATE_SCAN_RETENTION_JOB_INTERVAL_MS: 60 * 60 * 1000,
+    PLATE_SCAN_EXPIRE_JOB_INTERVAL_MS: 60 * 1000,
 });
 
 let activeJobs = [];
@@ -115,6 +126,50 @@ const buildJobDefinitions = () => [
         ),
         handler: () => bookingService.processDueServiceItemTimers({
             limit: getPositiveIntegerEnv('SERVICE_ITEM_TIMER_BATCH_SIZE', 50, 200),
+        }),
+    },
+    {
+        name: JOB_NAMES.STAFF_TYPE_CHANGE,
+        intervalMs: getPositiveIntegerEnv(
+            'STAFF_TYPE_CHANGE_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.STAFF_TYPE_CHANGE_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => staffTypeChangeService.processDueStaffTypeChanges({
+            limit: getPositiveIntegerEnv('STAFF_TYPE_CHANGE_BATCH_SIZE', 50, 200),
+        }),
+    },
+    {
+        name: JOB_NAMES.CUSTOMER_CASE_SLA,
+        intervalMs: getPositiveIntegerEnv(
+            'CUSTOMER_CASE_SLA_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.CUSTOMER_CASE_SLA_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => customerCaseStage2Service.processDueSlaEscalations({
+            limit: getPositiveIntegerEnv('CUSTOMER_CASE_SLA_BATCH_SIZE', 50, 200),
+        }),
+    },
+    {
+        name: JOB_NAMES.PLATE_SCAN_RETENTION,
+        intervalMs: getPositiveIntegerEnv(
+            'PLATE_SCAN_RETENTION_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.PLATE_SCAN_RETENTION_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => bookingArrivalService.purgeExpiredImages({
+            limit: getPositiveIntegerEnv('PLATE_SCAN_RETENTION_BATCH_SIZE', 50, 200),
+        }),
+    },
+    {
+        name: JOB_NAMES.PLATE_SCAN_EXPIRE,
+        intervalMs: getPositiveIntegerEnv(
+            'PLATE_SCAN_EXPIRE_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.PLATE_SCAN_EXPIRE_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => bookingArrivalService.expirePendingScans({
+            limit: getPositiveIntegerEnv('PLATE_SCAN_EXPIRE_BATCH_SIZE', 50, 200),
         }),
     },
 ];

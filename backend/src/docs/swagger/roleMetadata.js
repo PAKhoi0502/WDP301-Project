@@ -25,6 +25,10 @@ const ROLE_DETAILS = Object.freeze({
         label: 'ADMIN',
         auth: 'Bearer JWT required. User role must be ADMIN.',
     },
+    CAMERA_DEVICE: {
+        label: 'CAMERA DEVICE',
+        auth: 'X-Camera-Device-Code and X-Camera-Device-Key headers are required.',
+    },
 });
 
 const STAFF_GARAGE_SCOPE = 'STAFF access is limited by assigned garage where the service enforces garage scope. ADMIN access is system-wide unless a request filter is provided.';
@@ -85,6 +89,16 @@ const ROUTE_GROUPS = Object.freeze([
         feature: 'Staff profile',
         operations: [
             'GET /staff-profiles/me',
+            'GET /staff-profiles/me/capabilities',
+            'GET /staff-profiles/me/type-change-requests',
+            'POST /staff-profiles/me/type-change-requests',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Staff position change',
+        operations: [
+            'PATCH /staff-profiles/type-change-requests/{requestId}/cancel',
         ],
     },
     {
@@ -100,6 +114,11 @@ const ROUTE_GROUPS = Object.freeze([
             'DELETE /staff-profiles/{id}',
             'PATCH /staff-profiles/{id}/status',
             'PATCH /staff-profiles/{id}/employment-status',
+            'GET /staff-profiles/type-change-requests',
+            'PATCH /staff-profiles/type-change-requests/{requestId}/approve',
+            'PATCH /staff-profiles/type-change-requests/{requestId}/reject',
+            'GET /staff-profiles/{id}/type-change-impact',
+            'GET /staff-profiles/{id}/type-change-history',
         ],
     },
     {
@@ -216,6 +235,21 @@ const ROUTE_GROUPS = Object.freeze([
         ],
     },
     {
+        roles: ['CUSTOMER'],
+        feature: 'Vehicle handover and issue reporting',
+        operations: [
+            'GET /bookings/{id}/handover',
+            'POST /bookings/{id}/handover/accept',
+            'POST /bookings/{id}/handover/report',
+            'GET /customer-cases',
+            'GET /customer-cases/{id}',
+            'POST /customer-cases/{id}/evidence',
+            'POST /customer-cases/{id}/messages',
+            'PATCH /customer-cases/{id}/resolution-response',
+            'POST /customer-cases/{id}/reopen',
+        ],
+    },
+    {
         roles: ['STAFF', 'ADMIN'],
         feature: 'Booking operations',
         scope: STAFF_GARAGE_SCOPE,
@@ -258,6 +292,8 @@ const ROUTE_GROUPS = Object.freeze([
         feature: 'Booking operations',
         operations: [
             'PATCH /admin/bookings/{id}/reopen-service',
+            'PATCH /admin/bookings/{id}/assign-inspection-staff',
+            'PATCH /admin/bookings/{id}/service-items/{itemKey}/assign-staff',
         ],
     },
     {
@@ -267,6 +303,87 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'GET /admin/bookings/{id}/inspections',
             'POST /admin/bookings/{id}/inspections',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'License plate arrival verification',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /staff/booking-arrivals/arrival-queue',
+            'GET /staff/booking-arrivals/plate-scans',
+            'POST /staff/booking-arrivals/plate-scans',
+            'GET /staff/booking-arrivals/plate-scans/{scanId}',
+            'POST /staff/booking-arrivals/plate-scans/{scanId}/retry',
+            'POST /staff/booking-arrivals/plate-scans/{scanId}/confirm',
+            'POST /staff/booking-arrivals/plate-scans/{scanId}/reject',
+            'POST /staff/booking-arrivals/plate-scans/{scanId}/alternate-vehicle',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'License plate arrival administration',
+        operations: [
+            'GET /admin/booking-arrivals/plate-scans',
+            'GET /admin/booking-arrivals/metrics',
+            'PATCH /admin/booking-arrivals/plate-scans/{scanId}/alternate-vehicle',
+            'GET /admin/booking-arrivals/camera-devices',
+            'POST /admin/booking-arrivals/camera-devices',
+            'PATCH /admin/booking-arrivals/camera-devices/{id}',
+            'POST /admin/booking-arrivals/camera-devices/{id}/rotate-key',
+        ],
+    },
+    {
+        roles: ['CAMERA_DEVICE'],
+        feature: 'Gate camera ingestion',
+        operations: [
+            'POST /camera-devices/heartbeat',
+            'POST /camera-devices/uploads',
+            'POST /camera-devices/events/batch',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Vehicle handover operations',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/bookings/{id}/handover',
+            'PATCH /admin/bookings/{id}/handover/ready',
+            'PATCH /admin/bookings/{id}/handover/release',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Customer case operations',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /admin/customer-cases',
+            'GET /admin/customer-cases/{id}',
+            'PATCH /admin/customer-cases/{id}/assign',
+            'PATCH /admin/customer-cases/{id}/acknowledge',
+            'POST /admin/customer-cases/{id}/evidence',
+            'POST /admin/customer-cases/{id}/messages',
+            'GET /staff/customer-cases/sla-dashboard',
+            'POST /staff/customer-cases/walk-in/otp/request',
+            'POST /staff/customer-cases/walk-in/otp/verify',
+            'POST /staff/customer-cases/walk-in',
+            'PATCH /staff/customer-cases/{id}/technical-assessment/assign',
+            'GET /staff/customer-cases/{id}/technical-assessment',
+            'PATCH /staff/customer-cases/{id}/technical-assessment/start',
+            'POST /staff/customer-cases/{id}/technical-assessment/submit',
+            'PATCH /staff/customer-cases/{id}/walk-in-resolution-response',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Customer case resolution',
+        operations: [
+            'PATCH /admin/customer-cases/{id}/conclude',
+            'PATCH /admin/customer-cases/{id}/close',
+            'POST /admin/customer-cases/{id}/resolutions',
+            'POST /admin/customer-cases/{id}/resolutions/{resolutionId}/apply',
+            'PATCH /admin/customer-cases/{id}/refunds/{refundId}',
+            'POST /admin/customer-cases/{id}/reopen',
         ],
     },
     {

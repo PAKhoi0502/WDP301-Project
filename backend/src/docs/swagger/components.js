@@ -10,6 +10,16 @@ const components = {
             in: 'cookie',
             name: 'refreshToken',
         },
+        cameraDeviceCode: {
+            type: 'apiKey',
+            in: 'header',
+            name: 'X-Camera-Device-Code',
+        },
+        cameraDeviceKey: {
+            type: 'apiKey',
+            in: 'header',
+            name: 'X-Camera-Device-Key',
+        },
     },
     schemas: {
         ErrorResponse: {

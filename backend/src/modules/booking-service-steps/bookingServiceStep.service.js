@@ -78,8 +78,12 @@ const getServiceStepGroupName = (bookingItem, fallbackServicePackage) => {
 };
 
 const getFirstAssignedCareStaffUserId = (bookingItem) => {
-    const assignment = (bookingItem.assigned_care_staff || []).find((item) => !item.released_at)
-        || (bookingItem.assigned_care_staff || [])[0];
+    const assignments = [
+        ...(bookingItem.assigned_execution_staff || []),
+        ...(bookingItem.assigned_care_staff || []),
+    ];
+    const assignment = assignments.find((item) => !item.released_at)
+        || assignments[0];
 
     return assignment?.user_id?._id || assignment?.user_id || null;
 };
@@ -151,7 +155,7 @@ const buildPostServiceDocument = (booking, fallbackServicePackage, order) => ({
     service_package_id: fallbackServicePackage?._id || booking.service_package_id,
     booking_item_key: null,
     step_code: 'POST_SERVICE_HANDOVER',
-    step_name: 'Kiểm tra cuối và bàn giao',
+    step_name: 'Kiểm tra cuối và chuẩn bị bàn giao',
     order,
     step_type: SERVICE_STEP_TYPES.MANUAL_SERVICE_STEP,
     workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.POST_SERVICE,
@@ -168,7 +172,7 @@ const buildPostServiceDocument = (booking, fallbackServicePackage, order) => ({
         'Kiểm tra tổng thể lần cuối',
         'Chụp ảnh sau dịch vụ nếu cần',
         'Ghi nhận tình trạng sau dịch vụ',
-        'Bàn giao xe cho khách hàng',
+        'Xác nhận xe sẵn sàng để khách hàng kiểm tra và phản hồi',
     ],
     started_at: null,
     completed_at: null,
@@ -442,6 +446,26 @@ const clearResourceReleasedForBookingItem = async (bookingId, bookingItemKey, re
     );
 };
 
+const assignStaffForBookingItem = async (bookingId, bookingItemKey, staffUserId) => {
+    if (!bookingItemKey) {
+        return 0;
+    }
+
+    const result = await BookingServiceStep.updateMany(
+        {
+            booking_id: bookingId,
+            booking_item_key: normalizeStepCode(bookingItemKey),
+        },
+        {
+            $set: {
+                assigned_staff_id: staffUserId,
+            },
+        }
+    );
+
+    return result.modifiedCount || 0;
+};
+
 module.exports = {
     getStepsByBookingId,
     countStepsByBookingId,
@@ -453,4 +477,5 @@ module.exports = {
     areAllRequiredStepsDoneForBookingItem,
     markResourceReleasedForBookingItem,
     clearResourceReleasedForBookingItem,
+    assignStaffForBookingItem,
 };

@@ -1,5 +1,9 @@
 const UserMapper = require('../users/user.mapper');
-const { STAFF_EMPLOYMENT_STATUS } = require('../../shared/constants/staff.constant');
+const {
+    STAFF_EMPLOYMENT_STATUS,
+    getStaffCapabilities,
+    getStaffGroup,
+} = require('../../shared/constants/staff.constant');
 
 const toId = (value) => {
     if (!value) {
@@ -34,6 +38,8 @@ const toStaffProfileDto = (staffProfile) => {
         user,
         staff_code: plainStaffProfile.staff_code,
         staff_type: plainStaffProfile.staff_type,
+        staff_group: getStaffGroup(plainStaffProfile.staff_type),
+        capabilities: getStaffCapabilities(plainStaffProfile.staff_type),
         garage_id: toId(plainStaffProfile.garage_id),
         is_active: plainStaffProfile.is_active,
         employment_status: employmentStatus,
@@ -78,10 +84,6 @@ const toUpdatePayload = (data = {}) => {
 
     if (data.staff_code !== undefined) {
         payload.staff_code = data.staff_code;
-    }
-
-    if (data.staff_type !== undefined) {
-        payload.staff_type = data.staff_type;
     }
 
     if (data.garage_id !== undefined) {
