@@ -39,6 +39,8 @@ const toStaffTypeChangeDto = (request) => {
         status: item.status,
         requested_by: toId(item.requested_by),
         requester: toUserSummary(item.requested_by),
+        request_source: item.request_source || 'STAFF_SELF_REQUEST',
+        requested_by_role: item.requested_by_role || 'STAFF',
         approved_by: toId(item.approved_by),
         approver: toUserSummary(item.approved_by),
         approved_at: item.approved_at,

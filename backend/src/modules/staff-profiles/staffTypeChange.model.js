@@ -1,10 +1,13 @@
 const mongoose = require('mongoose');
 
 const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
+const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const {
     STAFF_TYPE_CHANGE_STATUS,
     STAFF_TYPE_CHANGE_STATUS_VALUES,
     STAFF_TYPE_CHANGE_ACTIVE_STATUSES,
+    STAFF_TYPE_CHANGE_REQUEST_SOURCES,
+    STAFF_TYPE_CHANGE_REQUEST_SOURCE_VALUES,
 } = require('../../shared/constants/staffTypeChange.constant');
 
 const staffTypeChangeSchema = new mongoose.Schema(
@@ -58,6 +61,18 @@ const staffTypeChangeSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
             required: [true, 'Requester is required'],
+        },
+        request_source: {
+            type: String,
+            enum: STAFF_TYPE_CHANGE_REQUEST_SOURCE_VALUES,
+            default: STAFF_TYPE_CHANGE_REQUEST_SOURCES.STAFF_SELF_REQUEST,
+            required: [true, 'Request source is required'],
+        },
+        requested_by_role: {
+            type: String,
+            enum: [USER_ROLES.STAFF, USER_ROLES.ADMIN],
+            default: USER_ROLES.STAFF,
+            required: [true, 'Requester role is required'],
         },
         approved_by: {
             type: mongoose.Schema.Types.ObjectId,

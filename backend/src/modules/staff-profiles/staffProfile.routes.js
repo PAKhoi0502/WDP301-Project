@@ -13,6 +13,7 @@ const {
 } = require('./staffProfile.validator');
 const {
     createMyStaffTypeChangeRequestSchema,
+    createAdminStaffTypeChangeRequestSchema,
     getMyStaffTypeChangeRequestsSchema,
     getAdminStaffTypeChangeRequestsSchema,
     getStaffTypeChangeImpactSchema,
@@ -82,6 +83,14 @@ router.patch(
     authorize(USER_ROLES.STAFF, USER_ROLES.ADMIN),
     validate(cancelStaffTypeChangeRequestSchema),
     staffTypeChangeController.cancelRequest
+);
+
+router.post(
+    '/:id/type-change-requests',
+    authenticate,
+    authorize(USER_ROLES.ADMIN),
+    validate(createAdminStaffTypeChangeRequestSchema),
+    staffTypeChangeController.createAdminRequest
 );
 
 router.get(

@@ -398,6 +398,12 @@ const schemas = {
                 type: 'string',
                 enum: ['REQUESTED', 'APPROVED', 'SCHEDULED', 'APPLIED', 'REJECTED', 'CANCELLED', 'FAILED'],
             },
+            request_source: {
+                type: 'string',
+                enum: ['STAFF_SELF_REQUEST', 'ADMIN_DIRECTED'],
+            },
+            requested_by: { type: 'string' },
+            requested_by_role: { type: 'string', enum: ['STAFF', 'ADMIN'] },
             approved_at: { type: 'string', format: 'date-time', nullable: true },
             applied_at: { type: 'string', format: 'date-time', nullable: true },
             handover_note: { type: 'string', nullable: true },
@@ -543,6 +549,13 @@ const paths = {
             tags: ['Staff Profiles'],
             summary: 'List staff type change requests (admin)',
             security: [{ bearerAuth: [] }],
+            parameters: [
+                { in: 'query', name: 'page', schema: { type: 'integer', default: 1 } },
+                { in: 'query', name: 'limit', schema: { type: 'integer', default: 20 } },
+                { in: 'query', name: 'staff_profile_id', schema: { type: 'string' } },
+                { in: 'query', name: 'status', schema: { type: 'string', enum: ['REQUESTED', 'APPROVED', 'SCHEDULED', 'APPLIED', 'REJECTED', 'CANCELLED', 'FAILED'] } },
+                { in: 'query', name: 'request_source', schema: { type: 'string', enum: ['STAFF_SELF_REQUEST', 'ADMIN_DIRECTED'] } },
+            ],
             responses: { 200: { description: 'Request list' }, 401: unauthorizedResponse, 403: forbiddenResponse },
         },
     },
@@ -584,6 +597,31 @@ const paths = {
                 { in: 'query', name: 'effective_at', schema: { type: 'string', format: 'date-time' } },
             ],
             responses: { 200: { description: 'Impact preview' }, 404: notFoundResponse },
+        },
+    },
+    '/staff-profiles/{id}/type-change-requests': {
+        post: {
+            tags: ['Staff Profiles'],
+            summary: 'Initiate a staff position change (admin)',
+            description: 'Creates an ADMIN_DIRECTED request in REQUESTED state and stores an initial impact snapshot. handover_note is required when active or future assignments exist. The request must still pass the existing approve or schedule workflow; this endpoint never updates staff_type directly.',
+            security: [{ bearerAuth: [] }],
+            parameters: [staffProfileIdParameter],
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: { $ref: '#/components/schemas/StaffTypeChangeCreateRequest' },
+                    },
+                },
+            },
+            responses: {
+                201: staffTypeChangeResponse,
+                400: validationErrorResponse,
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: notFoundResponse,
+                409: conflictResponse,
+            },
         },
     },
     '/staff-profiles/{id}/type-change-history': {

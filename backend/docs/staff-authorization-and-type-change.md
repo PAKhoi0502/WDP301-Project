@@ -67,6 +67,24 @@ REQUESTED/APPROVED/SCHEDULED ------> CANCELLED
 SCHEDULED -------------------------> FAILED
 ```
 
+Requests have one of two initiation sources:
+
+- `STAFF_SELF_REQUEST`: an active staff member requests their own position
+  change.
+- `ADMIN_DIRECTED`: an administrator initiates an operational reassignment for
+  an active staff member.
+
+Both sources enter `REQUESTED`. Admin initiation does not update `staff_type`
+and does not bypass approval, impact checks, scheduling, audit or token
+revocation. The same admin may initiate and approve in the current operating
+model; separation of duties can be introduced later without changing the state
+machine.
+
+Admin initiation calculates and stores an initial impact snapshot. If the staff
+member has active or future assignments, `handover_note` is mandatory. Approval
+and scheduled application still recalculate impact because the initial snapshot
+can become stale.
+
 The source staff type and garage are captured from the profile on the server.
 The general profile update endpoint rejects `staff_type`; callers must use this
 workflow.
@@ -75,6 +93,7 @@ Endpoints:
 
 - `POST /api/v1/staff-profiles/me/type-change-requests`
 - `GET /api/v1/staff-profiles/me/type-change-requests`
+- `POST /api/v1/staff-profiles/:id/type-change-requests` (admin initiation)
 - `GET /api/v1/staff-profiles/type-change-requests` (admin)
 - `GET /api/v1/staff-profiles/:id/type-change-impact` (admin)
 - `PATCH /api/v1/staff-profiles/type-change-requests/:requestId/approve` (admin)
@@ -88,10 +107,26 @@ inside the transaction. A due change is deferred when active work exists.
 Emergency application requires `emergency_override=true` and a non-empty
 `override_reason`.
 
+Staff can cancel only their own `STAFF_SELF_REQUEST` while it is still
+`REQUESTED`. They cannot cancel an `ADMIN_DIRECTED` reassignment. Admin can
+cancel any open request, but an audit reason is mandatory.
+
+Creating a self-request notifies all active admins. Creating an
+admin-directed request notifies the target staff member. Approval, scheduling,
+application, rejection, cancellation and terminal scheduler failure notify the
+target staff.
+
 The scheduler applies due changes every minute by default. Configure it with:
 
 - `STAFF_TYPE_CHANGE_JOB_INTERVAL_MS`
 - `STAFF_TYPE_CHANGE_BATCH_SIZE`
+
+After deploying request-source fields, run:
+
+```text
+npm run migrate:staff-type-change-sources:dry-run
+npm run migrate:staff-type-change-sources
+```
 
 Applying a change updates the staff profile, writes an audit event, creates an
 in-app notification, and revokes refresh tokens. Capability middleware reads the

@@ -3,6 +3,7 @@ const { z } = require('zod');
 const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
 const {
     STAFF_TYPE_CHANGE_STATUS_VALUES,
+    STAFF_TYPE_CHANGE_REQUEST_SOURCE_VALUES,
 } = require('../../shared/constants/staffTypeChange.constant');
 
 const objectIdField = z
@@ -43,13 +44,20 @@ const paginationQuery = z.object({
     status: z.enum(STAFF_TYPE_CHANGE_STATUS_VALUES).optional(),
 }).strict();
 
+const createStaffTypeChangeRequestBody = z.object({
+    to_staff_type: z.enum(STAFF_TYPE_VALUES),
+    reason: reasonField,
+    effective_at: optionalDateField,
+    handover_note: optionalHandoverNoteField,
+}).strict();
+
 const createMyStaffTypeChangeRequestSchema = z.object({
-    body: z.object({
-        to_staff_type: z.enum(STAFF_TYPE_VALUES),
-        reason: reasonField,
-        effective_at: optionalDateField,
-        handover_note: optionalHandoverNoteField,
-    }).strict(),
+    body: createStaffTypeChangeRequestBody,
+});
+
+const createAdminStaffTypeChangeRequestSchema = z.object({
+    params: staffProfileIdParam,
+    body: createStaffTypeChangeRequestBody,
 });
 
 const getMyStaffTypeChangeRequestsSchema = z.object({
@@ -59,6 +67,7 @@ const getMyStaffTypeChangeRequestsSchema = z.object({
 const getAdminStaffTypeChangeRequestsSchema = z.object({
     query: paginationQuery.extend({
         staff_profile_id: objectIdField.optional(),
+        request_source: z.enum(STAFF_TYPE_CHANGE_REQUEST_SOURCE_VALUES).optional(),
     }).strict(),
 });
 
@@ -113,6 +122,7 @@ const getStaffTypeChangeHistorySchema = z.object({
 
 module.exports = {
     createMyStaffTypeChangeRequestSchema,
+    createAdminStaffTypeChangeRequestSchema,
     getMyStaffTypeChangeRequestsSchema,
     getAdminStaffTypeChangeRequestsSchema,
     getStaffTypeChangeImpactSchema,

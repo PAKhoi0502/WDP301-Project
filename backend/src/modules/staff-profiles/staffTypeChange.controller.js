@@ -29,6 +29,20 @@ const getMyRequests = asyncHandler(async (req, res) => {
     });
 });
 
+const createAdminRequest = asyncHandler(async (req, res) => {
+    const result = await staffTypeChangeService.createAdminStaffTypeChangeRequest(
+        req.validated.params.id,
+        req.user._id,
+        req.validated.body,
+        getAuditRequestContext(req)
+    );
+
+    return sendCreated(res, {
+        message: 'Create admin-directed staff type change request successfully',
+        data: result,
+    });
+});
+
 const getAdminRequests = asyncHandler(async (req, res) => {
     const result = await staffTypeChangeService.getAdminStaffTypeChangeRequests(
         req.validated.query
@@ -110,6 +124,7 @@ const getHistory = asyncHandler(async (req, res) => {
 
 module.exports = {
     createMyRequest,
+    createAdminRequest,
     getMyRequests,
     getAdminRequests,
     getImpact,

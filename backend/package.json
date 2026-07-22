@@ -19,7 +19,9 @@
     "migrate:service-countdowns": "node src/scripts/migrateServiceCountdowns.js",
     "migrate:service-countdowns:dry-run": "node src/scripts/migrateServiceCountdowns.js --dry-run",
     "migrate:payment-initiators": "node src/scripts/migratePaymentInitiators.js",
-    "migrate:payment-initiators:dry-run": "node src/scripts/migratePaymentInitiators.js --dry-run"
+    "migrate:payment-initiators:dry-run": "node src/scripts/migratePaymentInitiators.js --dry-run",
+    "migrate:staff-type-change-sources": "node src/scripts/migrateStaffTypeChangeSources.js",
+    "migrate:staff-type-change-sources:dry-run": "node src/scripts/migrateStaffTypeChangeSources.js --dry-run"
   },
   "keywords": [],
   "author": "Pham Anh Khoi",

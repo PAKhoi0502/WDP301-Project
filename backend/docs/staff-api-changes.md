@@ -217,6 +217,7 @@ backend and cannot be supplied by the client.
 
 | Method | Path | Description |
 | --- | --- | --- |
+| `POST` | `/staff-profiles/:id/type-change-requests` | Initiate an admin-directed position change in `REQUESTED` state |
 | `GET` | `/staff-profiles/type-change-requests` | List and filter requests |
 | `GET` | `/staff-profiles/:id/type-change-impact` | Preview assignments and capacity impact |
 | `PATCH` | `/staff-profiles/type-change-requests/:requestId/approve` | Approve, schedule, or immediately apply |
@@ -265,6 +266,36 @@ SCHEDULED -> FAILED
 Scheduled requests are processed by the staff-type-change scheduler. Active or
 future assignments are recalculated at application time, not trusted from the
 earlier preview.
+
+Admin-directed create request body:
+
+```json
+{
+  "to_staff_type": "WASH_OPERATOR",
+  "reason": "Operational reassignment requested by management",
+  "effective_at": "2026-07-25T01:00:00.000Z",
+  "handover_note": "Complete and hand over current inspection work"
+}
+```
+
+The response adds:
+
+```json
+{
+  "request_source": "ADMIN_DIRECTED",
+  "requested_by_role": "ADMIN"
+}
+```
+
+Admin initiation does not change `staff_type`. The request must still be
+approved through the existing endpoint and will be applied immediately or by
+the scheduler only after impact checks. The create call stores an initial
+impact snapshot and requires `handover_note` when active or future assignments
+exist. Staff self-requests use
+`request_source=STAFF_SELF_REQUEST` and now notify active admins.
+
+Staff may cancel only their own self-request while it is `REQUESTED`. Admin may
+cancel any open request and must provide a reason.
 
 ## 5. Existing APIs with changed behavior
 

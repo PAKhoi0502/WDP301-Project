@@ -4,6 +4,7 @@ const StaffProfile = require('./staffProfile.model');
 const StaffTypeChangeRequest = require('./staffTypeChange.model');
 const StaffTypeChangeMapper = require('./staffTypeChange.mapper');
 const Booking = require('../bookings/booking.model');
+const User = require('../users/user.model');
 const TokenService = require('../auth/services/token.service');
 const auditLogService = require('../audit-logs/auditLog.service');
 const notificationService = require('../notifications/notification.service');
@@ -16,6 +17,7 @@ const {
 const {
     STAFF_TYPE_CHANGE_STATUS,
     STAFF_TYPE_CHANGE_ACTIVE_STATUSES,
+    STAFF_TYPE_CHANGE_REQUEST_SOURCES,
 } = require('../../shared/constants/staffTypeChange.constant');
 const {
     BOOKING_HOLD_SLOT_STATUSES,
@@ -105,6 +107,17 @@ const assertTargetStaffType = (currentStaffType, targetStaffType) => {
             400,
             'STAFF_TYPE_CHANGE_NO_CHANGE'
         );
+    }
+};
+
+const assertActiveStaffProfile = (profile) => {
+    const employmentStatus = profile.employment_status
+        || (profile.is_active
+            ? STAFF_EMPLOYMENT_STATUS.ACTIVE
+            : STAFF_EMPLOYMENT_STATUS.SUSPENDED);
+
+    if (!profile.is_active || employmentStatus !== STAFF_EMPLOYMENT_STATUS.ACTIVE) {
+        throw new AppError('Staff profile is not active', 409, 'STAFF_PROFILE_INACTIVE');
     }
 };
 
@@ -275,6 +288,8 @@ const recordChangeAudit = async ({
         from_staff_type: request.from_staff_type,
         to_staff_type: request.to_staff_type,
         effective_at: request.effective_at,
+        request_source: request.request_source || STAFF_TYPE_CHANGE_REQUEST_SOURCES.STAFF_SELF_REQUEST,
+        requested_by_role: request.requested_by_role || USER_ROLES.STAFF,
     },
     session,
 });
@@ -299,6 +314,8 @@ const notifyTargetStaff = async (request, type, title, message) => {
                 to_staff_type: request.to_staff_type,
                 status: request.status,
                 effective_at: request.effective_at,
+                request_source: request.request_source
+                    || STAFF_TYPE_CHANGE_REQUEST_SOURCES.STAFF_SELF_REQUEST,
             },
         });
     } catch (error) {
@@ -310,55 +327,175 @@ const notifyTargetStaff = async (request, type, title, message) => {
     }
 };
 
-const createMyStaffTypeChangeRequest = async (userId, payload, auditContext = {}) => {
-    const profile = await getStaffProfileByUserId(userId);
-    const employmentStatus = profile.employment_status
-        || (profile.is_active ? STAFF_EMPLOYMENT_STATUS.ACTIVE : STAFF_EMPLOYMENT_STATUS.SUSPENDED);
+const notifyActiveAdmins = async (request) => {
+    try {
+        const admins = await User.find({
+            role: USER_ROLES.ADMIN,
+            is_active: true,
+        }).select('_id');
+        const metadata = {
+            staff_profile_id: toIdString(request.staff_profile_id),
+            from_staff_type: request.from_staff_type,
+            to_staff_type: request.to_staff_type,
+            status: request.status,
+            effective_at: request.effective_at,
+            request_source: request.request_source,
+        };
 
-    if (!profile.is_active || employmentStatus !== STAFF_EMPLOYMENT_STATUS.ACTIVE) {
-        throw new AppError('Staff profile is not active', 409, 'STAFF_PROFILE_INACTIVE');
+        await Promise.allSettled(admins.map((admin) => (
+            notificationService.createInAppNotification({
+                userId: admin._id,
+                type: NOTIFICATION_TYPES.STAFF_TYPE_CHANGE_REQUESTED,
+                title: 'Staff position change requested',
+                message: `A staff member requested a position change from ${request.from_staff_type} to ${request.to_staff_type}.`,
+                relatedType: NOTIFICATION_RELATED_TYPES.STAFF,
+                relatedId: request._id,
+                metadata,
+            })
+        )));
+    } catch (error) {
+        console.warn('[staff-type-change] admin notification failed', {
+            request_id: request._id?.toString?.() || request._id,
+            error: error.message,
+        });
     }
+};
 
+const createStaffTypeChangeRequest = async ({
+    profile,
+    actorId,
+    actorRole,
+    requestSource,
+    payload,
+    impactSnapshot = null,
+    auditContext = {},
+}) => {
+    assertActiveStaffProfile(profile);
     assertTargetStaffType(profile.staff_type, payload.to_staff_type);
 
-    const existingRequest = await StaffTypeChangeRequest.exists({
-        staff_profile_id: profile._id,
-        status: { $in: STAFF_TYPE_CHANGE_ACTIVE_STATUSES },
-    });
+    const session = await mongoose.startSession();
+    let request;
 
-    if (existingRequest) {
-        throw new AppError(
-            'Staff already has an active type change request',
-            409,
-            'STAFF_TYPE_CHANGE_REQUEST_ALREADY_ACTIVE'
+    try {
+        await session.withTransaction(async () => {
+            const existingQuery = StaffTypeChangeRequest.exists({
+                staff_profile_id: profile._id,
+                status: { $in: STAFF_TYPE_CHANGE_ACTIVE_STATUSES },
+            });
+            const existingRequest = await applySession(existingQuery, session);
+
+            if (existingRequest) {
+                throw new AppError(
+                    'Staff already has an active type change request',
+                    409,
+                    'STAFF_TYPE_CHANGE_REQUEST_ALREADY_ACTIVE'
+                );
+            }
+
+            const documents = await StaffTypeChangeRequest.create([{
+                staff_profile_id: profile._id,
+                from_staff_type: profile.staff_type,
+                to_staff_type: payload.to_staff_type,
+                from_garage_id: profile.garage_id,
+                to_garage_id: profile.garage_id,
+                reason: normalizeText(payload.reason),
+                effective_at: payload.effective_at || new Date(),
+                requested_by: actorId,
+                request_source: requestSource,
+                requested_by_role: actorRole,
+                handover_note: normalizeText(payload.handover_note),
+                impact_snapshot: impactSnapshot,
+                status: STAFF_TYPE_CHANGE_STATUS.REQUESTED,
+            }], { session });
+
+            [request] = documents;
+
+            await recordChangeAudit({
+                request,
+                actorId,
+                action: AUDIT_ACTIONS.STAFF_TYPE_CHANGE_REQUESTED,
+                after: request,
+                auditContext,
+                session,
+            });
+        });
+    } catch (error) {
+        if (error?.code === 11000) {
+            throw new AppError(
+                'Staff already has an active type change request',
+                409,
+                'STAFF_TYPE_CHANGE_REQUEST_ALREADY_ACTIVE'
+            );
+        }
+        throw error;
+    } finally {
+        await session.endSession();
+    }
+
+    const populatedRequest = await populateRequestQuery(
+        StaffTypeChangeRequest.findById(request._id)
+    );
+
+    if (requestSource === STAFF_TYPE_CHANGE_REQUEST_SOURCES.STAFF_SELF_REQUEST) {
+        await notifyActiveAdmins(populatedRequest);
+    } else {
+        await notifyTargetStaff(
+            populatedRequest,
+            NOTIFICATION_TYPES.STAFF_TYPE_CHANGE_REQUESTED,
+            'Staff position change initiated',
+            `An administrator initiated your position change from ${populatedRequest.from_staff_type} to ${populatedRequest.to_staff_type}.`
         );
     }
 
-    const effectiveAt = payload.effective_at || new Date();
-    const request = await StaffTypeChangeRequest.create({
-        staff_profile_id: profile._id,
-        from_staff_type: profile.staff_type,
-        to_staff_type: payload.to_staff_type,
-        from_garage_id: profile.garage_id,
-        to_garage_id: profile.garage_id,
-        reason: normalizeText(payload.reason),
-        effective_at: effectiveAt,
-        requested_by: userId,
-        handover_note: normalizeText(payload.handover_note),
-        status: STAFF_TYPE_CHANGE_STATUS.REQUESTED,
-    });
+    return StaffTypeChangeMapper.toStaffTypeChangeDto(populatedRequest);
+};
 
-    await recordChangeAudit({
-        request,
+const createMyStaffTypeChangeRequest = async (userId, payload, auditContext = {}) => {
+    const profile = await getStaffProfileByUserId(userId);
+
+    return createStaffTypeChangeRequest({
+        profile,
         actorId: userId,
-        action: AUDIT_ACTIONS.STAFF_TYPE_CHANGE_REQUESTED,
-        after: request,
+        actorRole: USER_ROLES.STAFF,
+        requestSource: STAFF_TYPE_CHANGE_REQUEST_SOURCES.STAFF_SELF_REQUEST,
+        payload,
         auditContext,
     });
+};
 
-    return StaffTypeChangeMapper.toStaffTypeChangeDto(
-        await populateRequestQuery(StaffTypeChangeRequest.findById(request._id))
+const createAdminStaffTypeChangeRequest = async (
+    staffProfileId,
+    actorId,
+    payload,
+    auditContext = {}
+) => {
+    const profile = await getStaffProfileById(staffProfileId);
+    assertActiveStaffProfile(profile);
+    const effectiveAt = payload.effective_at || new Date();
+    const impact = await buildStaffTypeChangeImpact(
+        profile,
+        payload.to_staff_type,
+        effectiveAt
     );
+
+    if ((impact.active_assignment_count > 0 || impact.future_assignment_count > 0)
+        && !normalizeText(payload.handover_note)) {
+        throw new AppError(
+            'Handover note is required when the staff member has active or future assignments',
+            400,
+            'STAFF_TYPE_CHANGE_HANDOVER_REQUIRED'
+        );
+    }
+
+    return createStaffTypeChangeRequest({
+        profile,
+        actorId,
+        actorRole: USER_ROLES.ADMIN,
+        requestSource: STAFF_TYPE_CHANGE_REQUEST_SOURCES.ADMIN_DIRECTED,
+        payload: { ...payload, effective_at: effectiveAt },
+        impactSnapshot: impact,
+        auditContext,
+    });
 };
 
 const paginateRequests = async (filter, { page = 1, limit = 20 } = {}) => {
@@ -404,6 +541,10 @@ const getAdminStaffTypeChangeRequests = async (query = {}) => {
 
     if (query.staff_profile_id) {
         filter.staff_profile_id = query.staff_profile_id;
+    }
+
+    if (query.request_source) {
+        filter.request_source = query.request_source;
     }
 
     return paginateRequests(filter, query);
@@ -678,8 +819,13 @@ const cancelStaffTypeChangeRequest = async (
     const profile = await getStaffProfileById(request.staff_profile_id);
     const isAdmin = user.role === USER_ROLES.ADMIN;
     const isTargetStaff = toIdString(profile.user_id) === toIdString(user._id);
+    const requestSource = request.request_source
+        || STAFF_TYPE_CHANGE_REQUEST_SOURCES.STAFF_SELF_REQUEST;
+    const staffCanCancel = isTargetStaff
+        && request.status === STAFF_TYPE_CHANGE_STATUS.REQUESTED
+        && requestSource === STAFF_TYPE_CHANGE_REQUEST_SOURCES.STAFF_SELF_REQUEST;
 
-    if (!isAdmin && (!isTargetStaff || request.status !== STAFF_TYPE_CHANGE_STATUS.REQUESTED)) {
+    if (!isAdmin && !staffCanCancel) {
         throw new AppError(
             'You cannot cancel this staff type change request',
             403,
@@ -687,10 +833,20 @@ const cancelStaffTypeChangeRequest = async (
         );
     }
 
+    const normalizedReason = normalizeText(reason);
+
+    if (isAdmin && !normalizedReason) {
+        throw new AppError(
+            'Admin cancellation requires a reason',
+            400,
+            'STAFF_TYPE_CHANGE_CANCEL_REASON_REQUIRED'
+        );
+    }
+
     request.status = STAFF_TYPE_CHANGE_STATUS.CANCELLED;
     request.cancelled_by = user._id;
     request.cancelled_at = new Date();
-    request.decision_reason = normalizeText(reason);
+    request.decision_reason = normalizedReason;
     await request.save();
 
     await recordChangeAudit({
@@ -791,13 +947,41 @@ const processDueStaffTypeChanges = async ({ limit = 50 } = {}) => {
                 continue;
             }
 
-            await StaffTypeChangeRequest.findByIdAndUpdate(claimed._id, {
-                $set: {
-                    status: STAFF_TYPE_CHANGE_STATUS.FAILED,
-                    is_open: false,
-                    failure_reason: error.message,
+            const failedRequest = await StaffTypeChangeRequest.findByIdAndUpdate(
+                claimed._id,
+                {
+                    $set: {
+                        status: STAFF_TYPE_CHANGE_STATUS.FAILED,
+                        is_open: false,
+                        failure_reason: error.message,
+                    },
                 },
-            });
+                { new: true }
+            );
+
+            if (failedRequest) {
+                try {
+                    await recordChangeAudit({
+                        request: failedRequest,
+                        actorId: null,
+                        action: AUDIT_ACTIONS.STAFF_TYPE_CHANGE_FAILED,
+                        before: { status: claimed.status },
+                        after: failedRequest,
+                    });
+                } catch (auditError) {
+                    console.warn('[staff-type-change] failure audit failed', {
+                        request_id: failedRequest._id?.toString?.() || failedRequest._id,
+                        error: auditError.message,
+                    });
+                }
+
+                await notifyTargetStaff(
+                    failedRequest,
+                    NOTIFICATION_TYPES.STAFF_TYPE_CHANGE_FAILED,
+                    'Staff position change failed',
+                    `Your scheduled position change could not be applied: ${error.message}`
+                );
+            }
             result.failed += 1;
         }
     }
@@ -807,6 +991,7 @@ const processDueStaffTypeChanges = async ({ limit = 50 } = {}) => {
 
 module.exports = {
     createMyStaffTypeChangeRequest,
+    createAdminStaffTypeChangeRequest,
     getMyStaffTypeChangeRequests,
     getAdminStaffTypeChangeRequests,
     getStaffTypeChangeImpact,

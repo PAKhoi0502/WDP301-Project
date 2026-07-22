@@ -417,6 +417,7 @@ const ROUTE_GROUPS = Object.freeze([
             'GET /staff-profiles/type-change-requests',
             'PATCH /staff-profiles/type-change-requests/{requestId}/approve',
             'PATCH /staff-profiles/type-change-requests/{requestId}/reject',
+            'POST /staff-profiles/{id}/type-change-requests',
             'GET /staff-profiles/{id}/type-change-impact',
             'GET /staff-profiles/{id}/type-change-history',
         ],
