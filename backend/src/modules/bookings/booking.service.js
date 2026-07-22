@@ -360,8 +360,11 @@ const populateBookingQuery = (query) => {
         .populate('booking_items.assigned_execution_staff.user_id', 'full_name email phone role is_active');
 };
 
-const getBookingDocumentById = async (bookingId) => {
-    const booking = await populateBookingQuery(Booking.findById(bookingId));
+const getBookingDocumentById = async (bookingId, session = null) => {
+    const query = Booking.findById(bookingId);
+    const booking = await populateBookingQuery(
+        session && typeof query.session === 'function' ? query.session(session) : query
+    );
 
     if (!booking) {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
@@ -370,8 +373,11 @@ const getBookingDocumentById = async (bookingId) => {
     return booking;
 };
 
-const getActiveGarage = async (garageId) => {
-    const garage = await Garage.findById(garageId);
+const getActiveGarage = async (garageId, session = null) => {
+    const query = Garage.findById(garageId);
+    const garage = session && typeof query.session === 'function'
+        ? await query.session(session)
+        : await query;
 
     if (!garage) {
         throw new AppError('Garage not found', 404, 'GARAGE_NOT_FOUND');
@@ -4601,14 +4607,28 @@ const createIncidentCompensationVoucher = async (
 };
 
 
-const checkInBooking = async (user, bookingId, { note, verification = null } = {}, auditContext = {}) => {
-    const booking = await getRawBookingDocumentById(bookingId);
+const checkInBooking = async (
+    user,
+    bookingId,
+    { note, verification = null } = {},
+    auditContext = {},
+    { session = null } = {}
+) => {
+    const booking = await getRawBookingDocumentById(bookingId, session);
 
     await assertStaffCanAccessBooking(user, booking);
     assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED], 'BOOKING_CHECK_IN_NOT_ALLOWED');
 
-    const garage = await getActiveGarage(booking.garage_id);
+    if (booking.arrived_at) {
+        throw new AppError(
+            'Booking arrival has already been recorded and must be resolved before another check-in',
+            409,
+            'BOOKING_ARRIVAL_ALREADY_RECORDED'
+        );
+    }
+
+    const garage = await getActiveGarage(booking.garage_id, session);
     const arrivedAt = verification?.arrived_at || booking.arrived_at || new Date();
     const scheduledStartTime = booking.arrival_reference_start_time || booking.start_time;
     const classification = getArrivalClassification({
@@ -4640,9 +4660,9 @@ const checkInBooking = async (user, bookingId, { note, verification = null } = {
         booking.note = normalizeText(note);
     }
 
-    await booking.save();
+    await booking.save(session ? { session } : undefined);
 
-    const populatedBooking = await getBookingDocumentById(booking._id);
+    const populatedBooking = await getBookingDocumentById(booking._id, session);
     const result = BookingMapper.toBookingDto(populatedBooking);
 
     await auditLogService.recordAuditEvent({
@@ -4667,6 +4687,7 @@ const checkInBooking = async (user, bookingId, { note, verification = null } = {
         metadata: {
             verification_scan_id: verification?.scan_id?.toString?.() || null,
         },
+        session,
     });
 
     return result;

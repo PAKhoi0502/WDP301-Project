@@ -94,6 +94,7 @@ const schema = new mongoose.Schema({
         default: ALTERNATE_VEHICLE_STATUSES.NONE,
     },
     alternate_vehicle: {
+        booking_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking', default: null },
         license_plate: { type: String, trim: true, maxlength: 30, default: null },
         normalized_license_plate: { type: String, trim: true, uppercase: true, maxlength: 20, default: null },
         vehicle_type: { type: String, enum: VEHICLE_TYPE_VALUES, default: null },

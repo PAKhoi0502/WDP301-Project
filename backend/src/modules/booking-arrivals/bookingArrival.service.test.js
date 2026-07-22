@@ -59,6 +59,7 @@ describe('booking arrival recognition rules', () => {
         expect(find).toHaveBeenCalledWith(expect.objectContaining({
             garage_id: garageId,
             status: { $in: ['PENDING', 'CONFIRMED'] },
+            arrived_at: null,
             start_time: { $gte: expect.any(Date), $lte: expect.any(Date) },
         }));
         expect(result).toEqual([expect.objectContaining({
@@ -85,6 +86,30 @@ describe('booking arrival recognition rules', () => {
 
         const manual = new BookingPlateScan({ ...base, manual_override: true });
         await expect(manual.validate()).rejects.toThrow('Manual override reason is required');
+    });
+
+    it('exposes authorized populated frame metadata without changing upload id fields', () => {
+        const uploadId = new mongoose.Types.ObjectId();
+        const dto = mapper.toScanDto({
+            _id: new mongoose.Types.ObjectId(),
+            upload_ids: [{
+                _id: uploadId,
+                url: 'https://res.cloudinary.com/example/frame.jpg',
+                mime_type: 'image/jpeg',
+                size: 20480,
+                width: 1280,
+                height: 720,
+                created_at: new Date('2026-07-23T03:00:00.000Z'),
+            }],
+        });
+
+        expect(dto.upload_ids).toEqual([uploadId.toString()]);
+        expect(dto.frames).toEqual([expect.objectContaining({
+            upload_id: uploadId.toString(),
+            url: 'https://res.cloudinary.com/example/frame.jpg',
+            width: 1280,
+            height: 720,
+        })]);
     });
 
     it('hashes device keys with the configured pepper and reports health', () => {

@@ -40,11 +40,17 @@ implemented until pilot data demonstrates an acceptable false-match rate.
 5. If recognition is unusable, use `POST .../:scanId/retry`, reject the scan,
    or continue with the existing manual booking check-in API.
 
-For live camera, send 2-5 sampled frame uploads with `mode=LIVE_BATCH` and
-`capture_source=LIVE_CAMERA`. The backend votes by normalized plate, then
-confidence. More than one frame must agree; otherwise the scan is
-`AMBIGUOUS`. A provider bounding box produces a non-destructive Cloudinary crop
-URL.
+`SINGLE` requires exactly one frame. `LIVE_BATCH` requires 2-5 sampled frame
+uploads. A laptop or mobile camera can use `SINGLE` with
+`capture_source=LIVE_CAMERA` for the first release. Batch mode votes by
+normalized plate, then confidence. More than one frame must agree; otherwise
+the scan is `AMBIGUOUS`. A provider bounding box produces a non-destructive
+Cloudinary crop URL.
+
+The scan DTO preserves `upload_ids` and also returns authorized `frames[]`
+containing the upload URL and image metadata. These URLs are exposed only after
+the scan has passed the same authenticated garage-scope check as the rest of
+the scan detail.
 
 Fuzzy candidates never auto-select a booking. Confirming fuzzy/manual matches
 requires `override_reason`, and the scan plus booking store match type, detected
@@ -52,10 +58,14 @@ plate, actor and reason.
 
 ## Replacement or different vehicle
 
-Staff submits `POST .../:scanId/alternate-vehicle`; admin approves or rejects
-with `PATCH /api/v1/admin/booking-arrivals/plate-scans/:scanId/alternate-vehicle`.
-Approval permits the one check-in decision but does not silently overwrite the
-customer's master Vehicle record.
+Staff submits `POST .../:scanId/alternate-vehicle` with the selected
+`booking_id`, detected `license_plate`, vehicle type and reason. The booking
+must still be open, unarrived, in the same garage and inside the scan check-in
+window. The requested plate must equal the plate recognized by that scan.
+Admin approves or rejects with
+`PATCH /api/v1/admin/booking-arrivals/plate-scans/:scanId/alternate-vehicle`.
+Approval is bound to that one booking and one scan; it does not silently
+overwrite the customer's master Vehicle record.
 
 ## Fixed camera and offline queue
 
@@ -92,6 +102,11 @@ Raw images are retained for `PLATE_SCAN_RETENTION_DAYS` (default 7), then a
 scheduler removes Cloudinary assets and Upload records. Recognition metadata,
 candidate decision, actors and audit events remain. Linked scan images cannot
 be manually deleted before their retention deadline.
+
+Creating a scan claims its uploads in one transaction. Gate arrival detection,
+staff confirmation, rejection and expiry also update the scan, booking marker
+and audit record atomically. The expiry scheduler covers every non-terminal
+scan state, including capture, recognition and provider-failure states.
 
 ## Configuration
 

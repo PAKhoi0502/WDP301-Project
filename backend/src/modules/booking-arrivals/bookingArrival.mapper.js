@@ -11,6 +11,21 @@ const toCandidateDto = (candidate = {}) => ({
     vehicle_type_mismatch: !!candidate.vehicle_type_mismatch,
 });
 
+const toFrameDto = (upload) => {
+    if (!upload || typeof upload !== 'object' || !upload._id || !upload.url) return null;
+    const value = upload.toObject ? upload.toObject() : upload;
+
+    return {
+        upload_id: toId(value._id),
+        url: value.url,
+        mime_type: value.mime_type,
+        size: value.size,
+        width: value.width,
+        height: value.height,
+        created_at: value.created_at,
+    };
+};
+
 const toScanDto = (scan) => {
     if (!scan) return null;
     const value = scan.toObject ? scan.toObject() : scan;
@@ -27,6 +42,7 @@ const toScanDto = (scan) => {
         server_received_at: value.server_received_at,
         status: value.status,
         upload_ids: (value.upload_ids || []).map(toId),
+        frames: (value.upload_ids || []).map(toFrameDto).filter(Boolean),
         primary_upload_id: toId(value.primary_upload_id),
         plate_crop_url: value.plate_crop_url,
         frame_results: value.frame_results || [],

@@ -25,9 +25,21 @@ const createScanSchema = z.object({
         captured_at: z.coerce.date().optional(),
         mode: z.enum(['SINGLE', 'LIVE_BATCH']).default('SINGLE'),
         capture_source: staffCaptureSources.default('STAFF_CAMERA'),
-    }).strict().refine((value) => value.mode === 'LIVE_BATCH' || value.upload_ids.length === 1, {
-        message: 'Multiple frames require LIVE_BATCH mode',
-        path: ['upload_ids'],
+    }).strict().superRefine((value, context) => {
+        if (value.mode === 'SINGLE' && value.upload_ids.length !== 1) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'SINGLE mode requires exactly one frame',
+                path: ['upload_ids'],
+            });
+        }
+        if (value.mode === 'LIVE_BATCH' && value.upload_ids.length < 2) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'LIVE_BATCH mode requires 2-5 frames',
+                path: ['upload_ids'],
+            });
+        }
     }),
 });
 
@@ -38,7 +50,22 @@ const retryScanSchema = z.object({
         captured_at: z.coerce.date().optional(),
         mode: z.enum(['SINGLE', 'LIVE_BATCH']).optional(),
         capture_source: staffCaptureSources.optional(),
-    }).strict(),
+    }).strict().superRefine((value, context) => {
+        if (value.mode === 'SINGLE' && value.upload_ids.length !== 1) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'SINGLE mode requires exactly one frame',
+                path: ['upload_ids'],
+            });
+        }
+        if (value.mode === 'LIVE_BATCH' && value.upload_ids.length < 2) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'LIVE_BATCH mode requires 2-5 frames',
+                path: ['upload_ids'],
+            });
+        }
+    }),
 });
 
 const scanIdSchema = z.object({ params: scanParams });
@@ -72,6 +99,7 @@ const rejectScanSchema = z.object({
 const alternateVehicleSchema = z.object({
     params: scanParams,
     body: z.object({
+        booking_id: objectId,
         license_plate: z.string().trim().min(4).max(30),
         vehicle_type: z.enum(VEHICLE_TYPE_VALUES),
         brand: z.string().trim().max(80).optional(),

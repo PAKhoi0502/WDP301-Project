@@ -19,10 +19,18 @@ const response = (schema = { $ref: '#/components/schemas/BookingPlateScan' }) =>
 });
 
 const createScanRequest = {
-    type: 'object', required: ['garage_id', 'upload_ids'],
+    type: 'object',
+    required: ['garage_id', 'upload_ids'],
+    description: 'SINGLE mode requires exactly one upload. LIVE_BATCH mode requires 2-5 uploads.',
     properties: {
         garage_id: { type: 'string' },
-        upload_ids: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } },
+        upload_ids: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 5,
+            items: { type: 'string' },
+            description: 'Upload resource IDs returned by POST /uploads, not image URLs.',
+        },
         captured_at: { type: 'string', format: 'date-time' },
         mode: { type: 'string', enum: ['SINGLE', 'LIVE_BATCH'], default: 'SINGLE' },
         capture_source: { type: 'string', enum: ['STAFF_CAMERA', 'GALLERY', 'LIVE_CAMERA'] },
@@ -39,6 +47,7 @@ const schemas = {
             capture_source: { type: 'string' }, captured_at: { type: 'string', format: 'date-time' },
             status: { type: 'string', enum: ['CAPTURED', 'QUALITY_REJECTED', 'RECOGNIZING', 'EXACT_MATCH', 'FUZZY_CANDIDATES', 'AMBIGUOUS', 'NO_MATCH', 'MULTIPLE_PLATES', 'ARRIVAL_DETECTED', 'CONFIRMED', 'REJECTED', 'EXPIRED', 'FAILED'] },
             upload_ids: { type: 'array', items: { type: 'string' } }, plate_crop_url: { type: 'string', nullable: true },
+            frames: { type: 'array', items: { type: 'object', properties: { upload_id: { type: 'string' }, url: { type: 'string' }, mime_type: { type: 'string' }, size: { type: 'integer' }, width: { type: 'integer', nullable: true }, height: { type: 'integer', nullable: true }, created_at: { type: 'string', format: 'date-time' } } } },
             raw_plate_text: { type: 'string', nullable: true }, normalized_plate: { type: 'string', nullable: true },
             confidence: { type: 'number', minimum: 0, maximum: 1 }, detected_vehicle_type: { type: 'string', enum: ['CAR', 'MOTORBIKE', 'UNKNOWN'] },
             quality_flags: { type: 'array', items: { type: 'string' } }, multiple_plate_count: { type: 'integer' },
@@ -48,7 +57,27 @@ const schemas = {
             confirmed_booking_id: { type: 'string', nullable: true }, confirmed_by_id: { type: 'string', nullable: true }, confirmed_at: { type: 'string', format: 'date-time', nullable: true },
             manual_override: { type: 'boolean' }, override_reason: { type: 'string', nullable: true },
             alternate_vehicle_status: { type: 'string', enum: ['NONE', 'REQUESTED', 'APPROVED', 'REJECTED'] },
+            alternate_vehicle: {
+                type: 'object',
+                nullable: true,
+                properties: {
+                    booking_id: { type: 'string' },
+                    license_plate: { type: 'string' },
+                    normalized_license_plate: { type: 'string' },
+                    vehicle_type: { type: 'string', enum: ['CAR', 'MOTORBIKE'] },
+                    brand: { type: 'string', nullable: true },
+                    model: { type: 'string', nullable: true },
+                    color: { type: 'string', nullable: true },
+                    reason: { type: 'string' },
+                    requested_by_id: { type: 'string' },
+                    requested_at: { type: 'string', format: 'date-time' },
+                    reviewed_by_id: { type: 'string', nullable: true },
+                    reviewed_at: { type: 'string', format: 'date-time', nullable: true },
+                    review_note: { type: 'string', nullable: true },
+                },
+            },
             retain_until: { type: 'string', format: 'date-time' }, image_deleted_at: { type: 'string', format: 'date-time', nullable: true },
+            expires_at: { type: 'string', format: 'date-time' },
         },
     },
     CameraDevice: {
@@ -82,16 +111,33 @@ const paths = {
         get: { tags: ['Booking Arrivals'], summary: 'Get plate scan and booking candidates', security: bearer, parameters: [scanId], responses: response() },
     },
     '/staff/booking-arrivals/plate-scans/{scanId}/retry': {
-        post: { tags: ['Booking Arrivals'], summary: 'Retry recognition with new frame uploads', security: bearer, parameters: [scanId], requestBody: jsonBody({ type: 'object', required: ['upload_ids'], properties: createScanRequest.properties }), responses: { ...response(), 201: response()[200] } },
+        post: {
+            tags: ['Booking Arrivals'],
+            summary: 'Retry recognition with new frame uploads',
+            description: 'When mode is omitted, one upload becomes SINGLE and 2-5 uploads become LIVE_BATCH.',
+            security: bearer,
+            parameters: [scanId],
+            requestBody: jsonBody({
+                type: 'object',
+                required: ['upload_ids'],
+                properties: {
+                    upload_ids: createScanRequest.properties.upload_ids,
+                    captured_at: createScanRequest.properties.captured_at,
+                    mode: createScanRequest.properties.mode,
+                    capture_source: createScanRequest.properties.capture_source,
+                },
+            }),
+            responses: { ...response(), 201: response()[200] },
+        },
     },
     '/staff/booking-arrivals/plate-scans/{scanId}/confirm': {
         post: { tags: ['Booking Arrivals'], summary: 'Staff confirms vehicle and records booking check-in', description: 'Exact match is preferred. Fuzzy/manual selection requires an override reason unless an alternate vehicle was approved. This is the only scan endpoint that invokes check-in.', security: bearer, parameters: [scanId], requestBody: jsonBody({ type: 'object', required: ['booking_id'], properties: { booking_id: { type: 'string' }, note: { type: 'string' }, override_reason: { type: 'string' } } }), responses: response({ type: 'object' }) },
     },
     '/staff/booking-arrivals/plate-scans/{scanId}/reject': {
-        post: { tags: ['Booking Arrivals'], summary: 'Reject a scan candidate or mismatch', security: bearer, parameters: [scanId], requestBody: jsonBody({ type: 'object', required: ['reason'], properties: { reason: { type: 'string' }, note: { type: 'string' } } }), responses: response() },
+        post: { tags: ['Booking Arrivals'], summary: 'Reject a scan candidate or mismatch', security: bearer, parameters: [scanId], requestBody: jsonBody({ type: 'object', required: ['reason'], properties: { reason: { type: 'string', enum: ['VEHICLE_MISMATCH', 'WRONG_BOOKING', 'POOR_IMAGE', 'CUSTOMER_NOT_PRESENT', 'DUPLICATE_SCAN', 'OTHER'] }, note: { type: 'string' } } }), responses: response() },
     },
     '/staff/booking-arrivals/plate-scans/{scanId}/alternate-vehicle': {
-        post: { tags: ['Booking Arrivals'], summary: 'Request approval for a replacement or different vehicle', security: bearer, parameters: [scanId], requestBody: jsonBody({ type: 'object', required: ['license_plate', 'vehicle_type', 'reason'], properties: { license_plate: { type: 'string' }, vehicle_type: { type: 'string', enum: ['CAR', 'MOTORBIKE'] }, brand: { type: 'string' }, model: { type: 'string' }, color: { type: 'string' }, reason: { type: 'string' } } }), responses: response() },
+        post: { tags: ['Booking Arrivals'], summary: 'Request approval for a replacement or different vehicle', description: 'The request is bound to one eligible booking. license_plate must match the plate recognized in this scan.', security: bearer, parameters: [scanId], requestBody: jsonBody({ type: 'object', required: ['booking_id', 'license_plate', 'vehicle_type', 'reason'], properties: { booking_id: { type: 'string' }, license_plate: { type: 'string' }, vehicle_type: { type: 'string', enum: ['CAR', 'MOTORBIKE'] }, brand: { type: 'string' }, model: { type: 'string' }, color: { type: 'string' }, reason: { type: 'string' } } }), responses: response() },
     },
     '/admin/booking-arrivals/plate-scans': {
         get: { tags: ['Arrival Administration'], summary: 'List plate scans across garages', security: bearer, parameters: listParameters, responses: response({ type: 'array', items: { $ref: '#/components/schemas/BookingPlateScan' } }) },

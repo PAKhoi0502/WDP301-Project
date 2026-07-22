@@ -183,6 +183,19 @@ describe('booking late arrival', () => {
         }));
     });
 
+    it('does not overwrite an arrival that was already recorded', async () => {
+        const booking = createLateBooking();
+        Booking.findById.mockReturnValueOnce(booking);
+
+        await expect(bookingService.checkInBooking(adminUser, bookingId, {})).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'BOOKING_ARRIVAL_ALREADY_RECORDED',
+        });
+
+        expect(booking.save).not.toHaveBeenCalled();
+        expect(auditLogService.recordAuditEvent).not.toHaveBeenCalled();
+    });
+
     it('does not allow no-show after the customer has arrived', async () => {
         const booking = createLateBooking();
         Booking.findById.mockReturnValueOnce(booking);

@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 const BookingPlateScan = require('./bookingPlateScan.model');
 const Booking = require('../bookings/booking.model');
 const Upload = require('../uploads/upload.model');
@@ -32,6 +34,9 @@ const TERMINAL_SCAN_STATUSES = [
     PLATE_SCAN_STATUSES.REJECTED,
     PLATE_SCAN_STATUSES.EXPIRED,
 ];
+const EXPIRABLE_SCAN_STATUSES = Object.values(PLATE_SCAN_STATUSES).filter(
+    (status) => !TERMINAL_SCAN_STATUSES.includes(status)
+);
 
 const envInteger = (name, fallback, max = Number.MAX_SAFE_INTEGER) => {
     const value = Number(process.env[name]);
@@ -72,25 +77,54 @@ const assertGarageAccess = async (user, garageId) => {
     }
 };
 
-const populateScan = (query) => query.populate({
-    path: 'candidates.booking_id',
-    populate: [
-        { path: 'customer_id', select: 'full_name email phone role is_active' },
-        { path: 'vehicle_id' },
-        { path: 'garage_id' },
-    ],
-});
+const populateScan = (query) => query.populate([
+    {
+        path: 'upload_ids',
+        select: 'url mime_type size width height created_at',
+    },
+    {
+        path: 'candidates.booking_id',
+        populate: [
+            { path: 'customer_id', select: 'full_name email phone role is_active' },
+            { path: 'vehicle_id' },
+            { path: 'garage_id' },
+        ],
+    },
+]);
 
-const getScanDocument = async (scanId) => {
-    const scan = await populateScan(BookingPlateScan.findById(scanId));
+const getScanDocument = async (scanId, session = null) => {
+    const query = BookingPlateScan.findById(scanId);
+    const scan = await populateScan(
+        session && typeof query.session === 'function' ? query.session(session) : query
+    );
     if (!scan) throw new AppError('Plate scan not found', 404, 'BOOKING_PLATE_SCAN_NOT_FOUND');
     return scan;
 };
 
-const getAccessibleScan = async (user, scanId) => {
-    const scan = await getScanDocument(scanId);
+const getAccessibleScan = async (user, scanId, session = null) => {
+    const scan = await getScanDocument(scanId, session);
     await assertGarageAccess(user, scan.garage_id);
     return scan;
+};
+
+const assertFrameMode = (mode, uploadIds) => {
+    const frameCount = uploadIds.length;
+
+    if (mode === PLATE_SCAN_MODES.SINGLE && frameCount !== 1) {
+        throw new AppError(
+            'Single scan mode requires exactly one frame',
+            400,
+            'PLATE_SCAN_SINGLE_FRAME_REQUIRED'
+        );
+    }
+
+    if (mode === PLATE_SCAN_MODES.LIVE_BATCH && frameCount < 2) {
+        throw new AppError(
+            'Live batch mode requires at least two frames',
+            400,
+            'PLATE_SCAN_LIVE_BATCH_FRAMES_REQUIRED'
+        );
+    }
 };
 
 const validateCapturedAt = (capturedAt, source) => {
@@ -173,6 +207,7 @@ const findCandidates = async ({ garageId, plate, vehicleType, capturedAt }) => {
     const filter = {
         garage_id: garageId,
         status: { $in: OPEN_BOOKING_STATUSES },
+        arrived_at: null,
         start_time: { $gte: earliestStart, $lte: latestStart },
     };
     const bookings = await Booking.find(filter).sort({ start_time: 1 });
@@ -346,18 +381,35 @@ const recognizeScan = async (scan, uploads) => {
     return scan;
 };
 
-const linkUploads = async (scan, uploads) => {
-    await Upload.updateMany(
+const linkUploads = async (scan, uploads, session = null) => {
+    const result = await Upload.updateMany(
         { _id: { $in: uploads.map((upload) => upload._id) }, related_id: null },
         { $set: {
             related_type: UPLOAD_RELATED_TYPES.BOOKING_PLATE_SCAN,
             related_id: scan._id,
             retained_until: scan.retain_until,
-        } }
+        } },
+        session ? { session } : undefined
     );
+    const modifiedCount = result.modifiedCount ?? result.nModified ?? 0;
+
+    if (modifiedCount !== uploads.length) {
+        throw new AppError(
+            'One or more frame uploads were claimed concurrently',
+            409,
+            'PLATE_SCAN_UPLOAD_ALREADY_LINKED'
+        );
+    }
 };
 
-const recordScanAudit = (scan, actorId, action, context = {}, extra = {}) => auditLogService.recordAuditEvent({
+const recordScanAudit = (
+    scan,
+    actorId,
+    action,
+    context = {},
+    extra = {},
+    session = null
+) => auditLogService.recordAuditEvent({
     actorId,
     action,
     resourceType: AUDIT_RESOURCE_TYPES.BOOKING_PLATE_SCAN,
@@ -366,6 +418,7 @@ const recordScanAudit = (scan, actorId, action, context = {}, extra = {}) => aud
     ip: context.ip,
     userAgent: context.userAgent,
     metadata: extra,
+    session,
 });
 
 const createScan = async ({ user, device = null, payload, auditContext = {} }) => {
@@ -374,12 +427,14 @@ const createScan = async ({ user, device = null, payload, auditContext = {} }) =
     const uploads = await validateUploads({ user, device, garageId, uploadIds: payload.upload_ids });
     const now = new Date();
     const policy = getPolicy();
-    const scan = await BookingPlateScan.create({
+    const mode = payload.mode || PLATE_SCAN_MODES.SINGLE;
+    assertFrameMode(mode, payload.upload_ids);
+    const scanPayload = {
         garage_id: garageId,
         staff_id: device ? null : user._id,
         camera_device_id: device?._id || null,
         client_event_id: payload.client_event_id || null,
-        mode: payload.mode || PLATE_SCAN_MODES.SINGLE,
+        mode,
         capture_source: payload.capture_source || PLATE_CAPTURE_SOURCES.STAFF_CAMERA,
         captured_at: capturedAt,
         server_received_at: now,
@@ -389,12 +444,34 @@ const createScan = async ({ user, device = null, payload, auditContext = {} }) =
         expires_at: addMinutes(now, device ? policy.gateScanExpiryMinutes : policy.scanExpiryMinutes),
         retry_of_scan_id: payload.retry_of_scan_id || null,
         retry_count: payload.retry_count || 0,
-    });
+    };
+    const session = await mongoose.startSession();
+    let scanId;
 
-    await linkUploads(scan, uploads);
-    await recordScanAudit(scan, device?.created_by_id || user._id, AUDIT_ACTIONS.BOOKING_PLATE_SCAN_CREATED, auditContext, {
-        device_id: toId(device?._id),
-    });
+    try {
+        await session.withTransaction(async () => {
+            const documents = await BookingPlateScan.create([scanPayload], { session });
+            const [createdScan] = documents;
+            scanId = createdScan._id;
+            await linkUploads(createdScan, uploads, session);
+            await recordScanAudit(
+                createdScan,
+                device?.created_by_id || user._id,
+                AUDIT_ACTIONS.BOOKING_PLATE_SCAN_CREATED,
+                auditContext,
+                { device_id: toId(device?._id) },
+                session
+            );
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    const scan = await BookingPlateScan.findById(scanId);
+
+    if (!scan) {
+        throw new AppError('Plate scan was not created', 500, 'BOOKING_PLATE_SCAN_CREATE_FAILED');
+    }
 
     await recognizeScan(scan, uploads);
     await recordScanAudit(scan, device?.created_by_id || user._id, AUDIT_ACTIONS.BOOKING_PLATE_SCAN_RECOGNIZED, auditContext);
@@ -407,33 +484,47 @@ const createScan = async ({ user, device = null, payload, auditContext = {} }) =
 };
 
 const markArrivalDetected = async (scan, device, auditContext) => {
-    const booking = await Booking.findOneAndUpdate(
-        {
-            _id: scan.matched_booking_id,
-            garage_id: device.garage_id,
-            status: { $in: OPEN_BOOKING_STATUSES },
-            arrival_detection_scan_id: null,
-        },
-        { $set: { arrival_detected_at: scan.captured_at, arrival_detection_scan_id: scan._id } },
-        { new: true }
-    );
+    const session = await mongoose.startSession();
+    let booking = null;
+
+    try {
+        await session.withTransaction(async () => {
+            booking = await Booking.findOneAndUpdate(
+                {
+                    _id: scan.matched_booking_id,
+                    garage_id: device.garage_id,
+                    status: { $in: OPEN_BOOKING_STATUSES },
+                    arrived_at: null,
+                    arrival_detection_scan_id: null,
+                },
+                { $set: { arrival_detected_at: scan.captured_at, arrival_detection_scan_id: scan._id } },
+                { new: true, session }
+            );
+
+            if (!booking) return;
+
+            scan.status = PLATE_SCAN_STATUSES.ARRIVAL_DETECTED;
+            await scan.save({ session });
+            device.last_event_at = new Date();
+            await device.save({ session });
+
+            await auditLogService.recordAuditEvent({
+                actorId: device.created_by_id,
+                action: AUDIT_ACTIONS.CAMERA_DEVICE_EVENT_INGESTED,
+                resourceType: AUDIT_RESOURCE_TYPES.BOOKING,
+                resourceId: booking._id,
+                after: { arrival_detected_at: booking.arrival_detected_at, arrival_detection_scan_id: scan._id },
+                ip: auditContext.ip,
+                userAgent: auditContext.userAgent,
+                metadata: { device_id: toId(device._id), auto_check_in: false },
+                session,
+            });
+        });
+    } finally {
+        await session.endSession();
+    }
+
     if (!booking) return false;
-
-    scan.status = PLATE_SCAN_STATUSES.ARRIVAL_DETECTED;
-    await scan.save();
-    device.last_event_at = new Date();
-    await device.save();
-
-    await auditLogService.recordAuditEvent({
-        actorId: device.created_by_id,
-        action: AUDIT_ACTIONS.CAMERA_DEVICE_EVENT_INGESTED,
-        resourceType: AUDIT_RESOURCE_TYPES.BOOKING,
-        resourceId: booking._id,
-        after: { arrival_detected_at: booking.arrival_detected_at, arrival_detection_scan_id: scan._id },
-        ip: auditContext.ip,
-        userAgent: auditContext.userAgent,
-        metadata: { device_id: toId(device._id), auto_check_in: false },
-    });
 
     const [profiles, admins] = await Promise.all([
         StaffProfile.find({ garage_id: booking.garage_id, staff_type: STAFF_TYPES.CUSTOMER_SERVICE_STAFF, is_active: true })
@@ -484,14 +575,29 @@ const retryScan = async (user, scanId, payload, auditContext) => {
     if (TERMINAL_SCAN_STATUSES.includes(original.status)) {
         throw new AppError('Terminal plate scan cannot be retried', 409, 'BOOKING_PLATE_SCAN_RETRY_NOT_ALLOWED');
     }
+    if (original.expires_at <= new Date()) {
+        throw new AppError('Expired plate scan cannot be retried', 409, 'BOOKING_PLATE_SCAN_EXPIRED');
+    }
+    const mode = payload.mode || (
+        payload.upload_ids.length > 1
+            ? PLATE_SCAN_MODES.LIVE_BATCH
+            : PLATE_SCAN_MODES.SINGLE
+    );
+    assertFrameMode(mode, payload.upload_ids);
+    const captureSource = payload.capture_source || (
+        mode === PLATE_SCAN_MODES.LIVE_BATCH
+            ? PLATE_CAPTURE_SOURCES.LIVE_CAMERA
+            : PLATE_CAPTURE_SOURCES.STAFF_CAMERA
+    );
+
     return createScan({
         user,
         payload: {
             garage_id: toId(original.garage_id),
             upload_ids: payload.upload_ids,
             captured_at: payload.captured_at || new Date(),
-            mode: payload.mode || original.mode,
-            capture_source: payload.capture_source || original.capture_source,
+            mode,
+            capture_source: captureSource,
             retry_of_scan_id: original._id,
             retry_count: (original.retry_count || 0) + 1,
         },
@@ -499,31 +605,21 @@ const retryScan = async (user, scanId, payload, auditContext) => {
     });
 };
 
-const confirmScan = async (user, scanId, payload, auditContext = {}) => {
-    const scan = await getAccessibleScan(user, scanId);
-    if (TERMINAL_SCAN_STATUSES.includes(scan.status)) {
-        throw new AppError('Plate scan is already finalized', 409, 'BOOKING_PLATE_SCAN_FINALIZED');
-    }
-    if (scan.expires_at < new Date()) {
-        const wasArrivalDetected = scan.status === PLATE_SCAN_STATUSES.ARRIVAL_DETECTED;
-        scan.status = PLATE_SCAN_STATUSES.EXPIRED;
-        await scan.save();
-        if (wasArrivalDetected && scan.matched_booking_id) {
-            await Booking.updateOne(
-                { _id: scan.matched_booking_id, arrival_detection_scan_id: scan._id },
-                { $set: { arrival_detected_at: null, arrival_detection_scan_id: null } }
-            );
-        }
-        await recordScanAudit(scan, user._id, AUDIT_ACTIONS.BOOKING_PLATE_SCAN_EXPIRED, auditContext);
-        throw new AppError('Plate scan confirmation window has expired', 409, 'BOOKING_PLATE_SCAN_EXPIRED');
-    }
+const getBookingForScan = async (scan, bookingId, session = null) => {
+    const query = Booking.findById(bookingId);
+    const booking = session && typeof query.session === 'function'
+        ? await query.session(session)
+        : await query;
 
-    const booking = await Booking.findById(payload.booking_id);
     if (!booking) throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
     if (toId(booking.garage_id) !== toId(scan.garage_id)) {
-        throw new AppError('Booking and scan must belong to the same garage', 409, 'PLATE_SCAN_BOOKING_GARAGE_MISMATCH');
+        throw new AppError(
+            'Booking and scan must belong to the same garage',
+            409,
+            'PLATE_SCAN_BOOKING_GARAGE_MISMATCH'
+        );
     }
-    if (!OPEN_BOOKING_STATUSES.includes(booking.status)) {
+    if (!OPEN_BOOKING_STATUSES.includes(booking.status) || booking.arrived_at) {
         throw new AppError('Booking cannot be checked in', 409, 'BOOKING_CHECK_IN_NOT_ALLOWED');
     }
 
@@ -531,6 +627,7 @@ const confirmScan = async (user, scanId, payload, auditContext = {}) => {
     const bookingStart = new Date(booking.start_time);
     const earliestStart = addMinutes(scan.captured_at, -policy.afterMinutes);
     const latestStart = addMinutes(scan.captured_at, policy.beforeMinutes);
+
     if (bookingStart < earliestStart || bookingStart > latestStart) {
         throw new AppError(
             'Booking is outside the scan check-in window; use manual fallback after verification',
@@ -539,100 +636,275 @@ const confirmScan = async (user, scanId, payload, auditContext = {}) => {
         );
     }
 
-    const exactMatch = booking.normalized_license_plate === scan.normalized_plate;
-    const alternateApproved = scan.alternate_vehicle_status === ALTERNATE_VEHICLE_STATUSES.APPROVED
-        && scan.alternate_vehicle?.normalized_license_plate === scan.normalized_plate;
-    const manualOverride = !exactMatch;
-    if (manualOverride && !alternateApproved && !payload.override_reason) {
-        throw new AppError('Override reason is required for a non-exact match', 400, 'PLATE_SCAN_OVERRIDE_REASON_REQUIRED');
-    }
-
-    const selectedCandidate = scan.candidates.find((item) => toId(item.booking_id) === toId(booking._id));
-    const matchType = exactMatch ? PLATE_MATCH_TYPES.EXACT
-        : (selectedCandidate?.match_type === PLATE_MATCH_TYPES.FUZZY
-            ? PLATE_MATCH_TYPES.FUZZY : PLATE_MATCH_TYPES.MANUAL);
-    const overrideReason = manualOverride
-        ? (payload.override_reason || scan.alternate_vehicle?.reason || null) : null;
-    const result = await bookingService.checkInBooking(user, booking._id, {
-        note: payload.note,
-        verification: {
-            scan_id: scan._id,
-            arrived_at: scan.captured_at,
-            detected_plate: scan.normalized_plate,
-            match_type: matchType,
-            manual_override: manualOverride,
-            override_reason: overrideReason,
-        },
-    }, auditContext);
-
-    scan.status = PLATE_SCAN_STATUSES.CONFIRMED;
-    scan.confirmed_booking_id = booking._id;
-    scan.confirmed_by_id = user._id;
-    scan.confirmed_at = new Date();
-    scan.staff_confirmed_vehicle = true;
-    scan.match_type = matchType;
-    scan.manual_override = manualOverride;
-    scan.override_reason = overrideReason;
-    await scan.save();
-    await recordScanAudit(scan, user._id, AUDIT_ACTIONS.BOOKING_PLATE_SCAN_CONFIRMED, auditContext, {
-        booking_id: toId(booking._id), match_type: matchType, manual_override: manualOverride,
-    });
-
-    return { scan: BookingArrivalMapper.toScanDto(scan), booking: result };
+    return booking;
 };
 
-const rejectScan = async (user, scanId, payload, auditContext = {}) => {
-    const scan = await getAccessibleScan(user, scanId);
-    if (TERMINAL_SCAN_STATUSES.includes(scan.status)) {
-        throw new AppError('Plate scan is already finalized', 409, 'BOOKING_PLATE_SCAN_FINALIZED');
-    }
+const expireScan = async (scan, actorId, auditContext = {}, metadata = {}, session = null) => {
     const wasArrivalDetected = scan.status === PLATE_SCAN_STATUSES.ARRIVAL_DETECTED;
-    scan.status = PLATE_SCAN_STATUSES.REJECTED;
-    scan.rejection_reason = payload.reason;
-    scan.rejection_note = payload.note || null;
-    scan.rejected_by_id = user._id;
-    scan.rejected_at = new Date();
-    await scan.save();
+
     if (wasArrivalDetected && scan.matched_booking_id) {
         await Booking.updateOne(
             { _id: scan.matched_booking_id, arrival_detection_scan_id: scan._id },
-            { $set: { arrival_detected_at: null, arrival_detection_scan_id: null } }
+            { $set: { arrival_detected_at: null, arrival_detection_scan_id: null } },
+            session ? { session } : undefined
         );
     }
-    await recordScanAudit(scan, user._id, AUDIT_ACTIONS.BOOKING_PLATE_SCAN_REJECTED, auditContext);
-    return BookingArrivalMapper.toScanDto(scan);
+
+    scan.status = PLATE_SCAN_STATUSES.EXPIRED;
+    await scan.save(session ? { session } : undefined);
+    await recordScanAudit(
+        scan,
+        actorId,
+        AUDIT_ACTIONS.BOOKING_PLATE_SCAN_EXPIRED,
+        auditContext,
+        metadata,
+        session
+    );
+};
+
+const confirmScan = async (user, scanId, payload, auditContext = {}) => {
+    const session = await mongoose.startSession();
+    let response;
+    let expired = false;
+
+    try {
+        await session.withTransaction(async () => {
+            const scan = await getAccessibleScan(user, scanId, session);
+
+            if (TERMINAL_SCAN_STATUSES.includes(scan.status)) {
+                throw new AppError('Plate scan is already finalized', 409, 'BOOKING_PLATE_SCAN_FINALIZED');
+            }
+            if (scan.expires_at <= new Date()) {
+                await expireScan(scan, user._id, auditContext, {}, session);
+                expired = true;
+                return;
+            }
+
+            const booking = await getBookingForScan(scan, payload.booking_id, session);
+            const exactMatch = booking.normalized_license_plate === scan.normalized_plate;
+            const alternateApproved = scan.alternate_vehicle_status === ALTERNATE_VEHICLE_STATUSES.APPROVED
+                && toId(scan.alternate_vehicle?.booking_id) === toId(booking._id)
+                && scan.alternate_vehicle?.normalized_license_plate === scan.normalized_plate;
+            const manualOverride = !exactMatch;
+
+            if (manualOverride && !alternateApproved && !payload.override_reason) {
+                throw new AppError(
+                    'Override reason is required for a non-exact match',
+                    400,
+                    'PLATE_SCAN_OVERRIDE_REASON_REQUIRED'
+                );
+            }
+
+            const selectedCandidate = scan.candidates.find(
+                (item) => toId(item.booking_id) === toId(booking._id)
+            );
+            const matchType = exactMatch
+                ? PLATE_MATCH_TYPES.EXACT
+                : (selectedCandidate?.match_type === PLATE_MATCH_TYPES.FUZZY
+                    ? PLATE_MATCH_TYPES.FUZZY
+                    : PLATE_MATCH_TYPES.MANUAL);
+            const overrideReason = manualOverride
+                ? (payload.override_reason || scan.alternate_vehicle?.reason || null)
+                : null;
+            const bookingResult = await bookingService.checkInBooking(user, booking._id, {
+                note: payload.note,
+                verification: {
+                    scan_id: scan._id,
+                    arrived_at: scan.captured_at,
+                    detected_plate: scan.normalized_plate,
+                    match_type: matchType,
+                    manual_override: manualOverride,
+                    override_reason: overrideReason,
+                },
+            }, auditContext, { session });
+
+            scan.status = PLATE_SCAN_STATUSES.CONFIRMED;
+            scan.confirmed_booking_id = booking._id;
+            scan.confirmed_by_id = user._id;
+            scan.confirmed_at = new Date();
+            scan.staff_confirmed_vehicle = true;
+            scan.match_type = matchType;
+            scan.manual_override = manualOverride;
+            scan.override_reason = overrideReason;
+            await scan.save({ session });
+            await recordScanAudit(
+                scan,
+                user._id,
+                AUDIT_ACTIONS.BOOKING_PLATE_SCAN_CONFIRMED,
+                auditContext,
+                {
+                    booking_id: toId(booking._id),
+                    match_type: matchType,
+                    manual_override: manualOverride,
+                },
+                session
+            );
+
+            response = { scan: BookingArrivalMapper.toScanDto(scan), booking: bookingResult };
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    if (expired) {
+        throw new AppError(
+            'Plate scan confirmation window has expired',
+            409,
+            'BOOKING_PLATE_SCAN_EXPIRED'
+        );
+    }
+
+    return response;
+};
+
+const rejectScan = async (user, scanId, payload, auditContext = {}) => {
+    const session = await mongoose.startSession();
+    let result;
+
+    try {
+        await session.withTransaction(async () => {
+            const scan = await getAccessibleScan(user, scanId, session);
+
+            if (TERMINAL_SCAN_STATUSES.includes(scan.status)) {
+                throw new AppError('Plate scan is already finalized', 409, 'BOOKING_PLATE_SCAN_FINALIZED');
+            }
+
+            const wasArrivalDetected = scan.status === PLATE_SCAN_STATUSES.ARRIVAL_DETECTED;
+            scan.status = PLATE_SCAN_STATUSES.REJECTED;
+            scan.rejection_reason = payload.reason;
+            scan.rejection_note = payload.note || null;
+            scan.rejected_by_id = user._id;
+            scan.rejected_at = new Date();
+            await scan.save({ session });
+
+            if (wasArrivalDetected && scan.matched_booking_id) {
+                await Booking.updateOne(
+                    { _id: scan.matched_booking_id, arrival_detection_scan_id: scan._id },
+                    { $set: { arrival_detected_at: null, arrival_detection_scan_id: null } },
+                    { session }
+                );
+            }
+
+            await recordScanAudit(
+                scan,
+                user._id,
+                AUDIT_ACTIONS.BOOKING_PLATE_SCAN_REJECTED,
+                auditContext,
+                {},
+                session
+            );
+            result = BookingArrivalMapper.toScanDto(scan);
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    return result;
 };
 
 const requestAlternateVehicle = async (user, scanId, payload, auditContext = {}) => {
-    const scan = await getAccessibleScan(user, scanId);
-    if (TERMINAL_SCAN_STATUSES.includes(scan.status)) {
-        throw new AppError('Finalized scan cannot request an alternate vehicle', 409, 'ALTERNATE_VEHICLE_REQUEST_NOT_ALLOWED');
+    const session = await mongoose.startSession();
+    let result;
+
+    try {
+        await session.withTransaction(async () => {
+            const scan = await getAccessibleScan(user, scanId, session);
+
+            if (TERMINAL_SCAN_STATUSES.includes(scan.status) || scan.expires_at <= new Date()) {
+                throw new AppError(
+                    'Finalized or expired scan cannot request an alternate vehicle',
+                    409,
+                    'ALTERNATE_VEHICLE_REQUEST_NOT_ALLOWED'
+                );
+            }
+            if ([
+                ALTERNATE_VEHICLE_STATUSES.REQUESTED,
+                ALTERNATE_VEHICLE_STATUSES.APPROVED,
+            ].includes(scan.alternate_vehicle_status) && scan.alternate_vehicle?.booking_id) {
+                throw new AppError(
+                    'Alternate vehicle request is already pending or approved',
+                    409,
+                    'ALTERNATE_VEHICLE_REQUEST_ALREADY_EXISTS'
+                );
+            }
+
+            const booking = await getBookingForScan(scan, payload.booking_id, session);
+            const normalizedLicensePlate = normalizeLicensePlate(payload.license_plate);
+
+            if (!scan.normalized_plate || normalizedLicensePlate !== scan.normalized_plate) {
+                throw new AppError(
+                    'Alternate vehicle plate must match the plate recognized in this scan',
+                    409,
+                    'ALTERNATE_VEHICLE_PLATE_SCAN_MISMATCH'
+                );
+            }
+
+            scan.alternate_vehicle_status = ALTERNATE_VEHICLE_STATUSES.REQUESTED;
+            scan.alternate_vehicle = {
+                ...payload,
+                booking_id: booking._id,
+                normalized_license_plate: normalizedLicensePlate,
+                requested_by_id: user._id,
+                requested_at: new Date(),
+            };
+            await scan.save({ session });
+            await recordScanAudit(
+                scan,
+                user._id,
+                AUDIT_ACTIONS.BOOKING_ALTERNATE_VEHICLE_REQUESTED,
+                auditContext,
+                { booking_id: toId(booking._id) },
+                session
+            );
+            result = BookingArrivalMapper.toScanDto(scan);
+        });
+    } finally {
+        await session.endSession();
     }
-    scan.alternate_vehicle_status = ALTERNATE_VEHICLE_STATUSES.REQUESTED;
-    scan.alternate_vehicle = {
-        ...payload,
-        normalized_license_plate: normalizeLicensePlate(payload.license_plate),
-        requested_by_id: user._id,
-        requested_at: new Date(),
-    };
-    await scan.save();
-    await recordScanAudit(scan, user._id, AUDIT_ACTIONS.BOOKING_ALTERNATE_VEHICLE_REQUESTED, auditContext);
-    return BookingArrivalMapper.toScanDto(scan);
+
+    return result;
 };
 
 const reviewAlternateVehicle = async (user, scanId, payload, auditContext = {}) => {
-    const scan = await getAccessibleScan(user, scanId);
-    if (scan.alternate_vehicle_status !== ALTERNATE_VEHICLE_STATUSES.REQUESTED) {
-        throw new AppError('Alternate vehicle request is not pending', 409, 'ALTERNATE_VEHICLE_REVIEW_NOT_ALLOWED');
+    const session = await mongoose.startSession();
+    let result;
+
+    try {
+        await session.withTransaction(async () => {
+            const scan = await getAccessibleScan(user, scanId, session);
+
+            if (scan.expires_at <= new Date()
+                || scan.alternate_vehicle_status !== ALTERNATE_VEHICLE_STATUSES.REQUESTED
+                || !scan.alternate_vehicle?.booking_id) {
+                throw new AppError(
+                    'Alternate vehicle request is not pending or has expired',
+                    409,
+                    'ALTERNATE_VEHICLE_REVIEW_NOT_ALLOWED'
+                );
+            }
+
+            scan.alternate_vehicle_status = payload.approved
+                ? ALTERNATE_VEHICLE_STATUSES.APPROVED
+                : ALTERNATE_VEHICLE_STATUSES.REJECTED;
+            scan.alternate_vehicle.reviewed_by_id = user._id;
+            scan.alternate_vehicle.reviewed_at = new Date();
+            scan.alternate_vehicle.review_note = payload.note || null;
+            await scan.save({ session });
+            await recordScanAudit(
+                scan,
+                user._id,
+                AUDIT_ACTIONS.BOOKING_ALTERNATE_VEHICLE_REVIEWED,
+                auditContext,
+                { booking_id: toId(scan.alternate_vehicle?.booking_id), approved: payload.approved },
+                session
+            );
+            result = BookingArrivalMapper.toScanDto(scan);
+        });
+    } finally {
+        await session.endSession();
     }
-    scan.alternate_vehicle_status = payload.approved
-        ? ALTERNATE_VEHICLE_STATUSES.APPROVED : ALTERNATE_VEHICLE_STATUSES.REJECTED;
-    scan.alternate_vehicle.reviewed_by_id = user._id;
-    scan.alternate_vehicle.reviewed_at = new Date();
-    scan.alternate_vehicle.review_note = payload.note || null;
-    await scan.save();
-    await recordScanAudit(scan, user._id, AUDIT_ACTIONS.BOOKING_ALTERNATE_VEHICLE_REVIEWED, auditContext);
-    return BookingArrivalMapper.toScanDto(scan);
+
+    return result;
 };
 
 const getMetrics = async (user, query = {}) => {
@@ -717,37 +989,41 @@ const purgeExpiredImages = async ({ limit = 50 } = {}) => {
 };
 
 const expirePendingScans = async ({ limit = 50 } = {}) => {
+    const now = new Date();
     const scans = await BookingPlateScan.find({
-        expires_at: { $lte: new Date() },
-        status: { $in: [
-            PLATE_SCAN_STATUSES.EXACT_MATCH,
-            PLATE_SCAN_STATUSES.FUZZY_CANDIDATES,
-            PLATE_SCAN_STATUSES.AMBIGUOUS,
-            PLATE_SCAN_STATUSES.NO_MATCH,
-            PLATE_SCAN_STATUSES.MULTIPLE_PLATES,
-            PLATE_SCAN_STATUSES.ARRIVAL_DETECTED,
-        ] },
+        expires_at: { $lte: now },
+        status: { $in: EXPIRABLE_SCAN_STATUSES },
     }).sort({ expires_at: 1 }).limit(limit);
+    let expired = 0;
 
     for (const scan of scans) {
-        if (scan.status === PLATE_SCAN_STATUSES.ARRIVAL_DETECTED && scan.matched_booking_id) {
-            await Booking.updateOne(
-                { _id: scan.matched_booking_id, arrival_detection_scan_id: scan._id },
-                { $set: { arrival_detected_at: null, arrival_detection_scan_id: null } }
-            );
+        const session = await mongoose.startSession();
+        let didExpire = false;
+
+        try {
+            await session.withTransaction(async () => {
+                didExpire = false;
+                const query = BookingPlateScan.findOne({
+                    _id: scan._id,
+                    expires_at: { $lte: now },
+                    status: { $in: EXPIRABLE_SCAN_STATUSES },
+                });
+                const current = typeof query.session === 'function'
+                    ? await query.session(session)
+                    : await query;
+
+                if (!current) return;
+
+                await expireScan(current, null, {}, { scheduler: true }, session);
+                didExpire = true;
+            });
+            if (didExpire) expired += 1;
+        } finally {
+            await session.endSession();
         }
-        scan.status = PLATE_SCAN_STATUSES.EXPIRED;
-        await scan.save();
-        await auditLogService.recordAuditEvent({
-            actorId: null,
-            action: AUDIT_ACTIONS.BOOKING_PLATE_SCAN_EXPIRED,
-            resourceType: AUDIT_RESOURCE_TYPES.BOOKING_PLATE_SCAN,
-            resourceId: scan._id,
-            after: { status: scan.status, expires_at: scan.expires_at },
-            metadata: { scheduler: true },
-        });
     }
-    return { processed: scans.length, expired: scans.length };
+
+    return { processed: scans.length, expired };
 };
 
 module.exports = {
