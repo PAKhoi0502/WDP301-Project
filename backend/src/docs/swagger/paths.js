@@ -24,6 +24,7 @@ const bookingIncidentSwagger = require('../../modules/booking-incidents/bookingI
 const customerVoucherSwagger = require('../../modules/customer-vouchers/customerVoucher.swagger');
 const customerCaseSwagger = require('../../modules/customer-cases/customerCase.swagger');
 const bookingArrivalSwagger = require('../../modules/booking-arrivals/bookingArrival.swagger');
+const staffBookingWorkflowSwagger = require('../../modules/staff-booking-workflows/staffBookingWorkflow.swagger');
 
 const paths = {
     ...authSwagger.paths,
@@ -52,6 +53,7 @@ const paths = {
     ...customerVoucherSwagger.paths,
     ...customerCaseSwagger.paths,
     ...bookingArrivalSwagger.paths,
+    ...staffBookingWorkflowSwagger.paths,
 };
 
 module.exports = paths;

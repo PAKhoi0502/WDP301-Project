@@ -47,6 +47,32 @@ describe('OpenAPI staff capability contract', () => {
             $ref: '#/components/schemas/StaffCapabilitiesResponse',
         });
     });
+
+    it('publishes a redacted shared booking workflow contract', () => {
+        const detail = openApiSpec.components.schemas.StaffBookingWorkflowDetail;
+        const operation = openApiSpec.paths[
+            '/staff/workspace/bookings/{bookingId}/workflow'
+        ].get;
+
+        expect(detail.properties).not.toHaveProperty('customer_id');
+        expect(detail.properties).not.toHaveProperty('customer');
+        expect(detail.properties).not.toHaveProperty('guest_phone');
+        expect(detail.properties).not.toHaveProperty('guest_email');
+        expect(detail.properties).not.toHaveProperty('final_price');
+        expect(detail.properties).not.toHaveProperty('active_incident');
+        expect(detail.properties.available_actions.items.enum).toEqual(
+            expect.arrayContaining([
+                'inspection.before_wash.create',
+                'booking.service.start',
+                'service_item.pause',
+                'handover.release',
+            ])
+        );
+        expect(operation['x-required-capabilities']).toEqual([
+            STAFF_CAPABILITIES.BOOKING_WORKFLOW_READ_GARAGE,
+        ]);
+        expect(operation['x-resource-scope']).toBe('garage');
+    });
 });
 
 describe('OpenAPI role metadata', () => {

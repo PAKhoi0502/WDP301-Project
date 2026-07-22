@@ -78,6 +78,20 @@ Inspection operations:
 Inspection staff must also match `assigned_inspection_staff_id` for the
 booking.
 
+Shared operational workflow visibility:
+
+| Method | Path | Required capability |
+| --- | --- | --- |
+| `GET` | `/staff/workspace/bookings` | `booking.workflow.read_garage` |
+| `GET` | `/staff/workspace/bookings/:bookingId/workflow` | `booking.workflow.read_garage` |
+
+All active staff types receive `booking.workflow.read_garage`. These endpoints
+return a same-garage operational DTO without customer contact details, booking
+prices, PayOS transaction details or compensation data. The detail response
+includes `workflow_phase`, lifecycle `milestones`, `blockers` and
+caller-specific `available_actions`. Mutation endpoints continue to enforce
+their existing capability, assignment and booking-state requirements.
+
 Incident operations:
 
 | Method | Path | Required capability |

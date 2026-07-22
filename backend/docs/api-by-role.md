@@ -111,6 +111,8 @@ Neu source route cho ca STAFF va ADMIN cung truy cap, tai lieu nay lap lai endpo
 | Admin-only booking operation | ADMIN | `PATCH /api/v1/admin/bookings/:id/reopen-service` |
 | Booking inspections | STAFF | `POST /api/v1/admin/bookings/:id/inspections`, `GET /api/v1/admin/bookings/:id/inspections` |
 | Booking inspections | ADMIN | `POST /api/v1/admin/bookings/:id/inspections`, `GET /api/v1/admin/bookings/:id/inspections` |
+| Shared redacted booking workflow | STAFF | `GET /api/v1/staff/workspace/bookings`, `GET /api/v1/staff/workspace/bookings/:bookingId/workflow` |
+| Shared redacted booking workflow | ADMIN | `GET /api/v1/staff/workspace/bookings`, `GET /api/v1/staff/workspace/bookings/:bookingId/workflow` |
 
 ### Waitlists
 

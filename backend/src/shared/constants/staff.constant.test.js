@@ -52,6 +52,16 @@ describe('staff authorization constants', () => {
         expect(getStaffCapabilities(STAFF_TYPES.CUSTOMER_SERVICE_STAFF).length).toBeGreaterThan(0);
     });
 
+    it.each(Object.values(STAFF_TYPES))(
+        'allows %s to read the shared garage workflow',
+        (staffType) => {
+            expect(staffTypeHasCapability(
+                staffType,
+                STAFF_CAPABILITIES.BOOKING_WORKFLOW_READ_GARAGE
+            )).toBe(true);
+        }
+    );
+
     it('limits handover and customer case management to customer service staff', () => {
         expect(staffTypeHasCapability(
             STAFF_TYPES.CUSTOMER_SERVICE_STAFF,

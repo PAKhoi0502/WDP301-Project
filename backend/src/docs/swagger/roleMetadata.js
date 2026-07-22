@@ -77,6 +77,15 @@ addStaffOperationPolicies({
 
 addStaffOperationPolicies({
     operations: [
+        'GET /staff/workspace/bookings',
+        'GET /staff/workspace/bookings/{bookingId}/workflow',
+    ],
+    capabilities: [STAFF_CAPABILITIES.BOOKING_WORKFLOW_READ_GARAGE],
+    resourceScope: 'garage',
+});
+
+addStaffOperationPolicies({
+    operations: [
         'GET /admin/bookings',
         'GET /admin/bookings/{id}',
     ],
@@ -532,6 +541,15 @@ const ROUTE_GROUPS = Object.freeze([
             'POST /customer-cases/{id}/messages',
             'PATCH /customer-cases/{id}/resolution-response',
             'POST /customer-cases/{id}/reopen',
+        ],
+    },
+    {
+        roles: ['STAFF', 'ADMIN'],
+        feature: 'Shared booking workflow',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /staff/workspace/bookings',
+            'GET /staff/workspace/bookings/{bookingId}/workflow',
         ],
     },
     {

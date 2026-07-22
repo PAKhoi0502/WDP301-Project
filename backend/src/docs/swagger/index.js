@@ -26,6 +26,7 @@ const bookingIncidentSwagger = require('../../modules/booking-incidents/bookingI
 const customerVoucherSwagger = require('../../modules/customer-vouchers/customerVoucher.swagger');
 const customerCaseSwagger = require('../../modules/customer-cases/customerCase.swagger');
 const bookingArrivalSwagger = require('../../modules/booking-arrivals/bookingArrival.swagger');
+const staffBookingWorkflowSwagger = require('../../modules/staff-booking-workflows/staffBookingWorkflow.swagger');
 const { enrichOpenApiRoles } = require('./roleMetadata');
 
 const openApiSpec = enrichOpenApiRoles({
@@ -68,6 +69,7 @@ const openApiSpec = enrichOpenApiRoles({
         ...customerVoucherSwagger.tags,
         ...customerCaseSwagger.tags,
         ...bookingArrivalSwagger.tags,
+        ...staffBookingWorkflowSwagger.tags,
     ],
     paths,
     components: {
@@ -100,6 +102,7 @@ const openApiSpec = enrichOpenApiRoles({
             ...customerVoucherSwagger.schemas,
             ...customerCaseSwagger.schemas,
             ...bookingArrivalSwagger.schemas,
+            ...staffBookingWorkflowSwagger.schemas,
         },
     },
 });
