@@ -1,3 +1,9 @@
+const {
+    STAFF_TYPE_VALUES,
+    STAFF_GROUPS,
+    STAFF_CAPABILITY_VALUES,
+} = require('../../shared/constants/staff.constant');
+
 const tags = [
     {
         name: 'Staff Profiles',
@@ -5,16 +11,82 @@ const tags = [
     },
 ];
 
-const staffTypeValues = [
-    'CUSTOMER_SERVICE_STAFF',
-    'VEHICLE_INSPECTION_STAFF',
-    'WASH_OPERATOR',
-    'VEHICLE_CARE_STAFF',
-];
+const staffTypeValues = STAFF_TYPE_VALUES;
+const staffGroupValues = Object.values(STAFF_GROUPS);
 
 const employmentStatusValues = ['ACTIVE', 'SUSPENDED', 'TERMINATED'];
 
 const schemas = {
+    StaffCapabilityKey: {
+        type: 'string',
+        enum: STAFF_CAPABILITY_VALUES,
+        example: 'booking.read_garage',
+    },
+    StaffCapabilityContext: {
+        type: 'object',
+        required: [
+            'is_admin',
+            'user_id',
+            'staff_profile_id',
+            'staff_type',
+            'staff_group',
+            'garage_id',
+            'capabilities',
+        ],
+        properties: {
+            is_admin: {
+                type: 'boolean',
+                example: false,
+            },
+            user_id: {
+                type: 'string',
+                example: '665f1b7b2a5f9d0012a12345',
+            },
+            staff_profile_id: {
+                type: 'string',
+                example: '665f1b7b2a5f9d0012a11111',
+            },
+            staff_type: {
+                type: 'string',
+                enum: staffTypeValues,
+                example: 'CUSTOMER_SERVICE_STAFF',
+            },
+            staff_group: {
+                type: 'string',
+                enum: staffGroupValues,
+                example: 'BOOKING_OPERATIONS',
+            },
+            garage_id: {
+                type: 'string',
+                nullable: true,
+                example: '665f1b7b2a5f9d0012a54321',
+            },
+            capabilities: {
+                type: 'array',
+                uniqueItems: true,
+                items: {
+                    $ref: '#/components/schemas/StaffCapabilityKey',
+                },
+            },
+        },
+    },
+    StaffCapabilitiesResponse: {
+        type: 'object',
+        required: ['success', 'message', 'data'],
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Get my staff capabilities successfully',
+            },
+            data: {
+                $ref: '#/components/schemas/StaffCapabilityContext',
+            },
+        },
+    },
     StaffProfileCreateRequest: {
         type: 'object',
         required: ['user_id', 'staff_code', 'staff_type'],
@@ -111,12 +183,14 @@ const schemas = {
             },
             staff_group: {
                 type: 'string',
-                enum: ['BOOKING_OPERATIONS', 'SERVICE_EXECUTION'],
+                enum: staffGroupValues,
                 example: 'BOOKING_OPERATIONS',
             },
             capabilities: {
                 type: 'array',
-                items: { type: 'string' },
+                items: {
+                    $ref: '#/components/schemas/StaffCapabilityKey',
+                },
                 example: ['booking.read_garage', 'booking.check_in'],
             },
             garage_id: {
@@ -427,7 +501,16 @@ const paths = {
             summary: 'Get current staff workspace and capabilities',
             security: [{ bearerAuth: [] }],
             responses: {
-                200: { description: 'Get staff capabilities successfully' },
+                200: {
+                    description: 'Get staff capabilities successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffCapabilitiesResponse',
+                            },
+                        },
+                    },
+                },
                 401: unauthorizedResponse,
                 403: forbiddenResponse,
             },
