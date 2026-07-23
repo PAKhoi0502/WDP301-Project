@@ -128,8 +128,8 @@ describe('loyalty module', () => {
         });
         const redeemRule = new LoyaltyRedeemRule({
             point_value_amount: 1000,
-            min_redeem_points: 10,
-            redeem_step: 10,
+            min_redeem_points: 1,
+            redeem_step: 1,
             max_redeem_percent: 101,
         });
 
@@ -154,9 +154,9 @@ describe('loyalty module', () => {
             redeem_rule: {
                 _id: new mongoose.Types.ObjectId(),
                 point_value_amount: 1000,
-                min_redeem_points: 10,
-                redeem_step: 10,
-                max_redeem_percent: 100,
+                min_redeem_points: 1,
+                redeem_step: 1,
+                max_redeem_percent: 50,
                 is_active: true,
             },
         });
@@ -168,7 +168,7 @@ describe('loyalty module', () => {
             final_price: 130000,
             redeem_rule: {
                 point_value_amount: 1000,
-                redeem_step: 10,
+                redeem_step: 1,
             },
         });
     });

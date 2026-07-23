@@ -221,9 +221,9 @@ describe('loyalty service business rules', () => {
         LoyaltyRedeemRule.findOne.mockReturnValue(createQueryMock({
             _id: new mongoose.Types.ObjectId(),
             point_value_amount: 1000,
-            min_redeem_points: 10,
-            redeem_step: 10,
-            max_redeem_percent: 100,
+            min_redeem_points: 1,
+            redeem_step: 1,
+            max_redeem_percent: 50,
             is_active: true,
         }));
         Promotion.findOne.mockResolvedValue({
@@ -263,6 +263,71 @@ describe('loyalty service business rules', () => {
             points_discount_amount: 50000,
             discount_amount: 70000,
             final_price: 130000,
+        });
+    });
+
+    it('allows redeeming a single point with the active rule', async () => {
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            available_points: 1,
+        });
+
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(loyalty));
+        LoyaltyRedeemRule.findOne.mockReturnValue(createQueryMock({
+            _id: new mongoose.Types.ObjectId(),
+            point_value_amount: 1000,
+            min_redeem_points: 1,
+            redeem_step: 1,
+            max_redeem_percent: 50,
+            is_active: true,
+        }));
+
+        const result = await loyaltyService.calculateBookingRedeemDiscount({
+            customerId,
+            usedPoints: 1,
+            priceAfterPromotion: 10000,
+        });
+
+        expect(result).toMatchObject({
+            used_points: 1,
+            points_discount_amount: 1000,
+        });
+    });
+
+    it('limits point discount to fifty percent of the remaining booking amount', async () => {
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            available_points: 100,
+        });
+
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(loyalty));
+        LoyaltyRedeemRule.findOne.mockReturnValue(createQueryMock({
+            _id: new mongoose.Types.ObjectId(),
+            point_value_amount: 1000,
+            min_redeem_points: 1,
+            redeem_step: 1,
+            max_redeem_percent: 50,
+            is_active: true,
+        }));
+
+        const allowedResult = await loyaltyService.calculateBookingRedeemDiscount({
+            customerId,
+            usedPoints: 75,
+            priceAfterPromotion: 150000,
+        });
+
+        expect(allowedResult).toMatchObject({
+            used_points: 75,
+            points_discount_amount: 75000,
+        });
+
+        await expect(loyaltyService.calculateBookingRedeemDiscount({
+            customerId,
+            usedPoints: 76,
+            priceAfterPromotion: 150000,
+        })).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'LOYALTY_MAX_REDEEM_PERCENT_EXCEEDED',
         });
     });
 
@@ -429,9 +494,9 @@ describe('loyalty service business rules', () => {
         LoyaltyRedeemRule.findOne.mockReturnValue(createQueryMock({
             _id: new mongoose.Types.ObjectId(),
             point_value_amount: 1000,
-            min_redeem_points: 10,
-            redeem_step: 10,
-            max_redeem_percent: 100,
+            min_redeem_points: 1,
+            redeem_step: 1,
+            max_redeem_percent: 50,
             is_active: true,
         }));
         PointTransaction.findOne.mockReturnValue(createQueryMock(null));

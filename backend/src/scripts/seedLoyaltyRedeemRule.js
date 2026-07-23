@@ -2,9 +2,9 @@ const LoyaltyRedeemRule = require('../modules/loyalty/loyaltyRedeemRule.model');
 
 const redeemRule = {
     point_value_amount: 1000,
-    min_redeem_points: 10,
-    redeem_step: 10,
-    max_redeem_percent: 100,
+    min_redeem_points: 1,
+    redeem_step: 1,
+    max_redeem_percent: 50,
     is_active: true,
 };
 

@@ -151,9 +151,9 @@ const loyaltyRedeemRuleSchema = {
     properties: {
         id: { type: 'string' },
         point_value_amount: { type: 'number', example: 1000 },
-        min_redeem_points: { type: 'number', example: 10 },
-        redeem_step: { type: 'number', example: 10 },
-        max_redeem_percent: { type: 'number', example: 100 },
+        min_redeem_points: { type: 'number', example: 1 },
+        redeem_step: { type: 'number', example: 1 },
+        max_redeem_percent: { type: 'number', example: 50 },
         is_active: { type: 'boolean' },
         created_at: { type: 'string', format: 'date-time' },
         updated_at: { type: 'string', format: 'date-time' },
