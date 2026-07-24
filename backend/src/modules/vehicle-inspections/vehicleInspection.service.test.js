@@ -23,6 +23,7 @@ jest.mock('./vehicleInspection.mapper', () => ({
 }));
 
 jest.mock('../booking-service-steps/bookingServiceStep.service', () => ({
+    completePreServiceStepFromInspection: jest.fn(),
     completePostServiceStepFromInspection: jest.fn(),
 }));
 
@@ -83,6 +84,7 @@ describe('vehicle inspection service', () => {
             booking_id: bookingId,
             type: 'AFTER_WASH',
         }));
+        bookingServiceStepService.completePreServiceStepFromInspection.mockResolvedValue(null);
         bookingServiceStepService.completePostServiceStepFromInspection.mockResolvedValue(null);
     });
 
@@ -161,7 +163,7 @@ describe('vehicle inspection service', () => {
         expect(session.endSession).toHaveBeenCalledTimes(1);
     });
 
-    it('keeps before-wash inspection independent from the post-service step', async () => {
+    it('creates before-wash inspection and completes the pre-service step in one transaction', async () => {
         Booking.findById.mockReturnValue(createSessionQuery(createBooking({
             status: 'CHECKED_IN',
             booking_items: [],
@@ -173,6 +175,15 @@ describe('vehicle inspection service', () => {
         });
 
         expect(VehicleInspection.create).toHaveBeenCalled();
+        expect(
+            bookingServiceStepService.completePreServiceStepFromInspection
+        ).toHaveBeenCalledWith({
+            bookingId,
+            inspectionId,
+            inspectorUserId: userId,
+            inspectedAt: expect.any(Date),
+            session,
+        });
         expect(
             bookingServiceStepService.completePostServiceStepFromInspection
         ).not.toHaveBeenCalled();

@@ -250,6 +250,45 @@ describe('booking service step service', () => {
         );
     });
 
+    it('atomically completes the pre-service step from before-wash inspection evidence', async () => {
+        const bookingId = '507f1f77bcf86cd799439001';
+        const inspectionId = '507f1f77bcf86cd799439002';
+        const inspectorUserId = '507f1f77bcf86cd799439003';
+        const inspectedAt = new Date('2999-01-01T06:30:00.000Z');
+        const session = { id: 'session-1' };
+
+        await bookingServiceStepService.completePreServiceStepFromInspection({
+            bookingId,
+            inspectionId,
+            inspectorUserId,
+            inspectedAt,
+            session,
+        });
+
+        expect(BookingServiceStep.findOneAndUpdate).toHaveBeenCalledWith(
+            {
+                booking_id: bookingId,
+                booking_item_key: null,
+                step_code: 'PRE_SERVICE_CHECK_IN',
+                workflow_type: 'PRE_SERVICE',
+                status: { $ne: 'DONE' },
+            },
+            {
+                $set: {
+                    status: 'DONE',
+                    started_at: inspectedAt,
+                    completed_at: inspectedAt,
+                    confirmed_by_staff_id: inspectorUserId,
+                    note: `Completed by before-wash inspection ${inspectionId}`,
+                },
+            },
+            {
+                new: true,
+                session,
+            }
+        );
+    });
+
     it('completes all unfinished steps for a booking item from one workflow transition', async () => {
         const completedAt = new Date('2999-01-01T06:30:00.000Z');
         const firstStep = {

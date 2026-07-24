@@ -228,7 +228,15 @@ const createInspection = async (user, bookingId, payload = {}) => {
 
             inspectionId = inspection._id;
 
-            if (payload.type === VEHICLE_INSPECTION_TYPES.AFTER_WASH) {
+            if (payload.type === VEHICLE_INSPECTION_TYPES.BEFORE_WASH) {
+                await bookingServiceStepService.completePreServiceStepFromInspection({
+                    bookingId: booking._id,
+                    inspectionId: inspection._id,
+                    inspectorUserId: user._id,
+                    inspectedAt,
+                    session,
+                });
+            } else if (payload.type === VEHICLE_INSPECTION_TYPES.AFTER_WASH) {
                 await bookingServiceStepService.completePostServiceStepFromInspection({
                     bookingId: booking._id,
                     inspectionId: inspection._id,

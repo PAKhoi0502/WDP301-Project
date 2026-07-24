@@ -1833,18 +1833,20 @@ const assertBookingStatusIn = (booking, statuses, errorCode) => {
 };
 
 const assertBeforeWashInspectionExists = async (bookingId) => {
-    const existedInspection = await VehicleInspection.exists({
+    const inspection = await VehicleInspection.findOne({
         booking_id: bookingId,
         type: VEHICLE_INSPECTION_TYPES.BEFORE_WASH,
     });
 
-    if (!existedInspection) {
+    if (!inspection) {
         throw new AppError(
             'Before-wash inspection is required before starting service',
             409,
             'BEFORE_WASH_INSPECTION_REQUIRED'
         );
     }
+
+    return inspection;
 };
 
 const getServicePackageForBooking = async (booking) => {
@@ -5317,7 +5319,7 @@ const startService = async (
     await assertStaffCanAccessBooking(user, booking);
     assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.CHECKED_IN], 'BOOKING_START_SERVICE_NOT_ALLOWED');
-    await assertBeforeWashInspectionExists(booking._id);
+    const beforeWashInspection = await assertBeforeWashInspectionExists(booking._id);
 
     try {
         if (booking.start_time && startedAt < booking.start_time) {
@@ -5376,7 +5378,14 @@ const startService = async (
 
         await booking.save();
 
-        const serviceSteps = await bookingServiceStepService.createStepsForBooking(booking, servicePackage);
+        await bookingServiceStepService.createStepsForBooking(booking, servicePackage);
+        await bookingServiceStepService.completePreServiceStepFromInspection({
+            bookingId: booking._id,
+            inspectionId: beforeWashInspection._id,
+            inspectorUserId: beforeWashInspection.inspected_by,
+            inspectedAt: beforeWashInspection.inspected_at,
+        });
+        const serviceSteps = await bookingServiceStepService.getStepsByBookingId(booking._id);
 
         if (firstBookingItem) {
             await recordServiceItemAudit({
@@ -6185,6 +6194,20 @@ const completeService = async (user, bookingId, { note } = {}) => {
             400,
             'AFTER_WASH_INSPECTION_REQUIRED'
         );
+    }
+
+    const beforeWashInspection = await VehicleInspection.findOne({
+        booking_id: booking._id,
+        type: VEHICLE_INSPECTION_TYPES.BEFORE_WASH,
+    });
+
+    if (beforeWashInspection) {
+        await bookingServiceStepService.completePreServiceStepFromInspection({
+            bookingId: booking._id,
+            inspectionId: beforeWashInspection._id,
+            inspectorUserId: beforeWashInspection.inspected_by,
+            inspectedAt: beforeWashInspection.inspected_at,
+        });
     }
 
     await bookingServiceStepService.completePostServiceStepFromInspection({

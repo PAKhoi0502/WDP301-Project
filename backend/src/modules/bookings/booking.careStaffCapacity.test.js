@@ -234,7 +234,11 @@ describe('booking care staff capacity', () => {
         Booking.countDocuments.mockResolvedValue(0);
         Booking.exists.mockResolvedValue(null);
         VehicleInspection.exists.mockResolvedValue(true);
-        VehicleInspection.findOne.mockResolvedValue(null);
+        VehicleInspection.findOne.mockResolvedValue({
+            _id: '507f1f77bcf86cd799439090',
+            inspected_by: '507f1f77bcf86cd799439091',
+            inspected_at: new Date('2999-01-01T05:30:00.000Z'),
+        });
         Booking.aggregate.mockResolvedValue([
             createCapacityReservation('507f1f77bcf86cd799439080'),
         ]);
@@ -246,6 +250,7 @@ describe('booking care staff capacity', () => {
         bookingServiceStepService.markResourceReleasedForBookingItem = jest.fn();
         bookingServiceStepService.clearResourceReleasedForBookingItem = jest.fn();
         bookingServiceStepService.assertAllRequiredStepsDone = jest.fn();
+        bookingServiceStepService.completePreServiceStepFromInspection = jest.fn();
         bookingServiceStepService.completePostServiceStepFromInspection = jest.fn();
         auditLogService.recordAuditEvent.mockResolvedValue(null);
         Vehicle.findOne.mockResolvedValue({
@@ -365,9 +370,17 @@ describe('booking care staff capacity', () => {
             {}
         );
 
-        expect(VehicleInspection.exists).toHaveBeenCalledWith({
+        expect(VehicleInspection.findOne).toHaveBeenCalledWith({
             booking_id: bookingId,
             type: 'BEFORE_WASH',
+        });
+        expect(
+            bookingServiceStepService.completePreServiceStepFromInspection
+        ).toHaveBeenCalledWith({
+            bookingId,
+            inspectionId: '507f1f77bcf86cd799439090',
+            inspectorUserId: '507f1f77bcf86cd799439091',
+            inspectedAt: new Date('2999-01-01T05:30:00.000Z'),
         });
         expect(booking.booking_items[0].assigned_care_staff).toHaveLength(1);
         expect(booking.booking_items[0].assigned_care_staff[0]).toMatchObject({
@@ -413,7 +426,7 @@ describe('booking care staff capacity', () => {
         };
 
         Booking.findById.mockResolvedValue(booking);
-        VehicleInspection.exists.mockResolvedValue(false);
+        VehicleInspection.findOne.mockResolvedValue(null);
 
         await expect(bookingService.startService(
             { _id: '507f1f77bcf86cd799439035', role: 'ADMIN' },
@@ -424,7 +437,7 @@ describe('booking care staff capacity', () => {
             errorCode: 'BEFORE_WASH_INSPECTION_REQUIRED',
         });
 
-        expect(VehicleInspection.exists).toHaveBeenCalledWith({
+        expect(VehicleInspection.findOne).toHaveBeenCalledWith({
             booking_id: booking._id,
             type: 'BEFORE_WASH',
         });
@@ -2278,6 +2291,11 @@ describe('booking care staff capacity', () => {
 
     it('releases remaining active care staff assignments when service is completed', async () => {
         const bookingId = '507f1f77bcf86cd799439019';
+        const beforeWashInspection = {
+            _id: '507f1f77bcf86cd799439016',
+            inspected_by: '507f1f77bcf86cd799439015',
+            inspected_at: new Date('2999-01-01T05:50:00.000Z'),
+        };
         const afterWashInspection = {
             _id: '507f1f77bcf86cd799439018',
             inspected_by: '507f1f77bcf86cd799439017',
@@ -2310,7 +2328,9 @@ describe('booking care staff capacity', () => {
         Booking.findById
             .mockReturnValueOnce(booking)
             .mockReturnValueOnce(createPopulateQuery(booking));
-        VehicleInspection.findOne.mockResolvedValue(afterWashInspection);
+        VehicleInspection.findOne.mockImplementation((filter) => (
+            filter.type === 'AFTER_WASH' ? afterWashInspection : beforeWashInspection
+        ));
         bookingServiceStepService.assertAllRequiredStepsDone.mockResolvedValue(undefined);
 
         await bookingService.completeService(
@@ -2323,6 +2343,14 @@ describe('booking care staff capacity', () => {
         expect(booking.completed_at).toBeInstanceOf(Date);
         expect(booking.booking_items[0].assigned_care_staff[0].released_at).toBe(booking.completed_at);
         expect(
+            bookingServiceStepService.completePreServiceStepFromInspection
+        ).toHaveBeenCalledWith({
+            bookingId: booking._id,
+            inspectionId: beforeWashInspection._id,
+            inspectorUserId: beforeWashInspection.inspected_by,
+            inspectedAt: beforeWashInspection.inspected_at,
+        });
+        expect(
             bookingServiceStepService.completePostServiceStepFromInspection
         ).toHaveBeenCalledWith({
             bookingId: booking._id,
@@ -2330,6 +2358,11 @@ describe('booking care staff capacity', () => {
             inspectorUserId: afterWashInspection.inspected_by,
             inspectedAt: afterWashInspection.inspected_at,
         });
+        expect(
+            bookingServiceStepService.completePreServiceStepFromInspection.mock.invocationCallOrder[0]
+        ).toBeLessThan(
+            bookingServiceStepService.assertAllRequiredStepsDone.mock.invocationCallOrder[0]
+        );
         expect(bookingServiceStepService.markResourceReleasedForBookingItem).toHaveBeenCalledWith(
             booking._id,
             'ITEM_1_507F1F77BCF86CD799439016',

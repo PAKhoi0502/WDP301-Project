@@ -349,16 +349,19 @@ const assertAllRequiredStepsDone = async (bookingId) => {
     }
 };
 
-const completePostServiceStepFromInspection = async ({
+const completeWorkflowStepFromInspection = async ({
     bookingId,
     inspectionId,
     inspectorUserId,
-    inspectedAt = new Date(),
-    session = null,
+    inspectedAt,
+    stepCode,
+    workflowType,
+    notePrefix,
+    session,
 }) => {
     const note = inspectionId
-        ? `Completed by after-wash inspection ${inspectionId.toString()}`
-        : 'Completed by after-wash inspection';
+        ? `${notePrefix} ${inspectionId.toString()}`
+        : notePrefix;
     const options = { new: true };
 
     if (session) {
@@ -369,8 +372,8 @@ const completePostServiceStepFromInspection = async ({
         {
             booking_id: bookingId,
             booking_item_key: null,
-            step_code: BOOKING_SERVICE_STEP_CODES.POST_SERVICE_HANDOVER,
-            workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.POST_SERVICE,
+            step_code: stepCode,
+            workflow_type: workflowType,
             status: { $ne: BOOKING_SERVICE_STEP_STATUS.DONE },
         },
         {
@@ -385,6 +388,40 @@ const completePostServiceStepFromInspection = async ({
         options
     );
 };
+
+const completePreServiceStepFromInspection = async ({
+    bookingId,
+    inspectionId,
+    inspectorUserId,
+    inspectedAt = new Date(),
+    session = null,
+}) => completeWorkflowStepFromInspection({
+    bookingId,
+    inspectionId,
+    inspectorUserId,
+    inspectedAt,
+    stepCode: BOOKING_SERVICE_STEP_CODES.PRE_SERVICE_CHECK_IN,
+    workflowType: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.PRE_SERVICE,
+    notePrefix: 'Completed by before-wash inspection',
+    session,
+});
+
+const completePostServiceStepFromInspection = async ({
+    bookingId,
+    inspectionId,
+    inspectorUserId,
+    inspectedAt = new Date(),
+    session = null,
+}) => completeWorkflowStepFromInspection({
+    bookingId,
+    inspectionId,
+    inspectorUserId,
+    inspectedAt,
+    stepCode: BOOKING_SERVICE_STEP_CODES.POST_SERVICE_HANDOVER,
+    workflowType: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.POST_SERVICE,
+    notePrefix: 'Completed by after-wash inspection',
+    session,
+});
 
 const areAllRequiredStepsDoneForBookingItem = async (bookingId, bookingItemKey) => {
     if (!bookingItemKey) {
@@ -512,6 +549,7 @@ module.exports = {
     markStepDone,
     completeStepsForBookingItem,
     assertAllRequiredStepsDone,
+    completePreServiceStepFromInspection,
     completePostServiceStepFromInspection,
     areAllRequiredStepsDoneForBookingItem,
     markResourceReleasedForBookingItem,
