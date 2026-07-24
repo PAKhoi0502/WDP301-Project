@@ -1,5 +1,6 @@
 jest.mock('./booking.model', () => ({
     find: jest.fn(),
+    findById: jest.fn(),
     countDocuments: jest.fn(),
 }));
 
@@ -7,8 +8,13 @@ jest.mock('../staff-profiles/staffProfile.model', () => ({
     findOne: jest.fn(),
 }));
 
+jest.mock('../booking-handovers/bookingHandover.model', () => ({
+    find: jest.fn(),
+}));
+
 const Booking = require('./booking.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
+const BookingHandover = require('../booking-handovers/bookingHandover.model');
 const bookingService = require('./booking.service');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const { STAFF_TYPES } = require('../../shared/constants/staff.constant');
@@ -36,6 +42,22 @@ describe('booking staff authorization filters', () => {
         };
 
         return bookingQuery;
+    };
+
+    const createHandoverQuery = (handovers) => ({
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue(handovers),
+    });
+
+    const createPopulatedBookingQuery = (booking) => {
+        const populatedQuery = {
+            populate: jest.fn().mockReturnThis(),
+        };
+        populatedQuery.then = (resolve, reject) => (
+            Promise.resolve(booking).then(resolve, reject)
+        );
+
+        return populatedQuery;
     };
 
     const getExpectedAssignmentFilter = () => ({
@@ -132,5 +154,87 @@ describe('booking staff authorization filters', () => {
 
         expect(Booking.find).toHaveBeenCalledWith({ garage_id: requestedGarageId });
         expect(StaffProfile.findOne).not.toHaveBeenCalled();
+    });
+
+    it('includes the exact handover release signal in admin booking lists', async () => {
+        const bookingId = '507f1f77bcf86cd799439014';
+        const releasedAt = new Date('2026-07-25T00:00:00.000Z');
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'COMPLETED',
+            payment_status: 'PAID',
+        };
+        const handoverQuery = createHandoverQuery([{
+            booking_id: bookingId,
+            state: 'RELEASED',
+            released_at: releasedAt,
+        }]);
+        query.limit.mockResolvedValue([booking]);
+        BookingHandover.find.mockReturnValue(handoverQuery);
+
+        const result = await bookingService.getAllBookings({
+            _id: userId,
+            role: USER_ROLES.ADMIN,
+        });
+
+        expect(BookingHandover.find).toHaveBeenCalledWith({
+            booking_id: { $in: [bookingId] },
+        });
+        expect(handoverQuery.select).toHaveBeenCalledWith('booking_id state released_at');
+        expect(result.data[0]).toMatchObject({
+            handover_state: 'RELEASED',
+            handover_released_at: releasedAt,
+        });
+    });
+
+    it('returns nullable handover signals when no handover exists', async () => {
+        const bookingId = '507f1f77bcf86cd799439014';
+        query.limit.mockResolvedValue([{
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'COMPLETED',
+            payment_status: 'PAID',
+        }]);
+        BookingHandover.find.mockReturnValue(createHandoverQuery([]));
+
+        const result = await bookingService.getAllBookings({
+            _id: userId,
+            role: USER_ROLES.ADMIN,
+        });
+
+        expect(result.data[0]).toMatchObject({
+            handover_state: null,
+            handover_released_at: null,
+        });
+    });
+
+    it('includes the same handover release signal in admin booking detail', async () => {
+        const bookingId = '507f1f77bcf86cd799439014';
+        const releasedAt = new Date('2026-07-25T00:00:00.000Z');
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'COMPLETED',
+            payment_status: 'PAID',
+        };
+        Booking.findById
+            .mockReturnValueOnce(Promise.resolve(booking))
+            .mockReturnValueOnce(createPopulatedBookingQuery(booking));
+        BookingHandover.find.mockReturnValue(createHandoverQuery([{
+            booking_id: bookingId,
+            state: 'RELEASED',
+            released_at: releasedAt,
+        }]));
+
+        const result = await bookingService.getBookingById({
+            _id: userId,
+            role: USER_ROLES.ADMIN,
+        }, bookingId);
+
+        expect(result).toMatchObject({
+            handover_state: 'RELEASED',
+            handover_released_at: releasedAt,
+        });
     });
 });

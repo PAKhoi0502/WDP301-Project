@@ -11,6 +11,7 @@ const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const BookingIncident = require('../booking-incidents/bookingIncident.model');
 const VehicleInspection = require('../vehicle-inspections/vehicleInspection.model');
+const BookingHandover = require('../booking-handovers/bookingHandover.model');
 const BookingIncidentMapper = require('../booking-incidents/bookingIncident.mapper');
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const bookingPaymentService = require('./bookingPayment.service');
@@ -359,6 +360,27 @@ const populateBookingQuery = (query) => {
             },
         })
         .populate('booking_items.assigned_execution_staff.user_id', 'full_name email phone role is_active');
+};
+
+const getBookingHandoverSummaryMap = async (bookings = []) => {
+    const bookingIds = bookings
+        .map((booking) => booking?._id)
+        .filter(Boolean);
+
+    if (bookingIds.length === 0) {
+        return new Map();
+    }
+
+    const handovers = await BookingHandover.find({
+        booking_id: { $in: bookingIds },
+    })
+        .select('booking_id state released_at')
+        .lean();
+
+    return new Map(handovers.map((handover) => [
+        toObjectIdString(handover.booking_id),
+        handover,
+    ]));
 };
 
 const getBookingDocumentById = async (bookingId, session = null) => {
@@ -2967,9 +2989,12 @@ const getAllBookings = async (user, query = {}) => {
             .limit(limit),
         Booking.countDocuments(filter),
     ]);
+    const handoverByBookingId = await getBookingHandoverSummaryMap(bookings);
 
     return {
-        data: BookingMapper.toBookingDtoList(bookings),
+        data: bookings.map((booking) => BookingMapper.toBookingDto(booking, {
+            handover: handoverByBookingId.get(toObjectIdString(booking._id)) || null,
+        })),
         meta: {
             page,
             limit,
@@ -2984,9 +3009,14 @@ const getBookingById = async (user, bookingId) => {
 
     await assertStaffCanAccessBooking(user, booking);
 
-    const populatedBooking = await getBookingDocumentById(booking._id);
+    const [populatedBooking, handoverByBookingId] = await Promise.all([
+        getBookingDocumentById(booking._id),
+        getBookingHandoverSummaryMap([booking]),
+    ]);
 
-    return BookingMapper.toBookingDto(populatedBooking);
+    return BookingMapper.toBookingDto(populatedBooking, {
+        handover: handoverByBookingId.get(toObjectIdString(booking._id)) || null,
+    });
 };
 
 const createCustomerBooking = async (customerId, payload = {}) => {

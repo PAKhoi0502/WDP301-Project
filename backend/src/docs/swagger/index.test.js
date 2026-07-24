@@ -20,6 +20,23 @@ describe('OpenAPI server configuration', () => {
     });
 });
 
+describe('OpenAPI booking handover summary contract', () => {
+    it('publishes authoritative nullable handover signals on booking DTOs', () => {
+        const booking = openApiSpec.components.schemas.Booking;
+
+        expect(booking.properties.handover_state).toEqual({
+            type: 'string',
+            enum: ['PENDING', 'READY_FOR_CUSTOMER', 'ON_HOLD', 'RELEASED'],
+            nullable: true,
+        });
+        expect(booking.properties.handover_released_at).toEqual({
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+        });
+    });
+});
+
 describe('OpenAPI staff capability contract', () => {
     it('publishes the canonical current-staff capability response', () => {
         const capabilityKey = openApiSpec.components.schemas.StaffCapabilityKey;

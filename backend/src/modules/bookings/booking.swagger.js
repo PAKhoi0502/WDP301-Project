@@ -139,6 +139,12 @@ const bookingSchema = {
         final_price: { type: 'number' },
         payment_method: { type: 'string', enum: ['CASH', 'PAYOS'] },
         payment_status: { type: 'string', enum: ['UNPAID', 'PENDING', 'PAID', 'WAIVED'] },
+        handover_state: {
+            type: 'string',
+            enum: ['PENDING', 'READY_FOR_CUSTOMER', 'ON_HOLD', 'RELEASED'],
+            nullable: true,
+        },
+        handover_released_at: { type: 'string', format: 'date-time', nullable: true },
         pre_waiver_final_price: { type: 'number', nullable: true },
         waived_amount: { type: 'number' },
         waiver_resolution_ids: { type: 'array', items: { type: 'string' } },

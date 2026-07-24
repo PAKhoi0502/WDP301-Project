@@ -194,12 +194,14 @@ const toWashBaySummaryDto = (washBay) => {
     };
 };
 
-const toBookingDto = (booking) => {
+const toBookingDto = (booking, options = {}) => {
     if (!booking) {
         return null;
     }
 
     const plainBooking = booking.toObject ? booking.toObject() : booking;
+    const includeHandover = Object.prototype.hasOwnProperty.call(options, 'handover');
+    const handover = options.handover || null;
 
     return {
         id: plainBooking._id?.toString() || plainBooking.id || null,
@@ -259,6 +261,10 @@ const toBookingDto = (booking) => {
         final_price: plainBooking.final_price,
         payment_method: plainBooking.payment_method,
         payment_status: plainBooking.payment_status,
+        ...(includeHandover ? {
+            handover_state: handover?.state || null,
+            handover_released_at: handover?.released_at || null,
+        } : {}),
         pre_waiver_final_price: plainBooking.pre_waiver_final_price,
         waived_amount: plainBooking.waived_amount || 0,
         waiver_resolution_ids: (plainBooking.waiver_resolution_ids || []).map(toId),
