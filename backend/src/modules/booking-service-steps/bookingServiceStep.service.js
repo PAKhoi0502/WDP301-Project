@@ -6,6 +6,7 @@ const { AppError } = require('../../shared/utils/appError');
 const {
     BOOKING_SERVICE_STEP_STATUS,
     BOOKING_SERVICE_STEP_WORKFLOW_TYPES,
+    BOOKING_SERVICE_STEP_CODES,
 } = require('../../shared/constants/bookingServiceStep.constant');
 const { SERVICE_STEP_TYPES } = require('../../shared/constants/servicePackage.constant');
 const { BOOKING_OPERATION_STATUS } = require('../../shared/constants/bookingIncident.constant');
@@ -124,7 +125,7 @@ const buildPreServiceDocument = (booking, fallbackServicePackage) => ({
     booking_id: booking._id,
     service_package_id: fallbackServicePackage?._id || booking.service_package_id,
     booking_item_key: null,
-    step_code: 'PRE_SERVICE_CHECK_IN',
+    step_code: BOOKING_SERVICE_STEP_CODES.PRE_SERVICE_CHECK_IN,
     step_name: 'Kiểm tra trước dịch vụ',
     order: 1,
     step_type: SERVICE_STEP_TYPES.MANUAL_SERVICE_STEP,
@@ -154,7 +155,7 @@ const buildPostServiceDocument = (booking, fallbackServicePackage, order) => ({
     booking_id: booking._id,
     service_package_id: fallbackServicePackage?._id || booking.service_package_id,
     booking_item_key: null,
-    step_code: 'POST_SERVICE_HANDOVER',
+    step_code: BOOKING_SERVICE_STEP_CODES.POST_SERVICE_HANDOVER,
     step_name: 'Kiểm tra cuối và chuẩn bị bàn giao',
     order,
     step_type: SERVICE_STEP_TYPES.MANUAL_SERVICE_STEP,
@@ -348,6 +349,43 @@ const assertAllRequiredStepsDone = async (bookingId) => {
     }
 };
 
+const completePostServiceStepFromInspection = async ({
+    bookingId,
+    inspectionId,
+    inspectorUserId,
+    inspectedAt = new Date(),
+    session = null,
+}) => {
+    const note = inspectionId
+        ? `Completed by after-wash inspection ${inspectionId.toString()}`
+        : 'Completed by after-wash inspection';
+    const options = { new: true };
+
+    if (session) {
+        options.session = session;
+    }
+
+    return BookingServiceStep.findOneAndUpdate(
+        {
+            booking_id: bookingId,
+            booking_item_key: null,
+            step_code: BOOKING_SERVICE_STEP_CODES.POST_SERVICE_HANDOVER,
+            workflow_type: BOOKING_SERVICE_STEP_WORKFLOW_TYPES.POST_SERVICE,
+            status: { $ne: BOOKING_SERVICE_STEP_STATUS.DONE },
+        },
+        {
+            $set: {
+                status: BOOKING_SERVICE_STEP_STATUS.DONE,
+                started_at: inspectedAt,
+                completed_at: inspectedAt,
+                confirmed_by_staff_id: inspectorUserId,
+                note,
+            },
+        },
+        options
+    );
+};
+
 const areAllRequiredStepsDoneForBookingItem = async (bookingId, bookingItemKey) => {
     if (!bookingItemKey) {
         return false;
@@ -474,6 +512,7 @@ module.exports = {
     markStepDone,
     completeStepsForBookingItem,
     assertAllRequiredStepsDone,
+    completePostServiceStepFromInspection,
     areAllRequiredStepsDoneForBookingItem,
     markResourceReleasedForBookingItem,
     clearResourceReleasedForBookingItem,

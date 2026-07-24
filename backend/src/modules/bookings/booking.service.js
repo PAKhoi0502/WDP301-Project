@@ -6153,6 +6153,27 @@ const completeService = async (user, bookingId, { note } = {}) => {
         );
     }
 
+    const afterWashInspection = await VehicleInspection.findOne({
+        booking_id: booking._id,
+        type: VEHICLE_INSPECTION_TYPES.AFTER_WASH,
+        'images.0': { $exists: true },
+    });
+
+    if (!afterWashInspection) {
+        throw new AppError(
+            'After-wash inspection with image evidence is required before completing booking',
+            400,
+            'AFTER_WASH_INSPECTION_REQUIRED'
+        );
+    }
+
+    await bookingServiceStepService.completePostServiceStepFromInspection({
+        bookingId: booking._id,
+        inspectionId: afterWashInspection._id,
+        inspectorUserId: afterWashInspection.inspected_by,
+        inspectedAt: afterWashInspection.inspected_at,
+    });
+
     await bookingServiceStepService.assertAllRequiredStepsDone(booking._id);
     await releaseWashBayForBooking(booking);
 

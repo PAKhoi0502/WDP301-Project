@@ -1,10 +1,16 @@
+const mongoose = require('mongoose');
+
 const Booking = require('../bookings/booking.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const VehicleInspection = require('./vehicleInspection.model');
 const VehicleInspectionMapper = require('./vehicleInspection.mapper');
+const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
-const { BOOKING_STATUS } = require('../../shared/constants/booking.constant');
+const {
+    BOOKING_STATUS,
+    BOOKING_ITEM_STATUS,
+} = require('../../shared/constants/booking.constant');
 const { VEHICLE_INSPECTION_TYPES } = require('../../shared/constants/vehicleInspection.constant');
 const {
     STAFF_CAPABILITIES,
@@ -37,8 +43,12 @@ const populateInspectionQuery = (query) => {
     return query.populate('inspected_by', 'full_name email phone role is_active');
 };
 
-const getBookingDocumentById = async (bookingId) => {
-    const booking = await Booking.findById(bookingId);
+const withSession = (query, session) => (
+    session && typeof query?.session === 'function' ? query.session(session) : query
+);
+
+const getBookingDocumentById = async (bookingId, session = null) => {
+    const booking = await withSession(Booking.findById(bookingId), session);
 
     if (!booking) {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
@@ -153,33 +163,90 @@ const assertInspectionTypeAllowed = (booking, type) => {
     }
 };
 
-const createInspection = async (user, bookingId, payload = {}) => {
-    const booking = await getBookingDocumentById(bookingId);
-
-    await assertStaffCanAccessBooking(user, booking, { requireCreateCapability: true });
-    assertInspectionTypeAllowed(booking, payload.type);
-
-    const existedInspection = await VehicleInspection.exists({
-        booking_id: booking._id,
-        type: payload.type,
-    });
-
-    if (existedInspection) {
-        throw new AppError('Inspection already exists for this booking and type', 409, 'VEHICLE_INSPECTION_ALREADY_EXISTS');
+const assertAfterWashInspectionReady = (booking, images) => {
+    if (images.length === 0) {
+        throw new AppError(
+            'After-wash inspection requires at least one image',
+            400,
+            'AFTER_WASH_INSPECTION_IMAGE_REQUIRED'
+        );
     }
 
-    const inspection = await VehicleInspection.create({
-        booking_id: booking._id,
-        type: payload.type,
-        note: normalizeText(payload.note),
-        images: normalizeImages(payload.images || []),
-        inspected_by: user._id,
-        inspected_at: new Date(),
-    });
+    const unfinishedBookingItem = (booking.booking_items || []).find((item) => (
+        item.status !== BOOKING_ITEM_STATUS.DONE
+        && item.status !== BOOKING_ITEM_STATUS.SKIPPED
+    ));
 
-    const populatedInspection = await populateInspectionQuery(VehicleInspection.findById(inspection._id));
+    if (unfinishedBookingItem) {
+        throw new AppError(
+            'All booking service items must be completed before after-wash inspection',
+            400,
+            'AFTER_WASH_SERVICE_ITEMS_NOT_DONE'
+        );
+    }
+};
 
-    return VehicleInspectionMapper.toVehicleInspectionDto(populatedInspection);
+const createInspection = async (user, bookingId, payload = {}) => {
+    const session = await mongoose.startSession();
+    let inspectionId = null;
+
+    try {
+        await session.withTransaction(async () => {
+            const booking = await getBookingDocumentById(bookingId, session);
+
+            await assertStaffCanAccessBooking(user, booking, { requireCreateCapability: true });
+            assertInspectionTypeAllowed(booking, payload.type);
+
+            const existedInspection = await withSession(VehicleInspection.exists({
+                booking_id: booking._id,
+                type: payload.type,
+            }), session);
+
+            if (existedInspection) {
+                throw new AppError(
+                    'Inspection already exists for this booking and type',
+                    409,
+                    'VEHICLE_INSPECTION_ALREADY_EXISTS'
+                );
+            }
+
+            const images = normalizeImages(payload.images || []);
+
+            if (payload.type === VEHICLE_INSPECTION_TYPES.AFTER_WASH) {
+                assertAfterWashInspectionReady(booking, images);
+            }
+
+            const inspectedAt = new Date();
+            const [inspection] = await VehicleInspection.create([{
+                booking_id: booking._id,
+                type: payload.type,
+                note: normalizeText(payload.note),
+                images,
+                inspected_by: user._id,
+                inspected_at: inspectedAt,
+            }], { session });
+
+            inspectionId = inspection._id;
+
+            if (payload.type === VEHICLE_INSPECTION_TYPES.AFTER_WASH) {
+                await bookingServiceStepService.completePostServiceStepFromInspection({
+                    bookingId: booking._id,
+                    inspectionId: inspection._id,
+                    inspectorUserId: user._id,
+                    inspectedAt,
+                    session,
+                });
+            }
+        });
+
+        const populatedInspection = await populateInspectionQuery(
+            VehicleInspection.findById(inspectionId)
+        );
+
+        return VehicleInspectionMapper.toVehicleInspectionDto(populatedInspection);
+    } finally {
+        await session.endSession();
+    }
 };
 
 const getAdminBookingInspections = async (user, bookingId) => {

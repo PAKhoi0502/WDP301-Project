@@ -14,6 +14,8 @@ const vehicleInspectionSchema = {
         note: { type: 'string', nullable: true },
         images: {
             type: 'array',
+            maxItems: 20,
+            description: 'AFTER_WASH inspections require at least one image',
             items: {
                 type: 'object',
                 properties: {

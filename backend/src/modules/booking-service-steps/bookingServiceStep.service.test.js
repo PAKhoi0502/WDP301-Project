@@ -2,6 +2,7 @@ jest.mock('./bookingServiceStep.model', () => ({
     countDocuments: jest.fn(),
     find: jest.fn(),
     findOne: jest.fn(),
+    findOneAndUpdate: jest.fn(),
     findById: jest.fn(),
     insertMany: jest.fn(),
     updateMany: jest.fn(),
@@ -28,6 +29,7 @@ describe('booking service step service', () => {
         jest.clearAllMocks();
         BookingServiceStep.countDocuments.mockResolvedValue(0);
         BookingServiceStep.find.mockReturnValue(createFindQuery([]));
+        BookingServiceStep.findOneAndUpdate.mockResolvedValue(null);
         BookingServiceStep.insertMany.mockResolvedValue([]);
         BookingServiceStep.updateMany.mockResolvedValue({ modifiedCount: 1 });
     });
@@ -205,6 +207,45 @@ describe('booking service step service', () => {
                 $set: {
                     resource_released_at: releasedAt,
                 },
+            }
+        );
+    });
+
+    it('atomically completes the post-service step from after-wash inspection evidence', async () => {
+        const bookingId = '507f1f77bcf86cd799439001';
+        const inspectionId = '507f1f77bcf86cd799439002';
+        const inspectorUserId = '507f1f77bcf86cd799439003';
+        const inspectedAt = new Date('2999-01-01T06:30:00.000Z');
+        const session = { id: 'session-1' };
+
+        await bookingServiceStepService.completePostServiceStepFromInspection({
+            bookingId,
+            inspectionId,
+            inspectorUserId,
+            inspectedAt,
+            session,
+        });
+
+        expect(BookingServiceStep.findOneAndUpdate).toHaveBeenCalledWith(
+            {
+                booking_id: bookingId,
+                booking_item_key: null,
+                step_code: 'POST_SERVICE_HANDOVER',
+                workflow_type: 'POST_SERVICE',
+                status: { $ne: 'DONE' },
+            },
+            {
+                $set: {
+                    status: 'DONE',
+                    started_at: inspectedAt,
+                    completed_at: inspectedAt,
+                    confirmed_by_staff_id: inspectorUserId,
+                    note: `Completed by after-wash inspection ${inspectionId}`,
+                },
+            },
+            {
+                new: true,
+                session,
             }
         );
     });

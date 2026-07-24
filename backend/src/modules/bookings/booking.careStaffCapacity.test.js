@@ -36,6 +36,7 @@ jest.mock('../service-packages/servicePackage.model', () => ({
 }));
 jest.mock('../vehicle-inspections/vehicleInspection.model', () => ({
     exists: jest.fn(),
+    findOne: jest.fn(),
 }));
 jest.mock('../booking-service-steps/bookingServiceStep.service', () => ({}));
 jest.mock('./bookingPayment.service', () => ({}));
@@ -233,6 +234,7 @@ describe('booking care staff capacity', () => {
         Booking.countDocuments.mockResolvedValue(0);
         Booking.exists.mockResolvedValue(null);
         VehicleInspection.exists.mockResolvedValue(true);
+        VehicleInspection.findOne.mockResolvedValue(null);
         Booking.aggregate.mockResolvedValue([
             createCapacityReservation('507f1f77bcf86cd799439080'),
         ]);
@@ -244,6 +246,7 @@ describe('booking care staff capacity', () => {
         bookingServiceStepService.markResourceReleasedForBookingItem = jest.fn();
         bookingServiceStepService.clearResourceReleasedForBookingItem = jest.fn();
         bookingServiceStepService.assertAllRequiredStepsDone = jest.fn();
+        bookingServiceStepService.completePostServiceStepFromInspection = jest.fn();
         auditLogService.recordAuditEvent.mockResolvedValue(null);
         Vehicle.findOne.mockResolvedValue({
             _id: vehicleId,
@@ -2275,6 +2278,11 @@ describe('booking care staff capacity', () => {
 
     it('releases remaining active care staff assignments when service is completed', async () => {
         const bookingId = '507f1f77bcf86cd799439019';
+        const afterWashInspection = {
+            _id: '507f1f77bcf86cd799439018',
+            inspected_by: '507f1f77bcf86cd799439017',
+            inspected_at: new Date('2999-01-01T06:50:00.000Z'),
+        };
         const booking = {
             _id: bookingId,
             garage_id: garageId,
@@ -2302,6 +2310,7 @@ describe('booking care staff capacity', () => {
         Booking.findById
             .mockReturnValueOnce(booking)
             .mockReturnValueOnce(createPopulateQuery(booking));
+        VehicleInspection.findOne.mockResolvedValue(afterWashInspection);
         bookingServiceStepService.assertAllRequiredStepsDone.mockResolvedValue(undefined);
 
         await bookingService.completeService(
@@ -2313,11 +2322,52 @@ describe('booking care staff capacity', () => {
         expect(booking.status).toBe('COMPLETED');
         expect(booking.completed_at).toBeInstanceOf(Date);
         expect(booking.booking_items[0].assigned_care_staff[0].released_at).toBe(booking.completed_at);
+        expect(
+            bookingServiceStepService.completePostServiceStepFromInspection
+        ).toHaveBeenCalledWith({
+            bookingId: booking._id,
+            inspectionId: afterWashInspection._id,
+            inspectorUserId: afterWashInspection.inspected_by,
+            inspectedAt: afterWashInspection.inspected_at,
+        });
         expect(bookingServiceStepService.markResourceReleasedForBookingItem).toHaveBeenCalledWith(
             booking._id,
             'ITEM_1_507F1F77BCF86CD799439016',
             booking.completed_at
         );
+    });
+
+    it('rejects service completion without after-wash image evidence', async () => {
+        const bookingId = '507f1f77bcf86cd799439019';
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            status: 'IN_PROGRESS',
+            wash_bay_id: null,
+            booking_items: [{
+                item_key: 'ITEM_1_507F1F77BCF86CD799439016',
+                status: 'DONE',
+            }],
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+
+        Booking.findById.mockReturnValueOnce(booking);
+        VehicleInspection.findOne.mockResolvedValue(null);
+
+        await expect(bookingService.completeService(
+            { _id: '507f1f77bcf86cd799439021', role: 'ADMIN' },
+            bookingId,
+            {}
+        )).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'AFTER_WASH_INSPECTION_REQUIRED',
+        });
+
+        expect(
+            bookingServiceStepService.completePostServiceStepFromInspection
+        ).not.toHaveBeenCalled();
+        expect(bookingServiceStepService.assertAllRequiredStepsDone).not.toHaveBeenCalled();
+        expect(booking.save).not.toHaveBeenCalled();
     });
 
     it('reopens completed unpaid booking as admin', async () => {

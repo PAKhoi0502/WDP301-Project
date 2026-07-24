@@ -1,6 +1,7 @@
 const { z } = require('zod');
 
 const {
+    VEHICLE_INSPECTION_TYPES,
     VEHICLE_INSPECTION_TYPE_VALUES,
 } = require('../../shared/constants/vehicleInspection.constant');
 
@@ -28,19 +29,33 @@ const imageSchema = z.object({
     caption: optionalTextField(255),
 }).strict();
 
+const createVehicleInspectionBodySchema = z
+    .object({
+        type: z.enum(VEHICLE_INSPECTION_TYPE_VALUES),
+        note: optionalTextField(2000),
+        images: z.array(imageSchema).max(20).default([]),
+    })
+    .strict()
+    .superRefine((value, context) => {
+        if (
+            value.type === VEHICLE_INSPECTION_TYPES.AFTER_WASH
+            && value.images.length === 0
+        ) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ['images'],
+                message: 'After-wash inspection requires at least one image',
+            });
+        }
+    });
+
 const createVehicleInspectionSchema = z.object({
     params: z
         .object({
             id: objectIdField,
         })
         .strict(),
-    body: z
-        .object({
-            type: z.enum(VEHICLE_INSPECTION_TYPE_VALUES),
-            note: optionalTextField(2000),
-            images: z.array(imageSchema).max(20).default([]),
-        })
-        .strict(),
+    body: createVehicleInspectionBodySchema,
 });
 
 const getVehicleInspectionsSchema = z.object({

@@ -1175,7 +1175,7 @@ const paths = {
     '/admin/bookings/{id}/complete-service': {
         patch: {
             tags: ['Admin Bookings'],
-            summary: 'Complete booking service',
+            summary: 'Complete booking service after after-wash inspection',
             security: [{ bearerAuth: [] }],
             parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
             requestBody: {

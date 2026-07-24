@@ -479,6 +479,123 @@ describe('staff booking workflow service', () => {
         );
     });
 
+    it('waits for after-wash inspection after all service items are done', async () => {
+        const booking = createBooking({
+            status: 'IN_PROGRESS',
+            booking_items: [{
+                item_key: 'WASH_1',
+                name_snapshot: 'Automated wash',
+                sequence: 1,
+                status: 'DONE',
+            }],
+        });
+        mockDetailQueries({
+            booking,
+            inspections: [beforeInspection],
+            serviceSteps: [{
+                step_code: 'POST_SERVICE_HANDOVER',
+                workflow_type: 'POST_SERVICE',
+                is_required: true,
+                status: 'PENDING',
+            }],
+        });
+
+        const result = await staffBookingWorkflowService.getBookingWorkflow(
+            createStaffContext(STAFF_TYPES.VEHICLE_INSPECTION_STAFF),
+            bookingId
+        );
+
+        expect(result.workflow_phase).toBe(
+            BOOKING_WORKFLOW_PHASES.WAITING_AFTER_WASH_INSPECTION
+        );
+        expect(result.blockers).toContain(
+            BOOKING_WORKFLOW_BLOCKERS.AFTER_WASH_INSPECTION_REQUIRED
+        );
+        expect(result.available_actions).toContain(
+            BOOKING_WORKFLOW_ACTIONS.INSPECTION_AFTER_WASH_CREATE
+        );
+    });
+
+    it('allows service completion when after-wash evidence covers a legacy pending post step', async () => {
+        const booking = createBooking({
+            status: 'IN_PROGRESS',
+            booking_items: [{
+                item_key: 'WASH_1',
+                name_snapshot: 'Automated wash',
+                sequence: 1,
+                status: 'DONE',
+            }],
+        });
+        mockDetailQueries({
+            booking,
+            inspections: [beforeInspection, afterInspection],
+            serviceSteps: [{
+                _id: '507f1f77bcf86cd799439030',
+                step_code: 'POST_SERVICE_HANDOVER',
+                workflow_type: 'POST_SERVICE',
+                is_required: true,
+                status: 'PENDING',
+            }],
+        });
+
+        const result = await staffBookingWorkflowService.getBookingWorkflow(
+            createStaffContext(STAFF_TYPES.CUSTOMER_SERVICE_STAFF),
+            bookingId
+        );
+
+        expect(result.workflow_phase).toBe(
+            BOOKING_WORKFLOW_PHASES.READY_TO_COMPLETE_SERVICE
+        );
+        expect(result.blockers).not.toContain(
+            BOOKING_WORKFLOW_BLOCKERS.REQUIRED_SERVICE_STEPS_NOT_DONE
+        );
+        expect(result.available_actions).toContain(
+            BOOKING_WORKFLOW_ACTIONS.BOOKING_SERVICE_COMPLETE
+        );
+    });
+
+    it('keeps service completion blocked when another required step is pending', async () => {
+        const booking = createBooking({
+            status: 'IN_PROGRESS',
+            booking_items: [{
+                item_key: 'WASH_1',
+                name_snapshot: 'Automated wash',
+                sequence: 1,
+                status: 'DONE',
+            }],
+        });
+        mockDetailQueries({
+            booking,
+            inspections: [beforeInspection, afterInspection],
+            serviceSteps: [
+                {
+                    step_code: 'CAR_STANDARD_WASH',
+                    workflow_type: 'SERVICE',
+                    is_required: true,
+                    status: 'PENDING',
+                },
+                {
+                    step_code: 'POST_SERVICE_HANDOVER',
+                    workflow_type: 'POST_SERVICE',
+                    is_required: true,
+                    status: 'PENDING',
+                },
+            ],
+        });
+
+        const result = await staffBookingWorkflowService.getBookingWorkflow(
+            createStaffContext(STAFF_TYPES.CUSTOMER_SERVICE_STAFF),
+            bookingId
+        );
+
+        expect(result.blockers).toContain(
+            BOOKING_WORKFLOW_BLOCKERS.REQUIRED_SERVICE_STEPS_NOT_DONE
+        );
+        expect(result.available_actions).not.toContain(
+            BOOKING_WORKFLOW_ACTIONS.BOOKING_SERVICE_COMPLETE
+        );
+    });
+
     it('derives post-service payment and release phases from handover state', async () => {
         const booking = createBooking({
             status: 'COMPLETED',

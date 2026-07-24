@@ -16,7 +16,10 @@ const {
     BOOKING_HANDOVER_STATES,
     BOOKING_HANDOVER_RESPONSES,
 } = require('../../shared/constants/customerCase.constant');
-const { BOOKING_SERVICE_STEP_STATUS } = require('../../shared/constants/bookingServiceStep.constant');
+const {
+    BOOKING_SERVICE_STEP_STATUS,
+    BOOKING_SERVICE_STEP_CODES,
+} = require('../../shared/constants/bookingServiceStep.constant');
 const {
     STAFF_TYPES,
     STAFF_CAPABILITIES,
@@ -53,6 +56,8 @@ const getInspectionByType = (inspections, type) => (
     inspections.find((inspection) => inspection.type === type) || null
 );
 
+const hasInspectionImageEvidence = (inspection) => Boolean(inspection?.images?.length);
+
 const isIncidentHold = (booking) => (
     booking.operation_status === BOOKING_OPERATION_STATUS.AWAITING_CUSTOMER_DECISION
     || Boolean(booking.active_incident_id)
@@ -66,10 +71,13 @@ const areAllServiceItemsDone = (booking) => (
     ))
 );
 
-const areAllRequiredStepsDone = (serviceSteps) => serviceSteps.every((step) => (
+const areAllRequiredStepsSatisfied = (serviceSteps, afterInspection) => serviceSteps.every((step) => (
     !step.is_required
     || step.status === BOOKING_SERVICE_STEP_STATUS.DONE
-    || step.status === BOOKING_SERVICE_STEP_STATUS.SKIPPED
+    || (
+        step.step_code === BOOKING_SERVICE_STEP_CODES.POST_SERVICE_HANDOVER
+        && hasInspectionImageEvidence(afterInspection)
+    )
 ));
 
 const getCurrentServiceItem = (booking) => {
@@ -109,7 +117,7 @@ const isServiceItemAssignedToCurrentStaff = (bookingItem, staffContext) => {
     ));
 };
 
-const getWorkflowPhase = ({ booking, inspections, handover }) => {
+const getWorkflowPhase = ({ booking, inspections, handover, serviceSteps }) => {
     const beforeInspection = getInspectionByType(inspections, VEHICLE_INSPECTION_TYPES.BEFORE_WASH);
     const afterInspection = getInspectionByType(inspections, VEHICLE_INSPECTION_TYPES.AFTER_WASH);
 
@@ -144,10 +152,20 @@ const getWorkflowPhase = ({ booking, inspections, handover }) => {
     }
 
     if (booking.status === BOOKING_STATUS.IN_PROGRESS) {
-        return BOOKING_WORKFLOW_PHASES.SERVICE_IN_PROGRESS;
+        if (!areAllServiceItemsDone(booking)) {
+            return BOOKING_WORKFLOW_PHASES.SERVICE_IN_PROGRESS;
+        }
+
+        if (!hasInspectionImageEvidence(afterInspection)) {
+            return BOOKING_WORKFLOW_PHASES.WAITING_AFTER_WASH_INSPECTION;
+        }
+
+        return areAllRequiredStepsSatisfied(serviceSteps, afterInspection)
+            ? BOOKING_WORKFLOW_PHASES.READY_TO_COMPLETE_SERVICE
+            : BOOKING_WORKFLOW_PHASES.SERVICE_IN_PROGRESS;
     }
 
-    if (booking.status === BOOKING_STATUS.COMPLETED && !afterInspection) {
+    if (booking.status === BOOKING_STATUS.COMPLETED && !hasInspectionImageEvidence(afterInspection)) {
         return BOOKING_WORKFLOW_PHASES.WAITING_AFTER_WASH_INSPECTION;
     }
 
@@ -166,7 +184,7 @@ const getWorkflowPhase = ({ booking, inspections, handover }) => {
     return BOOKING_WORKFLOW_PHASES.READY_FOR_RELEASE;
 };
 
-const getWorkflowBlockers = ({ booking, inspections, handover }) => {
+const getWorkflowBlockers = ({ booking, inspections, handover, serviceSteps }) => {
     const blockers = [];
     const beforeInspection = getInspectionByType(inspections, VEHICLE_INSPECTION_TYPES.BEFORE_WASH);
     const afterInspection = getInspectionByType(inspections, VEHICLE_INSPECTION_TYPES.AFTER_WASH);
@@ -183,11 +201,20 @@ const getWorkflowBlockers = ({ booking, inspections, handover }) => {
         blockers.push(BOOKING_WORKFLOW_BLOCKERS.BEFORE_WASH_INSPECTION_REQUIRED);
     }
 
-    if (booking.status === BOOKING_STATUS.IN_PROGRESS && !areAllServiceItemsDone(booking)) {
-        blockers.push(BOOKING_WORKFLOW_BLOCKERS.SERVICE_ITEMS_NOT_DONE);
+    if (booking.status === BOOKING_STATUS.IN_PROGRESS) {
+        if (!areAllServiceItemsDone(booking)) {
+            blockers.push(BOOKING_WORKFLOW_BLOCKERS.SERVICE_ITEMS_NOT_DONE);
+        } else if (!hasInspectionImageEvidence(afterInspection)) {
+            blockers.push(BOOKING_WORKFLOW_BLOCKERS.AFTER_WASH_INSPECTION_REQUIRED);
+        } else if (!areAllRequiredStepsSatisfied(serviceSteps, afterInspection)) {
+            blockers.push(BOOKING_WORKFLOW_BLOCKERS.REQUIRED_SERVICE_STEPS_NOT_DONE);
+        }
     }
 
-    if (booking.status === BOOKING_STATUS.COMPLETED && !afterInspection) {
+    if (
+        booking.status === BOOKING_STATUS.COMPLETED
+        && !hasInspectionImageEvidence(afterInspection)
+    ) {
         blockers.push(BOOKING_WORKFLOW_BLOCKERS.AFTER_WASH_INSPECTION_REQUIRED);
     }
 
@@ -207,8 +234,6 @@ const getWorkflowBlockers = ({ booking, inspections, handover }) => {
 
     return blockers;
 };
-
-const hasInspectionImageEvidence = (inspection) => Boolean(inspection?.images?.length);
 
 const getAvailableActions = ({ booking, inspections, handover, serviceSteps, staffContext }) => {
     if (isIncidentHold(booking)) {
@@ -293,7 +318,7 @@ const getAvailableActions = ({ booking, inspections, handover, serviceSteps, sta
         hasCapability(staffContext, STAFF_CAPABILITIES.BOOKING_SERVICE_COMPLETE)
         && booking.status === BOOKING_STATUS.IN_PROGRESS
         && areAllServiceItemsDone(booking)
-        && areAllRequiredStepsDone(serviceSteps)
+        && areAllRequiredStepsSatisfied(serviceSteps, afterInspection)
     ) {
         actions.push(BOOKING_WORKFLOW_ACTIONS.BOOKING_SERVICE_COMPLETE);
     }
@@ -302,6 +327,7 @@ const getAvailableActions = ({ booking, inspections, handover, serviceSteps, sta
         hasCapability(staffContext, STAFF_CAPABILITIES.INSPECTION_CREATE_ASSIGNED)
         && inspectionAssigned
         && !afterInspection
+        && areAllServiceItemsDone(booking)
         && [BOOKING_STATUS.IN_PROGRESS, BOOKING_STATUS.COMPLETED].includes(booking.status)
     ) {
         actions.push(BOOKING_WORKFLOW_ACTIONS.INSPECTION_AFTER_WASH_CREATE);
@@ -368,6 +394,7 @@ const toServiceStepDto = (step) => ({
     order: step.order,
     workflow_type: step.workflow_type,
     display_staff_type: step.display_staff_type || null,
+    is_required: Boolean(step.is_required),
     status: step.status,
     started_at: step.started_at || null,
     completed_at: step.completed_at || null,
@@ -376,7 +403,12 @@ const toServiceStepDto = (step) => ({
 const buildWorkflowDto = ({ booking, inspections, handover, serviceSteps, staffContext }) => {
     const beforeInspection = getInspectionByType(inspections, VEHICLE_INSPECTION_TYPES.BEFORE_WASH);
     const afterInspection = getInspectionByType(inspections, VEHICLE_INSPECTION_TYPES.AFTER_WASH);
-    const workflowPhase = getWorkflowPhase({ booking, inspections, handover });
+    const workflowPhase = getWorkflowPhase({
+        booking,
+        inspections,
+        handover,
+        serviceSteps,
+    });
     const currentServiceItem = getCurrentServiceItem(booking);
 
     return {
@@ -440,7 +472,12 @@ const buildWorkflowDto = ({ booking, inspections, handover, serviceSteps, staffC
             .sort((first, second) => first.sequence - second.sequence)
             .map((item) => toServiceItemDto(item, staffContext)),
         service_steps: serviceSteps.map(toServiceStepDto),
-        blockers: getWorkflowBlockers({ booking, inspections, handover }),
+        blockers: getWorkflowBlockers({
+            booking,
+            inspections,
+            handover,
+            serviceSteps,
+        }),
         available_actions: getAvailableActions({
             booking,
             inspections,
@@ -587,7 +624,12 @@ const listBookingWorkflows = async (staffContext, query = {}) => {
                 assigned_inspection_staff_id: toId(booking.assigned_inspection_staff_id),
                 booking_status: booking.status,
                 arrival_status: booking.arrival_status || null,
-                workflow_phase: getWorkflowPhase({ booking, inspections, handover }),
+                workflow_phase: getWorkflowPhase({
+                    booking,
+                    inspections,
+                    handover,
+                    serviceSteps,
+                }),
                 current_service_item_key: getCurrentServiceItem(booking)?.item_key || null,
                 payment_status: booking.payment_status,
                 blocked_by_incident: isIncidentHold(booking),
