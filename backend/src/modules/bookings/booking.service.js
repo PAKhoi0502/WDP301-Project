@@ -15,6 +15,7 @@ const BookingIncidentMapper = require('../booking-incidents/bookingIncident.mapp
 const bookingServiceStepService = require('../booking-service-steps/bookingServiceStep.service');
 const bookingPaymentService = require('./bookingPayment.service');
 const paymentService = require('../payments/payment.service');
+const bookingHandoverPaymentPolicy = require('../booking-handovers/bookingHandoverPayment.policy');
 const auditLogService = require('../audit-logs/auditLog.service');
 const promotionService = require('../promotions/promotion.service');
 const promotionUsageService = require('../promotion-usages/promotionUsage.service');
@@ -6073,6 +6074,21 @@ const processDueServiceItemTimers = async ({ limit = 50 } = {}) => {
 
 
 const markPaid = async (user, bookingId, { note } = {}) => {
+    const preflightBooking = await Booking.findById(bookingId);
+
+    if (!preflightBooking) {
+        throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    }
+
+    await assertStaffCanAccessBooking(user, preflightBooking);
+    assertBookingHasNoActiveIncident(preflightBooking);
+    assertBookingStatusIn(
+        preflightBooking,
+        [BOOKING_STATUS.COMPLETED],
+        'BOOKING_MARK_PAID_NOT_ALLOWED'
+    );
+    await bookingHandoverPaymentPolicy.assertPaymentCollectionAllowed(preflightBooking._id);
+
     await paymentService.resolvePendingPayosPaymentForCash(user, bookingId, {
         reason: 'Staff confirmed cash payment',
     });
@@ -6092,6 +6108,10 @@ const markPaid = async (user, bookingId, { note } = {}) => {
             await assertStaffCanAccessBooking(user, booking);
             assertBookingHasNoActiveIncident(booking);
             assertBookingStatusIn(booking, [BOOKING_STATUS.COMPLETED], 'BOOKING_MARK_PAID_NOT_ALLOWED');
+            await bookingHandoverPaymentPolicy.assertPaymentCollectionAllowed(
+                booking._id,
+                { session }
+            );
 
             if (
                 booking.payment_method === BOOKING_PAYMENT_METHOD.PAYOS
@@ -6188,8 +6208,6 @@ const completeService = async (user, bookingId, { note } = {}) => {
     }
 
     await booking.save();
-    await notificationService.emitPaymentReady({ booking });
-
     for (const bookingItemKey of releasedBookingItemKeys) {
         await bookingServiceStepService.markResourceReleasedForBookingItem(
             booking._id,

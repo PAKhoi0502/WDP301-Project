@@ -11,14 +11,12 @@ const customerCaseService = require('./customerCase.service');
 const customerCaseNotificationService = require('./customerCaseNotification.service');
 const customerVoucherService = require('../customer-vouchers/customerVoucher.service');
 const bookingService = require('../bookings/booking.service');
-const phoneVerificationService = require('../auth/services/phoneVerification.service');
 const auditLogService = require('../audit-logs/auditLog.service');
 const { AppError } = require('../../shared/utils/appError');
 const { normalizePhone } = require('../../shared/utils/phone');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const { BOOKING_STATUS, BOOKING_PAYMENT_STATUS } = require('../../shared/constants/booking.constant');
 const { CUSTOMER_VOUCHER_TYPE_VALUES } = require('../../shared/constants/customerVoucher.constant');
-const { PHONE_VERIFICATION_PURPOSES } = require('../auth/phoneVerification.constant');
 const {
     STAFF_TYPES,
     STAFF_EMPLOYMENT_STATUS,
@@ -26,6 +24,7 @@ const {
 const {
     BOOKING_HANDOVER_STATES,
     BOOKING_HANDOVER_RESPONSES,
+    BOOKING_HANDOVER_RESPONSE_SOURCES,
     CUSTOMER_CASE_CATEGORIES,
     CUSTOMER_CASE_STATUSES,
     CUSTOMER_CASE_OPEN_STATUSES,
@@ -394,21 +393,12 @@ const recordWalkInResolutionResponse = async (user, staffContext, caseId, payloa
             [resolution] = await Promise.all([
                 CustomerCaseResolution.findById(payload.resolution_id).session(session),
             ]);
-            const booking = await Booking.findById(customerCase.booking_id).session(session);
             if (!resolution || toId(resolution.case_id) !== toId(customerCase._id)) {
                 throw new AppError('Resolution proposal not found', 404, 'CUSTOMER_CASE_RESOLUTION_NOT_FOUND');
             }
             if (resolution.status !== CUSTOMER_CASE_RESOLUTION_STATUSES.PROPOSED) {
                 throw new AppError('Resolution proposal is no longer awaiting response', 409, 'CUSTOMER_CASE_RESOLUTION_NOT_PENDING');
             }
-            const phone = normalizePhone(booking?.normalized_guest_phone || booking?.guest_phone);
-            const challenge = await phoneVerificationService.getVerifiedChallenge({
-                phone,
-                purpose: PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE,
-                verificationToken: payload.verification_token,
-                userId: user._id,
-                session,
-            });
             before = resolution.toObject();
             resolution.status = payload.accepted
                 ? CUSTOMER_CASE_RESOLUTION_STATUSES.CUSTOMER_ACCEPTED
@@ -417,7 +407,6 @@ const recordWalkInResolutionResponse = async (user, staffContext, caseId, payloa
             resolution.customer_response_note = normalizeText(payload.note);
             resolution.customer_responded_at = new Date();
             await resolution.save({ session });
-            await phoneVerificationService.consumeVerifiedChallenge(challenge._id, session);
             await customerCaseService.createEvent({
                 customerCase,
                 actor: user,
@@ -426,7 +415,6 @@ const recordWalkInResolutionResponse = async (user, staffContext, caseId, payloa
                     resolution_id: toId(resolution._id),
                     version: resolution.version,
                     note: resolution.customer_response_note,
-                    walk_in_phone_verified: true,
                     response_recorded_by_staff: true,
                 },
                 session,
@@ -442,12 +430,12 @@ const recordWalkInResolutionResponse = async (user, staffContext, caseId, payloa
         before,
         after: resolution,
         context: auditContext,
-        metadata: { walk_in_phone_verified: true },
+        metadata: { response_recorded_by_staff: true },
     });
     await notifyCaseActors(customerCase, {
         type: NOTIFICATION_TYPES.CUSTOMER_CASE_RESOLUTION_RESPONDED,
         title: `Walk-in customer responded: ${customerCase.case_code}`,
-        message: payload.accepted ? 'The verified walk-in customer accepted the resolution.' : 'The verified walk-in customer rejected the resolution.',
+        message: payload.accepted ? 'Staff recorded that the walk-in customer accepted the resolution.' : 'Staff recorded that the walk-in customer rejected the resolution.',
         excludeUserId: user._id,
     });
     return customerCaseService.getCaseDetail(customerCase);
@@ -534,6 +522,52 @@ const applyResolution = async (user, caseId, resolutionId, auditContext = {}) =>
                 });
                 resolution.rework_booking_ids.push(rework._id || rework.id);
             }
+            if (action.action_type === CUSTOMER_CASE_RESOLUTION_ACTION_TYPES.WAIVE_CHARGE) {
+                const alreadyApplied = (booking.waiver_resolution_ids || [])
+                    .some((item) => toId(item) === toId(resolution._id));
+
+                if (alreadyApplied) continue;
+
+                if (booking.payment_status !== BOOKING_PAYMENT_STATUS.UNPAID) {
+                    throw new AppError(
+                        'Charge waiver can only be applied before payment',
+                        409,
+                        'CUSTOMER_CASE_WAIVER_UNPAID_REQUIRED'
+                    );
+                }
+
+                if (action.amount > booking.final_price) {
+                    throw new AppError(
+                        'Charge waiver exceeds the remaining booking amount',
+                        409,
+                        'CUSTOMER_CASE_WAIVER_EXCEEDS_REMAINING_AMOUNT'
+                    );
+                }
+
+                booking.pre_waiver_final_price = booking.pre_waiver_final_price
+                    ?? booking.final_price;
+                booking.waived_amount = (booking.waived_amount || 0) + action.amount;
+                booking.final_price -= action.amount;
+                if (typeof booking.waiver_resolution_ids?.addToSet === 'function') {
+                    booking.waiver_resolution_ids.addToSet(resolution._id);
+                } else {
+                    booking.waiver_resolution_ids = [
+                        ...(booking.waiver_resolution_ids || []),
+                        resolution._id,
+                    ];
+                }
+                booking.payment_waiver_case_id = customerCase._id;
+                booking.payment_waiver_reason = normalizeText(action.note)
+                    || normalizeText(resolution.summary);
+
+                if (booking.final_price === 0) {
+                    booking.payment_status = BOOKING_PAYMENT_STATUS.WAIVED;
+                    booking.payment_waived_at = new Date();
+                    booking.payment_waived_by_id = user._id;
+                }
+
+                await booking.save();
+            }
         }
         resolution.status = CUSTOMER_CASE_RESOLUTION_STATUSES.APPLIED;
         resolution.applied_by_id = user._id;
@@ -555,6 +589,8 @@ const applyResolution = async (user, caseId, resolutionId, auditContext = {}) =>
             refund_ids: resolution.refund_ids.map(toId),
             voucher_ids: resolution.voucher_ids.map(toId),
             rework_booking_ids: resolution.rework_booking_ids.map(toId),
+            waived_amount: booking.waived_amount || 0,
+            payment_status: booking.payment_status,
         },
     });
     await recordAudit({
@@ -746,6 +782,15 @@ const reopenCase = async (user, staffContext, caseId, payload, auditContext = {}
         status: { $in: CUSTOMER_CASE_OPEN_STATUSES },
     });
     if (duplicate) throw new AppError('Another open case already covers this issue', 409, 'CUSTOMER_CASE_DUPLICATE_OPEN');
+    const booking = await Booking.findById(customerCase.booking_id);
+    if (!booking) throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
+    if (booking.payment_status === BOOKING_PAYMENT_STATUS.PENDING) {
+        const paymentService = require('../payments/payment.service');
+        await paymentService.resolvePendingPayosPaymentForHandoverIssue(
+            user,
+            booking._id
+        );
+    }
     const before = customerCase.toObject();
     const previousStatus = customerCase.status;
     const sla = customerCaseService.getSlaDeadlines(customerCase.priority);
@@ -767,6 +812,17 @@ const reopenCase = async (user, staffContext, caseId, payload, auditContext = {}
     customerCase.resolved_at = null;
     customerCase.resolved_by_id = null;
     await customerCase.save();
+    const handover = await BookingHandover.findOne({ booking_id: booking._id });
+    if (handover) {
+        handover.customer_response = BOOKING_HANDOVER_RESPONSES.ISSUE_REPORTED;
+        handover.customer_responded_at = new Date();
+        handover.customer_response_note = normalizeText(payload.reason);
+        handover.issue_case_ids.addToSet(customerCase._id);
+        if (handover.state !== BOOKING_HANDOVER_STATES.RELEASED) {
+            handover.state = BOOKING_HANDOVER_STATES.ON_HOLD;
+        }
+        await handover.save();
+    }
     await customerCaseService.createEvent({
         customerCase,
         actor: user,
@@ -791,32 +847,24 @@ const reopenCase = async (user, staffContext, caseId, payload, auditContext = {}
     return customerCaseService.getCaseDetail(customerCase, { customerView: user.role === USER_ROLES.CUSTOMER });
 };
 
-const getVerifiedWalkInBooking = async (staffContext, bookingId) => {
-    const booking = await Booking.findById(bookingId);
-    if (!booking || !booking.is_walk_in) throw new AppError('Walk-in booking not found', 404, 'WALK_IN_BOOKING_NOT_FOUND');
-    customerCaseService.assertStaffGarageAccess(staffContext, { garage_id: booking.garage_id });
-    if (!booking.normalized_guest_phone) throw new AppError('Walk-in booking has no verified phone target', 409, 'WALK_IN_BOOKING_PHONE_REQUIRED');
-    return booking;
-};
-
-const requestWalkInOtp = async (user, staffContext, payload, meta = {}) => {
-    const booking = await getVerifiedWalkInBooking(staffContext, payload.booking_id);
-    return phoneVerificationService.requestVerification({
-        phone: booking.normalized_guest_phone,
-        purpose: PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE,
-        userId: user._id,
-        requestIp: meta.ip,
-        userAgent: meta.userAgent,
-    });
-};
-
-const verifyWalkInOtp = async (user, payload) => phoneVerificationService.verifyOtp({
-    challengeId: payload.challenge_id,
-    otp: payload.otp,
-    userId: user._id,
-});
-
 const createWalkInCase = async (user, staffContext, payload, auditContext = {}) => {
+    const preflightBooking = await Booking.findById(payload.booking_id);
+
+    if (preflightBooking?.is_walk_in) {
+        customerCaseService.assertStaffGarageAccess(
+            staffContext,
+            { garage_id: preflightBooking.garage_id }
+        );
+
+        if (preflightBooking.payment_status === BOOKING_PAYMENT_STATUS.PENDING) {
+            const paymentService = require('../payments/payment.service');
+            await paymentService.resolvePendingPayosPaymentForHandoverIssue(
+                user,
+                preflightBooking._id
+            );
+        }
+    }
+
     const session = await mongoose.startSession();
     let customerCase;
     try {
@@ -825,7 +873,13 @@ const createWalkInCase = async (user, staffContext, payload, auditContext = {}) 
             if (!booking || !booking.is_walk_in) throw new AppError('Walk-in booking not found', 404, 'WALK_IN_BOOKING_NOT_FOUND');
             customerCaseService.assertStaffGarageAccess(staffContext, { garage_id: booking.garage_id });
             if (booking.status !== BOOKING_STATUS.COMPLETED) throw new AppError('Walk-in service must be completed before reporting a handover issue', 409, 'WALK_IN_CASE_BOOKING_NOT_COMPLETED');
-            if (payload.vehicle_received && booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
+            if (
+                payload.vehicle_received
+                && ![
+                    BOOKING_PAYMENT_STATUS.PAID,
+                    BOOKING_PAYMENT_STATUS.WAIVED,
+                ].includes(booking.payment_status)
+            ) {
                 throw new AppError('Booking payment is required before recording vehicle receipt', 409, 'HANDOVER_PAYMENT_REQUIRED');
             }
             const handover = await BookingHandover.findOne({ booking_id: booking._id }).session(session);
@@ -833,13 +887,6 @@ const createWalkInCase = async (user, staffContext, payload, auditContext = {}) 
                 throw new AppError('Walk-in handover is not ready for issue reporting', 409, 'CUSTOMER_CASE_HANDOVER_NOT_READY');
             }
             const phone = normalizePhone(booking.normalized_guest_phone || booking.guest_phone);
-            const challenge = await phoneVerificationService.getVerifiedChallenge({
-                phone,
-                purpose: PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE,
-                verificationToken: payload.verification_token,
-                userId: user._id,
-                session,
-            });
             const duplicate = await CustomerCase.exists({
                 booking_id: booking._id,
                 category: payload.category,
@@ -865,7 +912,6 @@ const createWalkInCase = async (user, staffContext, payload, auditContext = {}) 
                 reporter_name: booking.guest_name,
                 reporter_phone: phone,
                 created_by_staff_id: user._id,
-                phone_verified_at: challenge.verified_at,
                 category: payload.category,
                 priority,
                 priority_rank: getCustomerCasePriorityRank(priority),
@@ -873,6 +919,7 @@ const createWalkInCase = async (user, staffContext, payload, auditContext = {}) 
                 open_dedupe_key: `${toId(booking._id)}:${payload.category}`,
                 source,
                 description: payload.description,
+                damage_location: normalizeText(payload.damage_location),
                 desired_resolution: normalizeText(payload.desired_resolution),
                 discovered_at: discoveredAt,
                 vehicle_received: payload.vehicle_received || handover.state === BOOKING_HANDOVER_STATES.RELEASED,
@@ -881,6 +928,9 @@ const createWalkInCase = async (user, staffContext, payload, auditContext = {}) 
                 inspection_snapshot: handover.inspection_snapshot || {},
             }], { session });
             handover.customer_response = BOOKING_HANDOVER_RESPONSES.ISSUE_REPORTED;
+            handover.customer_response_source = BOOKING_HANDOVER_RESPONSE_SOURCES.STAFF_ASSISTED;
+            handover.customer_response_recorded_by_id = user._id;
+            handover.customer_response_note = normalizeText(payload.description);
             handover.customer_responded_at = new Date();
             handover.issue_case_ids.addToSet(customerCase._id);
             if (handover.state !== BOOKING_HANDOVER_STATES.RELEASED) handover.state = BOOKING_HANDOVER_STATES.ON_HOLD;
@@ -890,10 +940,9 @@ const createWalkInCase = async (user, staffContext, payload, auditContext = {}) 
                 customerCase,
                 actor: user,
                 eventType: CUSTOMER_CASE_EVENT_TYPES.SUBMITTED,
-                metadata: { source, walk_in: true, phone_verified: true },
+                metadata: { source, walk_in: true, response_recorded_by_staff: true },
                 session,
             });
-            await phoneVerificationService.consumeVerifiedChallenge(challenge._id, session);
         });
     } finally {
         await session.endSession();
@@ -916,7 +965,5 @@ module.exports = {
     getSlaDashboard,
     processDueSlaEscalations,
     reopenCase,
-    requestWalkInOtp,
-    verifyWalkInOtp,
     createWalkInCase,
 };

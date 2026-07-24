@@ -44,7 +44,9 @@ jest.mock('../auth/services/phoneVerification.service', () => ({
 }));
 jest.mock('../audit-logs/auditLog.service', () => ({ recordAuditEvent: jest.fn() }));
 
+const mongoose = require('mongoose');
 const Booking = require('../bookings/booking.model');
+const BookingHandover = require('../booking-handovers/bookingHandover.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const CustomerCase = require('./customerCase.model');
 const CustomerCaseTechnicalAssessment = require('./customerCaseTechnicalAssessment.model');
@@ -147,6 +149,204 @@ describe('customer case stage 2 service', () => {
         expect(CustomerCaseRefund.create).not.toHaveBeenCalled();
         expect(resolution.refund_ids).toEqual([refundId]);
         expect(resolution.status).toBe('APPLIED');
+    });
+
+    it.each([
+        [50000, 150000, 'UNPAID'],
+        [200000, 0, 'WAIVED'],
+    ])(
+        'applies a charge waiver of %s before payment',
+        async (amount, expectedFinalPrice, expectedPaymentStatus) => {
+            const resolution = {
+                _id: '507f1f77bcf86cd799439088',
+                case_id: caseId,
+                status: 'CUSTOMER_ACCEPTED',
+                summary: 'Garage accepts responsibility and adjusts the service charge.',
+                actions: [{ action_type: 'WAIVE_CHARGE', amount }],
+                refund_ids: [],
+                voucher_ids: [],
+                rework_booking_ids: [],
+                toObject: () => ({}),
+                save: jest.fn(),
+            };
+            const booking = {
+                _id: bookingId,
+                payment_status: 'UNPAID',
+                final_price: 200000,
+                pre_waiver_final_price: null,
+                waived_amount: 0,
+                waiver_resolution_ids: [],
+                save: jest.fn(),
+            };
+            CustomerCaseResolution.findById.mockResolvedValue(resolution);
+            Booking.findById.mockResolvedValue(booking);
+
+            await stage2Service.applyResolution(admin, caseId, resolution._id);
+
+            expect(booking.pre_waiver_final_price).toBe(200000);
+            expect(booking.waived_amount).toBe(amount);
+            expect(booking.final_price).toBe(expectedFinalPrice);
+            expect(booking.payment_status).toBe(expectedPaymentStatus);
+            expect(booking.waiver_resolution_ids).toEqual([resolution._id]);
+            expect(booking.save).toHaveBeenCalled();
+            expect(resolution.status).toBe('APPLIED');
+        }
+    );
+
+    it('rejects a charge waiver after payment', async () => {
+        const resolution = {
+            _id: '507f1f77bcf86cd799439088',
+            case_id: caseId,
+            status: 'CUSTOMER_ACCEPTED',
+            actions: [{ action_type: 'WAIVE_CHARGE', amount: 100000 }],
+            refund_ids: [],
+            voucher_ids: [],
+            rework_booking_ids: [],
+            toObject: () => ({}),
+            save: jest.fn(),
+        };
+        CustomerCaseResolution.findById.mockResolvedValue(resolution);
+        Booking.findById.mockResolvedValue({
+            _id: bookingId,
+            payment_status: 'PAID',
+            final_price: 200000,
+        });
+
+        await expect(stage2Service.applyResolution(admin, caseId, resolution._id))
+            .rejects.toMatchObject({ errorCode: 'CUSTOMER_CASE_WAIVER_UNPAID_REQUIRED' });
+        expect(resolution.status).toBe('FAILED');
+    });
+
+    it('lets staff record a walk-in handover issue without OTP or signature', async () => {
+        const session = {
+            withTransaction: jest.fn(async (callback) => callback()),
+            endSession: jest.fn(),
+        };
+        jest.spyOn(mongoose, 'startSession').mockResolvedValueOnce(session);
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            is_walk_in: true,
+            status: 'COMPLETED',
+            payment_status: 'UNPAID',
+            guest_name: 'Walk-in customer',
+            guest_phone: '0901234567',
+            normalized_guest_phone: '+84901234567',
+            booking_items: [],
+        };
+        const issueCaseIds = [];
+        issueCaseIds.addToSet = (value) => issueCaseIds.push(value);
+        const handover = {
+            _id: '507f1f77bcf86cd799439020',
+            state: 'READY_FOR_CUSTOMER',
+            customer_response: 'PENDING',
+            issue_case_ids: issueCaseIds,
+            inspection_snapshot: {},
+            save: jest.fn(),
+        };
+        const createdCase = {
+            _id: caseId,
+            case_code: customerCase.case_code,
+            garage_id: garageId,
+            booking_id: bookingId,
+        };
+        Booking.findById
+            .mockResolvedValueOnce(booking)
+            .mockReturnValueOnce({
+                session: jest.fn().mockResolvedValue(booking),
+            });
+        BookingHandover.findOne.mockReturnValue({
+            session: jest.fn().mockResolvedValue(handover),
+        });
+        CustomerCase.exists.mockReturnValue({
+            session: jest.fn().mockResolvedValue(null),
+        });
+        CustomerCase.create.mockResolvedValue([createdCase]);
+        customerCaseService.validateEvidenceUploads.mockResolvedValue([]);
+        customerCaseService.getSlaDeadlines.mockReturnValue({
+            first_response_due_at: new Date(),
+            resolution_due_at: new Date(),
+        });
+        customerCaseService.buildCaseCode.mockReturnValue(customerCase.case_code);
+        customerCaseService.buildBookingSnapshot.mockReturnValue({});
+
+        await stage2Service.createWalkInCase(
+            { _id: userId, role: 'STAFF' },
+            staffContext,
+            {
+                booking_id: bookingId,
+                category: 'VEHICLE_DAMAGE',
+                description: 'A new scratch is visible on the front bumper.',
+                damage_location: 'Front bumper',
+                upload_ids: [],
+                vehicle_received: false,
+            }
+        );
+
+        expect(CustomerCase.create).toHaveBeenCalledWith([
+            expect.objectContaining({
+                is_walk_in_case: true,
+                created_by_staff_id: userId,
+                damage_location: 'Front bumper',
+            }),
+        ], { session });
+        expect(CustomerCase.create.mock.calls[0][0][0]).not.toHaveProperty(
+            'phone_verified_at'
+        );
+        expect(handover).toMatchObject({
+            state: 'ON_HOLD',
+            customer_response: 'ISSUE_REPORTED',
+            customer_response_source: 'STAFF_ASSISTED',
+            customer_response_recorded_by_id: userId,
+        });
+    });
+
+    it('puts an unreleased handover back on hold when a case is reopened', async () => {
+        const reopenedCase = {
+            ...customerCase,
+            status: 'RESOLVED',
+            category: 'VEHICLE_DAMAGE',
+            priority: 'HIGH',
+            conclusion: 'The original issue was considered resolved.',
+            resolution_summary: 'Garage completed the accepted corrective work.',
+            liability_status: 'GARAGE_RESPONSIBLE',
+            resolved_at: new Date(),
+            reopen_count: 0,
+            toObject: jest.fn().mockReturnValue({ status: 'RESOLVED' }),
+            save: jest.fn(),
+        };
+        const issueCaseIds = [];
+        issueCaseIds.addToSet = (value) => issueCaseIds.push(value);
+        const handover = {
+            state: 'READY_FOR_CUSTOMER',
+            customer_response: 'ACCEPTED',
+            issue_case_ids: issueCaseIds,
+            save: jest.fn(),
+        };
+        customerCaseService.getCaseDocument.mockResolvedValue(reopenedCase);
+        CustomerCase.exists.mockResolvedValue(null);
+        customerCaseService.getSlaDeadlines.mockReturnValue({
+            resolution_due_at: new Date(Date.now() + 86400000),
+        });
+        Booking.findById.mockResolvedValue({
+            _id: bookingId,
+            payment_status: 'UNPAID',
+        });
+        BookingHandover.findOne.mockResolvedValue(handover);
+
+        await stage2Service.reopenCase(
+            admin,
+            { is_admin: true },
+            caseId,
+            { reason: 'The same damage remains visible after corrective work.' }
+        );
+
+        expect(reopenedCase.status).toBe('INVESTIGATING');
+        expect(handover).toMatchObject({
+            state: 'ON_HOLD',
+            customer_response: 'ISSUE_REPORTED',
+        });
+        expect(handover.save).toHaveBeenCalled();
     });
 
     it('builds a garage-scoped SLA dashboard for staff', async () => {

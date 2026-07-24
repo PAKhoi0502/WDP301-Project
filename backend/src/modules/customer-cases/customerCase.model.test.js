@@ -38,7 +38,7 @@ describe('customer case model', () => {
         });
     });
 
-    it('requires verified reporter data for an accountless walk-in case', async () => {
+    it('requires reporter and staff audit data for an accountless walk-in case', async () => {
         const customerCase = new CustomerCase({
             ...base,
             customer_id: null,

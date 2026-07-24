@@ -32,6 +32,7 @@ const {
 const {
     BOOKING_HANDOVER_STATES,
     BOOKING_HANDOVER_RESPONSES,
+    BOOKING_HANDOVER_RESPONSE_SOURCES,
     CUSTOMER_CASE_CATEGORIES,
     CUSTOMER_CASE_STATUSES,
     CUSTOMER_CASE_OPEN_STATUSES,
@@ -267,6 +268,21 @@ const getCaseDetail = async (customerCase, { customerView = false } = {}) => {
 };
 
 const createFromHandover = async (user, bookingId, payload = {}, auditContext = {}) => {
+    const preflightBooking = await Booking.findById(bookingId);
+
+    if (
+        preflightBooking
+        && preflightBooking.customer_id
+        && toId(preflightBooking.customer_id) === toId(user._id)
+        && preflightBooking.payment_status === BOOKING_PAYMENT_STATUS.PENDING
+    ) {
+        const paymentService = require('../payments/payment.service');
+        await paymentService.resolvePendingPayosPaymentForHandoverIssue(
+            user,
+            preflightBooking._id
+        );
+    }
+
     const session = await mongoose.startSession();
     let createdCase;
 
@@ -288,7 +304,13 @@ const createFromHandover = async (user, bookingId, payload = {}, auditContext = 
                 throw new AppError('Booking is not available for customer issue reporting', 409, 'CUSTOMER_CASE_HANDOVER_NOT_READY');
             }
 
-            if (payload.vehicle_received && booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
+            if (
+                payload.vehicle_received
+                && ![
+                    BOOKING_PAYMENT_STATUS.PAID,
+                    BOOKING_PAYMENT_STATUS.WAIVED,
+                ].includes(booking.payment_status)
+            ) {
                 throw new AppError(
                     'Booking payment is required before recording vehicle receipt',
                     409,
@@ -342,6 +364,7 @@ const createFromHandover = async (user, bookingId, payload = {}, auditContext = 
                     open_dedupe_key: `${toId(booking._id)}:${payload.category}`,
                     source,
                     description: payload.description,
+                    damage_location: normalizeText(payload.damage_location),
                     desired_resolution: normalizeText(payload.desired_resolution),
                     discovered_at: discoveredAt,
                     vehicle_received: payload.vehicle_received || handover.state === BOOKING_HANDOVER_STATES.RELEASED,
@@ -368,6 +391,9 @@ const createFromHandover = async (user, bookingId, payload = {}, auditContext = 
                 issue_case_ids: (handover.issue_case_ids || []).map(toId),
             };
             handover.customer_response = BOOKING_HANDOVER_RESPONSES.ISSUE_REPORTED;
+            handover.customer_response_source = BOOKING_HANDOVER_RESPONSE_SOURCES.CUSTOMER_SELF_SERVICE;
+            handover.customer_response_recorded_by_id = user._id;
+            handover.customer_response_note = normalizeText(payload.description);
             handover.customer_responded_at = now;
             handover.issue_case_ids.addToSet(customerCase._id);
 
@@ -375,10 +401,8 @@ const createFromHandover = async (user, bookingId, payload = {}, auditContext = 
                 handover.state = BOOKING_HANDOVER_STATES.RELEASED;
                 handover.released_at = handover.released_at || now;
                 handover.released_by_id = handover.released_by_id || user._id;
-            } else if (payload.category === CUSTOMER_CASE_CATEGORIES.SAFETY_CONCERN) {
-                handover.state = BOOKING_HANDOVER_STATES.ON_HOLD;
             } else {
-                handover.state = BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER;
+                handover.state = BOOKING_HANDOVER_STATES.ON_HOLD;
             }
 
             await handover.save({ session });

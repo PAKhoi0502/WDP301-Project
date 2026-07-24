@@ -180,7 +180,7 @@ const recordWalkInResolutionResponse = asyncHandler(async (req, res) => {
         req.user, req.staffContext, req.validated.params.id, req.validated.body,
         auditLogService.getAuditRequestContext(req)
     );
-    return sendSuccess(res, { message: 'Record verified walk-in resolution response successfully', data: result });
+    return sendSuccess(res, { message: 'Record walk-in resolution response successfully', data: result });
 });
 
 const updateRefundStatus = asyncHandler(async (req, res) => {
@@ -202,18 +202,6 @@ const reopenCase = asyncHandler(async (req, res) => {
         auditLogService.getAuditRequestContext(req)
     );
     return sendSuccess(res, { message: 'Reopen customer case successfully', data: result });
-});
-
-const requestWalkInOtp = asyncHandler(async (req, res) => {
-    const result = await customerCaseStage2Service.requestWalkInOtp(
-        req.user, req.staffContext, req.validated.body, auditLogService.getAuditRequestContext(req)
-    );
-    return sendSuccess(res, { message: 'Request walk-in case OTP successfully', data: result });
-});
-
-const verifyWalkInOtp = asyncHandler(async (req, res) => {
-    const result = await customerCaseStage2Service.verifyWalkInOtp(req.user, req.validated.body);
-    return sendSuccess(res, { message: 'Verify walk-in case OTP successfully', data: result });
 });
 
 const createWalkInCase = asyncHandler(async (req, res) => {
@@ -248,7 +236,5 @@ module.exports = {
     updateRefundStatus,
     getSlaDashboard,
     reopenCase,
-    requestWalkInOtp,
-    verifyWalkInOtp,
     createWalkInCase,
 };

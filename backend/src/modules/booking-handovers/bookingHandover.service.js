@@ -1,6 +1,7 @@
 const Booking = require('../bookings/booking.model');
 const VehicleInspection = require('../vehicle-inspections/vehicleInspection.model');
 const BookingHandover = require('./bookingHandover.model');
+const CustomerCase = require('../customer-cases/customerCase.model');
 const BookingHandoverMapper = require('./bookingHandover.mapper');
 const customerCaseNotificationService = require('../customer-cases/customerCaseNotification.service');
 const auditLogService = require('../audit-logs/auditLog.service');
@@ -13,6 +14,8 @@ const { VEHICLE_INSPECTION_TYPES } = require('../../shared/constants/vehicleInsp
 const {
     BOOKING_HANDOVER_STATES,
     BOOKING_HANDOVER_RESPONSES,
+    BOOKING_HANDOVER_RESPONSE_SOURCES,
+    CUSTOMER_CASE_STATUSES,
 } = require('../../shared/constants/customerCase.constant');
 const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
 
@@ -21,6 +24,7 @@ const toId = (value) => value?._id?.toString?.() || value?.toString?.() || null;
 
 const populateHandoverQuery = (query) => query
     .populate('ready_by_id', 'full_name email phone role')
+    .populate('customer_response_recorded_by_id', 'full_name email phone role')
     .populate('released_by_id', 'full_name email phone role');
 
 const getBooking = async (bookingId) => {
@@ -95,6 +99,104 @@ const getRequiredInspectionSnapshot = async (bookingId) => {
 
 const getPopulatedHandover = (handoverId) => populateHandoverQuery(BookingHandover.findById(handoverId));
 
+const assertReportedIssuesResolved = async (handover) => {
+    if (handover.customer_response !== BOOKING_HANDOVER_RESPONSES.ISSUE_REPORTED) {
+        return;
+    }
+
+    const unresolvedCase = await CustomerCase.exists({
+        _id: { $in: handover.issue_case_ids || [] },
+        status: {
+            $nin: [
+                CUSTOMER_CASE_STATUSES.RESOLVED,
+                CUSTOMER_CASE_STATUSES.CLOSED,
+            ],
+        },
+    });
+
+    if (unresolvedCase) {
+        throw new AppError(
+            'Reported handover issues must be resolved before customer acceptance',
+            409,
+            'HANDOVER_ISSUE_RESOLUTION_REQUIRED'
+        );
+    }
+};
+
+const recordAcceptance = async ({
+    user,
+    booking,
+    handover,
+    payload,
+    source,
+    auditContext,
+}) => {
+    if (handover.state === BOOKING_HANDOVER_STATES.RELEASED) {
+        if (handover.customer_response === BOOKING_HANDOVER_RESPONSES.ACCEPTED) {
+            return BookingHandoverMapper.toBookingHandoverDto(
+                await getPopulatedHandover(handover._id)
+            );
+        }
+
+        throw new AppError(
+            'Released handover response cannot be changed',
+            409,
+            'HANDOVER_ALREADY_RELEASED'
+        );
+    }
+
+    if (handover.customer_response === BOOKING_HANDOVER_RESPONSES.ACCEPTED) {
+        return BookingHandoverMapper.toBookingHandoverDto(
+            await getPopulatedHandover(handover._id)
+        );
+    }
+
+    if (![
+        BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER,
+        BOOKING_HANDOVER_STATES.ON_HOLD,
+    ].includes(handover.state)) {
+        throw new AppError(
+            'Handover is not available for acceptance',
+            409,
+            'HANDOVER_ACCEPT_NOT_ALLOWED'
+        );
+    }
+
+    await assertReportedIssuesResolved(handover);
+
+    const before = BookingHandoverMapper.toBookingHandoverDto(handover);
+    const now = new Date();
+    handover.customer_response = BOOKING_HANDOVER_RESPONSES.ACCEPTED;
+    handover.customer_response_source = source;
+    handover.customer_response_recorded_by_id = user._id;
+    handover.customer_response_note = normalizeText(payload.note);
+    handover.customer_responded_at = now;
+    handover.accepted_at = now;
+    handover.state = BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER;
+    await handover.save();
+
+    const result = BookingHandoverMapper.toBookingHandoverDto(
+        await getPopulatedHandover(handover._id)
+    );
+    await auditLogService.recordAuditEvent({
+        actorId: user._id,
+        action: AUDIT_ACTIONS.BOOKING_HANDOVER_ACCEPTED,
+        resourceType: AUDIT_RESOURCE_TYPES.BOOKING_HANDOVER,
+        resourceId: handover._id,
+        before,
+        after: result,
+        ip: auditContext.ip,
+        userAgent: auditContext.userAgent,
+        metadata: {
+            booking_id: toId(booking._id),
+            response_source: source,
+        },
+    });
+    await customerCaseNotificationService.notifyHandoverAccepted(handover, user._id);
+
+    return result;
+};
+
 const markReady = async (user, staffContext, bookingId, payload = {}, auditContext = {}) => {
     const booking = await getBooking(bookingId);
     assertStaffGarageAccess(staffContext, booking);
@@ -111,7 +213,11 @@ const markReady = async (user, staffContext, bookingId, payload = {}, auditConte
     }
 
     if (handover?.state === BOOKING_HANDOVER_STATES.ON_HOLD) {
-        throw new AppError('Held handover must be resolved through the release operation', 409, 'HANDOVER_ON_HOLD');
+        throw new AppError(
+            'Held handover issues must be resolved before preparation can continue',
+            409,
+            'HANDOVER_ON_HOLD'
+        );
     }
 
     if (handover?.state === BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER) {
@@ -198,51 +304,52 @@ const acceptMyHandover = async (user, bookingId, payload = {}, auditContext = {}
         throw new AppError('Booking handover is not ready', 404, 'BOOKING_HANDOVER_NOT_FOUND');
     }
 
-    if (
-        handover.customer_response === BOOKING_HANDOVER_RESPONSES.ACCEPTED
-        && handover.state === BOOKING_HANDOVER_STATES.RELEASED
-    ) {
-        return BookingHandoverMapper.toBookingHandoverDto(await getPopulatedHandover(handover._id));
-    }
-
-    if (handover.customer_response === BOOKING_HANDOVER_RESPONSES.ISSUE_REPORTED) {
-        throw new AppError('An issue has already been reported for this handover', 409, 'HANDOVER_ISSUE_ALREADY_REPORTED');
-    }
-
-    if (handover.state !== BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER) {
-        throw new AppError('Handover is not available for acceptance', 409, 'HANDOVER_ACCEPT_NOT_ALLOWED');
-    }
-
-    if (booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
-        throw new AppError('Booking payment is required before vehicle release', 409, 'HANDOVER_PAYMENT_REQUIRED');
-    }
-
-    const before = BookingHandoverMapper.toBookingHandoverDto(handover);
-    const now = new Date();
-    handover.customer_response = BOOKING_HANDOVER_RESPONSES.ACCEPTED;
-    handover.customer_responded_at = now;
-    handover.accepted_at = now;
-    handover.state = BOOKING_HANDOVER_STATES.RELEASED;
-    handover.released_at = now;
-    handover.released_by_id = user._id;
-    handover.release_note = normalizeText(payload.note);
-    await handover.save();
-
-    const result = BookingHandoverMapper.toBookingHandoverDto(await getPopulatedHandover(handover._id));
-    await auditLogService.recordAuditEvent({
-        actorId: user._id,
-        action: AUDIT_ACTIONS.BOOKING_HANDOVER_ACCEPTED,
-        resourceType: AUDIT_RESOURCE_TYPES.BOOKING_HANDOVER,
-        resourceId: handover._id,
-        before,
-        after: result,
-        ip: auditContext.ip,
-        userAgent: auditContext.userAgent,
-        metadata: { booking_id: toId(booking._id) },
+    return recordAcceptance({
+        user,
+        booking,
+        handover,
+        payload,
+        source: BOOKING_HANDOVER_RESPONSE_SOURCES.CUSTOMER_SELF_SERVICE,
+        auditContext,
     });
-    await customerCaseNotificationService.notifyHandoverAccepted(handover, user._id);
+};
 
-    return result;
+const acceptWalkInHandover = async (
+    user,
+    staffContext,
+    bookingId,
+    payload = {},
+    auditContext = {}
+) => {
+    const booking = await getBooking(bookingId);
+    assertStaffGarageAccess(staffContext, booking);
+
+    if (!booking.is_walk_in) {
+        throw new AppError(
+            'Staff-assisted acceptance is only available for walk-in bookings',
+            409,
+            'HANDOVER_WALK_IN_REQUIRED'
+        );
+    }
+
+    const handover = await BookingHandover.findOne({ booking_id: booking._id });
+
+    if (!handover) {
+        throw new AppError(
+            'Booking handover is not ready',
+            404,
+            'BOOKING_HANDOVER_NOT_FOUND'
+        );
+    }
+
+    return recordAcceptance({
+        user,
+        booking,
+        handover,
+        payload,
+        source: BOOKING_HANDOVER_RESPONSE_SOURCES.STAFF_ASSISTED,
+        auditContext,
+    });
 };
 
 const release = async (user, staffContext, bookingId, payload = {}, auditContext = {}) => {
@@ -254,16 +361,35 @@ const release = async (user, staffContext, bookingId, payload = {}, auditContext
         throw new AppError('Booking handover not found', 404, 'BOOKING_HANDOVER_NOT_FOUND');
     }
 
-    if (handover.customer_response === BOOKING_HANDOVER_RESPONSES.PENDING) {
-        throw new AppError('Customer must accept or report an issue before release', 409, 'HANDOVER_CUSTOMER_RESPONSE_REQUIRED');
-    }
-
-    if (booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
-        throw new AppError('Booking payment is required before vehicle release', 409, 'HANDOVER_PAYMENT_REQUIRED');
-    }
-
     if (handover.state === BOOKING_HANDOVER_STATES.RELEASED) {
         return BookingHandoverMapper.toBookingHandoverDto(await getPopulatedHandover(handover._id));
+    }
+
+    if (handover.customer_response !== BOOKING_HANDOVER_RESPONSES.ACCEPTED) {
+        throw new AppError(
+            'Customer acceptance is required before vehicle release',
+            409,
+            'HANDOVER_CUSTOMER_ACCEPTANCE_REQUIRED'
+        );
+    }
+
+    if (handover.state !== BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER) {
+        throw new AppError(
+            'Handover is not ready for vehicle release',
+            409,
+            'HANDOVER_RELEASE_NOT_ALLOWED'
+        );
+    }
+
+    if (![
+        BOOKING_PAYMENT_STATUS.PAID,
+        BOOKING_PAYMENT_STATUS.WAIVED,
+    ].includes(booking.payment_status)) {
+        throw new AppError(
+            'Booking payment or full payment waiver is required before vehicle release',
+            409,
+            'HANDOVER_PAYMENT_REQUIRED'
+        );
     }
 
     const before = BookingHandoverMapper.toBookingHandoverDto(handover);
@@ -295,5 +421,6 @@ module.exports = {
     getMyHandover,
     getStaffHandover,
     acceptMyHandover,
+    acceptWalkInHandover,
     release,
 };

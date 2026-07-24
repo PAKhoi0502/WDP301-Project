@@ -74,6 +74,39 @@ describe('customer case stage 2 models', () => {
         });
     });
 
+    it('requires a positive amount for a charge waiver', async () => {
+        const resolution = new CustomerCaseResolution({
+            case_id: id(),
+            version: 1,
+            summary: 'Garage proposes waiving the remaining service charge.',
+            proposed_by_id: id(),
+            proposed_at: new Date(),
+            actions: [{ action_type: 'WAIVE_CHARGE' }],
+        });
+
+        await expect(resolution.validate()).rejects.toMatchObject({
+            errors: expect.objectContaining({ actions: expect.anything() }),
+        });
+    });
+
+    it('does not allow refund and charge waiver in the same proposal', async () => {
+        const resolution = new CustomerCaseResolution({
+            case_id: id(),
+            version: 1,
+            summary: 'This invalid proposal mixes pre-payment and post-payment actions.',
+            proposed_by_id: id(),
+            proposed_at: new Date(),
+            actions: [
+                { action_type: 'REFUND', amount: 100000, refund_method: 'BANK_TRANSFER' },
+                { action_type: 'WAIVE_CHARGE', amount: 100000 },
+            ],
+        });
+
+        await expect(resolution.validate()).rejects.toMatchObject({
+            errors: expect.objectContaining({ actions: expect.anything() }),
+        });
+    });
+
     it('requires a transaction reference before a refund is completed', async () => {
         const refund = new CustomerCaseRefund({
             case_id: id(),

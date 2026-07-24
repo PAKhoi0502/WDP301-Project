@@ -38,6 +38,20 @@ const acceptMyHandover = asyncHandler(async (req, res) => {
     return sendSuccess(res, { message: 'Accept booking handover successfully', data: result });
 });
 
+const acceptWalkInHandover = asyncHandler(async (req, res) => {
+    const result = await bookingHandoverService.acceptWalkInHandover(
+        req.user,
+        req.staffContext,
+        req.validated.params.id,
+        req.validated.body,
+        auditLogService.getAuditRequestContext(req)
+    );
+    return sendSuccess(res, {
+        message: 'Record walk-in handover acceptance successfully',
+        data: result,
+    });
+});
+
 const release = asyncHandler(async (req, res) => {
     const result = await bookingHandoverService.release(
         req.user,
@@ -54,5 +68,6 @@ module.exports = {
     getMyHandover,
     getStaffHandover,
     acceptMyHandover,
+    acceptWalkInHandover,
     release,
 };

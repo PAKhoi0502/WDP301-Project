@@ -638,5 +638,54 @@ describe('staff booking workflow service', () => {
         expect(paidResult.available_actions).toContain(
             BOOKING_WORKFLOW_ACTIONS.HANDOVER_RELEASE
         );
+
+        mockDetailQueries({
+            booking: { ...booking, payment_status: 'WAIVED' },
+            inspections: [beforeInspection, afterInspection],
+            handover,
+        });
+        const waivedResult = await staffBookingWorkflowService.getBookingWorkflow(
+            createStaffContext(STAFF_TYPES.CUSTOMER_SERVICE_STAFF),
+            bookingId
+        );
+
+        expect(waivedResult.workflow_phase).toBe(BOOKING_WORKFLOW_PHASES.READY_FOR_RELEASE);
+        expect(waivedResult.available_actions).toContain(
+            BOOKING_WORKFLOW_ACTIONS.HANDOVER_RELEASE
+        );
+    });
+
+    it('offers staff-assisted walk-in handover response actions before payment', async () => {
+        const booking = createBooking({
+            status: 'COMPLETED',
+            is_walk_in: true,
+            customer_id: null,
+            completed_at: new Date('2026-07-22T04:00:00.000Z'),
+        });
+        mockDetailQueries({
+            booking,
+            inspections: [beforeInspection, afterInspection],
+            handover: {
+                booking_id: bookingId,
+                state: 'READY_FOR_CUSTOMER',
+                customer_response: 'PENDING',
+                ready_at: new Date('2026-07-22T04:10:00.000Z'),
+            },
+        });
+
+        const result = await staffBookingWorkflowService.getBookingWorkflow(
+            createStaffContext(STAFF_TYPES.CUSTOMER_SERVICE_STAFF),
+            bookingId
+        );
+
+        expect(result.available_actions).toContain(
+            BOOKING_WORKFLOW_ACTIONS.HANDOVER_WALK_IN_ACCEPT
+        );
+        expect(result.available_actions).toContain(
+            BOOKING_WORKFLOW_ACTIONS.HANDOVER_WALK_IN_REPORT_ISSUE
+        );
+        expect(result.available_actions).not.toContain(
+            BOOKING_WORKFLOW_ACTIONS.BOOKING_PAYMENT_COLLECT_CASH
+        );
     });
 });

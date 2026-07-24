@@ -41,6 +41,14 @@ const confirmBookingPaid = async ({
         throw new AppError('Payment method is required', 400, 'PAYMENT_METHOD_REQUIRED');
     }
 
+    if (booking.payment_status === BOOKING_PAYMENT_STATUS.WAIVED) {
+        throw new AppError(
+            'Waived booking cannot be marked as paid',
+            409,
+            'BOOKING_PAYMENT_WAIVED'
+        );
+    }
+
     if (booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
         booking.payment_status = BOOKING_PAYMENT_STATUS.PAID;
         booking.payment_method = paymentMethod;

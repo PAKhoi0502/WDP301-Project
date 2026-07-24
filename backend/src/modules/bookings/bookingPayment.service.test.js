@@ -118,4 +118,23 @@ describe('booking payment service', () => {
             errorCode: 'PAYMENT_METHOD_REQUIRED',
         });
     });
+
+    it('does not convert a fully waived booking to paid', async () => {
+        const booking = {
+            status: 'COMPLETED',
+            payment_status: 'WAIVED',
+            save: jest.fn(),
+        };
+
+        await expect(bookingPaymentService.confirmBookingPaid({
+            booking,
+            paymentMethod: 'CASH',
+            actorId: 'staff-id',
+        })).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'BOOKING_PAYMENT_WAIVED',
+        });
+        expect(booking.save).not.toHaveBeenCalled();
+        expect(bookingRewardService.processCompletedPaidBooking).not.toHaveBeenCalled();
+    });
 });

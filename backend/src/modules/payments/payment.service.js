@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Booking = require('../bookings/booking.model');
 const BookingMapper = require('../bookings/booking.mapper');
 const bookingPaymentService = require('../bookings/bookingPayment.service');
+const bookingHandoverPaymentPolicy = require('../booking-handovers/bookingHandoverPayment.policy');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const auditLogService = require('../audit-logs/auditLog.service');
 const PaymentTransaction = require('./paymentTransaction.model');
@@ -95,6 +96,14 @@ const assertBookingCanCreatePayosPayment = (booking) => {
 
     if (booking.payment_status === BOOKING_PAYMENT_STATUS.PAID) {
         throw new AppError('Booking is already paid', 409, 'BOOKING_ALREADY_PAID');
+    }
+
+    if (booking.payment_status === BOOKING_PAYMENT_STATUS.WAIVED) {
+        throw new AppError(
+            'Booking payment has been fully waived',
+            409,
+            'BOOKING_PAYMENT_WAIVED'
+        );
     }
 
     if (!Number.isInteger(booking.final_price) || booking.final_price <= 0) {
@@ -330,6 +339,7 @@ const createPayosPayment = async (user, bookingId, payload = {}, auditContext = 
 
     await assertActorCanAccessBooking(user, booking);
     assertBookingCanCreatePayosPayment(booking);
+    await bookingHandoverPaymentPolicy.assertPaymentCollectionAllowed(booking._id);
 
     const now = new Date();
 
@@ -459,6 +469,10 @@ const createPayosPayment = async (user, bookingId, payload = {}, auditContext = 
             }
 
             assertBookingCanCreatePayosPayment(freshBooking);
+            await bookingHandoverPaymentPolicy.assertPaymentCollectionAllowed(
+                freshBooking._id,
+                { session }
+            );
 
             const payment = await PaymentTransaction.findById(initiatedPayment._id).session(session);
 
@@ -592,7 +606,7 @@ const beginPayosPaymentCancel = async (user, paymentId) => {
                 throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
             }
 
-            await assertStaffCanAccessBooking(user, booking);
+            await assertActorCanAccessBooking(user, booking);
 
             if (payment.status === PAYMENT_TRANSACTION_STATUS.CANCELING) {
                 cancelContext = {
@@ -658,7 +672,7 @@ const finishPayosPaymentCancel = async (
                 throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
             }
 
-            await assertStaffCanAccessBooking(user, booking);
+            await assertActorCanAccessBooking(user, booking);
 
             if (payment.status === PAYMENT_TRANSACTION_STATUS.PAID) {
                 throw new AppError('Paid payment cannot be canceled', 409, 'PAYMENT_ALREADY_PAID');
@@ -733,7 +747,7 @@ const getCurrentBookingAfterPaymentRace = async (user, bookingId) => {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
     }
 
-    await assertStaffCanAccessBooking(user, booking);
+    await assertActorCanAccessBooking(user, booking);
 
     return booking;
 };
@@ -1027,6 +1041,12 @@ const resolvePendingPayosPaymentForCash = async (
     }
 };
 
+const resolvePendingPayosPaymentForHandoverIssue = async (user, bookingId) => (
+    resolvePendingPayosPaymentForCash(user, bookingId, {
+        reason: 'Payment put on hold because a handover issue was reported',
+    })
+);
+
 const getPayosPaymentByWebhookData = async (webhookData, session = null) => {
     const query = PaymentTransaction.findOne({
         provider: PAYMENT_PROVIDER.PAYOS,
@@ -1238,5 +1258,6 @@ module.exports = {
     expirePayosPayment,
     expireDuePayosPayments,
     resolvePendingPayosPaymentForCash,
+    resolvePendingPayosPaymentForHandoverIssue,
     handlePayosWebhook,
 };

@@ -1,4 +1,7 @@
-const { BOOKING_STATUS_VALUES } = require('../../shared/constants/booking.constant');
+const {
+    BOOKING_STATUS_VALUES,
+    BOOKING_PAYMENT_STATUS_VALUES,
+} = require('../../shared/constants/booking.constant');
 const {
     BOOKING_WORKFLOW_PHASE_VALUES,
     BOOKING_WORKFLOW_ACTION_VALUES,
@@ -30,7 +33,7 @@ const workflowSummaryProperties = {
     arrival_status: { type: 'string', enum: ['EARLY', 'ON_TIME', 'LATE'], nullable: true },
     workflow_phase: { type: 'string', enum: BOOKING_WORKFLOW_PHASE_VALUES },
     current_service_item_key: { type: 'string', nullable: true },
-    payment_status: { type: 'string', enum: ['UNPAID', 'PENDING', 'PAID'] },
+    payment_status: { type: 'string', enum: BOOKING_PAYMENT_STATUS_VALUES },
     blocked_by_incident: { type: 'boolean' },
     available_actions: availableActionsProperty,
 };
@@ -99,7 +102,7 @@ const schemas = {
                 type: 'object',
                 properties: {
                     method: { type: 'string', enum: ['CASH', 'PAYOS'] },
-                    status: { type: 'string', enum: ['UNPAID', 'PENDING', 'PAID'] },
+                    status: { type: 'string', enum: BOOKING_PAYMENT_STATUS_VALUES },
                 },
             },
             milestones: {

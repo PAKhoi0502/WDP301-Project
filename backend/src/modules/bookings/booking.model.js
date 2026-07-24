@@ -525,6 +525,47 @@ const bookingSchema = new mongoose.Schema(
             default: BOOKING_PAYMENT_STATUS.UNPAID,
         },
 
+        pre_waiver_final_price: {
+            type: Number,
+            min: [0, 'Pre-waiver final price must be greater than or equal to 0'],
+            default: null,
+        },
+
+        waived_amount: {
+            type: Number,
+            min: [0, 'Waived amount must be greater than or equal to 0'],
+            default: 0,
+        },
+
+        waiver_resolution_ids: [{
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'CustomerCaseResolution',
+        }],
+
+        payment_waived_at: {
+            type: Date,
+            default: null,
+        },
+
+        payment_waived_by_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        payment_waiver_case_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'CustomerCase',
+            default: null,
+        },
+
+        payment_waiver_reason: {
+            type: String,
+            trim: true,
+            maxlength: [2000, 'Payment waiver reason must not exceed 2000 characters'],
+            default: null,
+        },
+
         used_points: {
             type: Number,
             min: [0, 'Used points must be greater than or equal to 0'],
@@ -857,6 +898,40 @@ bookingSchema.pre('validate', function (next) {
 
     if (this.start_time && this.end_time && this.start_time >= this.end_time) {
         this.invalidate('end_time', 'End time must be after start time');
+    }
+
+    if (this.waived_amount > 0) {
+        if (this.pre_waiver_final_price === null) {
+            this.invalidate(
+                'pre_waiver_final_price',
+                'Pre-waiver final price is required when a charge is waived'
+            );
+        } else if (
+            this.pre_waiver_final_price !== this.final_price + this.waived_amount
+        ) {
+            this.invalidate(
+                'waived_amount',
+                'Waived amount must reconcile with the remaining final price'
+            );
+        }
+    }
+
+    if (this.payment_status === BOOKING_PAYMENT_STATUS.WAIVED) {
+        if (this.final_price !== 0) {
+            this.invalidate('final_price', 'Fully waived booking must have zero final price');
+        }
+
+        if (
+            !this.payment_waived_at
+            || !this.payment_waived_by_id
+            || !this.payment_waiver_case_id
+            || !this.payment_waiver_reason
+        ) {
+            this.invalidate(
+                'payment_status',
+                'Fully waived booking requires waiver audit information'
+            );
+        }
     }
 
     if (this.requires_wash_bay) {

@@ -42,6 +42,7 @@ const createCaseRequest = {
             ],
         },
         description: { type: 'string', minLength: 10, maxLength: 2000 },
+        damage_location: { type: 'string', maxLength: 500 },
         desired_resolution: { type: 'string', maxLength: 1000 },
         discovered_at: { type: 'string', format: 'date-time' },
         vehicle_received: { type: 'boolean', default: false },
@@ -55,17 +56,27 @@ const bookingHandoverSchema = {
         id: { type: 'string' },
         booking_id: { type: 'string' },
         garage_id: { type: 'string' },
-        customer_id: { type: 'string' },
+        customer_id: { type: 'string', nullable: true },
         vehicle_id: { type: 'string', nullable: true },
-        is_walk_in_case: { type: 'boolean' },
-        reporter_name: { type: 'string', nullable: true },
-        reporter_phone: { type: 'string', nullable: true },
+        guest_name: { type: 'string', nullable: true },
+        guest_phone: { type: 'string', nullable: true },
         state: { type: 'string', enum: ['PENDING', 'READY_FOR_CUSTOMER', 'ON_HOLD', 'RELEASED'] },
         customer_response: { type: 'string', enum: ['PENDING', 'ACCEPTED', 'ISSUE_REPORTED'] },
+        customer_response_source: {
+            type: 'string',
+            enum: ['CUSTOMER_SELF_SERVICE', 'STAFF_ASSISTED'],
+            nullable: true,
+        },
+        customer_response_recorded_by_id: { type: 'string', nullable: true },
+        customer_response_note: { type: 'string', nullable: true },
         ready_at: { type: 'string', format: 'date-time', nullable: true },
+        ready_by_id: { type: 'string', nullable: true },
+        ready_note: { type: 'string', nullable: true },
         customer_responded_at: { type: 'string', format: 'date-time', nullable: true },
         accepted_at: { type: 'string', format: 'date-time', nullable: true },
         released_at: { type: 'string', format: 'date-time', nullable: true },
+        released_by_id: { type: 'string', nullable: true },
+        release_note: { type: 'string', nullable: true },
         issue_case_ids: { type: 'array', items: { type: 'string' } },
         inspection_snapshot: { type: 'object' },
     },
@@ -79,13 +90,18 @@ const customerCaseSchema = {
         booking_id: { type: 'string' },
         handover_id: { type: 'string' },
         garage_id: { type: 'string' },
-        customer_id: { type: 'string' },
+        customer_id: { type: 'string', nullable: true },
         vehicle_id: { type: 'string', nullable: true },
+        is_walk_in_case: { type: 'boolean' },
+        reporter_name: { type: 'string', nullable: true },
+        reporter_phone: { type: 'string', nullable: true },
+        created_by_staff_id: { type: 'string', nullable: true },
         category: { type: 'string' },
         priority: { type: 'string', enum: ['NORMAL', 'HIGH', 'CRITICAL'] },
         source: { type: 'string', enum: ['HANDOVER', 'AFTER_HANDOVER'] },
         status: { type: 'string', enum: ['SUBMITTED', 'ACKNOWLEDGED', 'INVESTIGATING', 'RESOLVED', 'CLOSED'] },
         description: { type: 'string' },
+        damage_location: { type: 'string', nullable: true },
         desired_resolution: { type: 'string', nullable: true },
         evidence: { type: 'array', items: { type: 'object' } },
         booking_snapshot: { type: 'object' },
@@ -125,6 +141,30 @@ const technicalAssessmentSchema = {
     },
 };
 
+const resolutionActionSchema = {
+    type: 'object',
+    required: ['action_type'],
+    properties: {
+        action_type: {
+            type: 'string',
+            enum: ['REFUND', 'VOUCHER', 'REWORK', 'WAIVE_CHARGE', 'NO_COMPENSATION'],
+        },
+        amount: { type: 'number', exclusiveMinimum: 0 },
+        refund_method: {
+            type: 'string',
+            enum: ['ORIGINAL_PAYMENT', 'CASH', 'BANK_TRANSFER'],
+        },
+        voucher_type: { type: 'string' },
+        value: { type: 'number', minimum: 0 },
+        max_discount_amount: { type: 'number', exclusiveMinimum: 0 },
+        min_order_amount: { type: 'number', minimum: 0 },
+        service_package_id: { type: 'string' },
+        expires_at: { type: 'string', format: 'date-time' },
+        rework_start_time: { type: 'string', format: 'date-time' },
+        note: { type: 'string', maxLength: 1000 },
+    },
+};
+
 const resolutionSchema = {
     type: 'object',
     properties: {
@@ -133,7 +173,7 @@ const resolutionSchema = {
         version: { type: 'integer' },
         status: { type: 'string', enum: ['PROPOSED', 'CUSTOMER_ACCEPTED', 'CUSTOMER_REJECTED', 'APPLIED', 'FAILED', 'SUPERSEDED'] },
         summary: { type: 'string' },
-        actions: { type: 'array', items: { type: 'object' } },
+        actions: { type: 'array', items: resolutionActionSchema },
         refund_ids: { type: 'array', items: { type: 'string' } },
         voucher_ids: { type: 'array', items: { type: 'string' } },
         rework_booking_ids: { type: 'array', items: { type: 'string' } },
@@ -210,7 +250,8 @@ const paths = {
     '/bookings/{id}/handover/accept': {
         post: {
             tags: ['Customer Cases'],
-            summary: 'Confirm vehicle receipt without an issue',
+            summary: 'Accept vehicle condition before payment',
+            description: 'Records ACCEPTED and keeps the handover READY_FOR_CUSTOMER. It does not release the vehicle.',
             parameters: [bookingIdParameter],
             requestBody: requestBody(handoverOperationRequest),
             responses: { 200: successResponse('Handover accepted', { $ref: '#/components/schemas/BookingHandover' }) },
@@ -247,10 +288,21 @@ const paths = {
     '/admin/bookings/{id}/handover/release': {
         patch: {
             tags: ['Customer Cases'],
-            summary: 'Release a vehicle after customer response',
+            summary: 'Confirm the vehicle was physically handed over',
+            description: 'Requires customer response ACCEPTED and payment status PAID or WAIVED.',
             parameters: [bookingIdParameter],
             requestBody: requestBody(handoverOperationRequest),
             responses: { 200: successResponse('Vehicle released', { $ref: '#/components/schemas/BookingHandover' }) },
+        },
+    },
+    '/admin/bookings/{id}/handover/walk-in-accept': {
+        patch: {
+            tags: ['Customer Cases'],
+            summary: 'Record walk-in customer acceptance before payment',
+            description: 'Staff-assisted recording without OTP or signature. The staff actor and timestamp are audited.',
+            parameters: [bookingIdParameter],
+            requestBody: requestBody(handoverOperationRequest),
+            responses: { 200: successResponse('Walk-in acceptance recorded', { $ref: '#/components/schemas/BookingHandover' }) },
         },
     },
     '/customer-cases': {
@@ -311,24 +363,11 @@ const paths = {
             responses: { 200: successResponse('SLA dashboard returned', { type: 'object' }) },
         },
     },
-    '/staff/customer-cases/walk-in/otp/request': {
-        post: {
-            tags: ['Customer Cases'], summary: 'Send OTP to the phone stored on a completed walk-in booking',
-            requestBody: requestBody({ type: 'object', required: ['booking_id'], properties: { booking_id: { type: 'string' } } }),
-            responses: { 200: successResponse('OTP sent', { type: 'object' }) },
-        },
-    },
-    '/staff/customer-cases/walk-in/otp/verify': {
-        post: {
-            tags: ['Customer Cases'], summary: 'Verify walk-in reporter OTP',
-            requestBody: requestBody({ type: 'object', required: ['challenge_id', 'otp'], properties: { challenge_id: { type: 'string' }, otp: { type: 'string', example: '123456' } } }),
-            responses: { 200: successResponse('OTP verified', { type: 'object' }) },
-        },
-    },
     '/staff/customer-cases/walk-in': {
         post: {
-            tags: ['Customer Cases'], summary: 'Create a case for a verified walk-in customer',
-            requestBody: requestBody({ ...createCaseRequest, required: ['booking_id', 'verification_token', 'category', 'description'], properties: { booking_id: { type: 'string' }, verification_token: { type: 'string' }, ...createCaseRequest.properties } }),
+            tags: ['Customer Cases'], summary: 'Staff records a handover issue for a walk-in customer',
+            description: 'No OTP or signature is required. The staff actor and timestamp are audited.',
+            requestBody: requestBody({ ...createCaseRequest, required: ['booking_id', 'category', 'description'], properties: { booking_id: { type: 'string' }, ...createCaseRequest.properties } }),
             responses: { 201: successResponse('Walk-in case created', caseDetailSchema) },
         },
     },
@@ -360,8 +399,8 @@ const paths = {
     },
     '/staff/customer-cases/{id}/walk-in-resolution-response': {
         patch: {
-            tags: ['Customer Cases'], summary: 'Record a verified walk-in customer resolution response', parameters: [caseIdParameter],
-            requestBody: requestBody({ type: 'object', required: ['resolution_id', 'verification_token', 'accepted'], properties: { resolution_id: { type: 'string' }, verification_token: { type: 'string' }, accepted: { type: 'boolean' }, note: { type: 'string' } } }),
+            tags: ['Customer Cases'], summary: 'Staff records a walk-in customer resolution response', parameters: [caseIdParameter],
+            requestBody: requestBody({ type: 'object', required: ['resolution_id', 'accepted'], properties: { resolution_id: { type: 'string' }, accepted: { type: 'boolean' }, note: { type: 'string' } } }),
             responses: { 200: successResponse('Walk-in response recorded', caseDetailSchema) },
         },
     },
@@ -445,13 +484,13 @@ const paths = {
     '/admin/customer-cases/{id}/resolutions': {
         post: {
             tags: ['Customer Cases'], summary: 'Propose a versioned resolution (admin)', parameters: [caseIdParameter],
-            requestBody: requestBody({ type: 'object', required: ['summary', 'actions'], properties: { summary: { type: 'string' }, actions: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'object' } } } }),
+            requestBody: requestBody({ type: 'object', required: ['summary', 'actions'], properties: { summary: { type: 'string' }, actions: { type: 'array', minItems: 1, maxItems: 3, items: resolutionActionSchema } } }),
             responses: { 201: successResponse('Resolution proposed', caseDetailSchema) },
         },
     },
     '/admin/customer-cases/{id}/resolutions/{resolutionId}/apply': {
         post: {
-            tags: ['Customer Cases'], summary: 'Apply accepted refund, voucher and rework actions (admin)',
+            tags: ['Customer Cases'], summary: 'Apply accepted refund, voucher, rework or charge-waiver actions (admin)',
             parameters: [caseIdParameter, { name: 'resolutionId', in: 'path', required: true, schema: { type: 'string' } }],
             responses: { 200: successResponse('Resolution applied', caseDetailSchema) },
         },

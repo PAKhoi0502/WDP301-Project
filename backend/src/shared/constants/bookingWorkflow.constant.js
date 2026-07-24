@@ -35,6 +35,8 @@ const BOOKING_WORKFLOW_ACTIONS = Object.freeze({
     INSPECTION_AFTER_WASH_CREATE: 'inspection.after_wash.create',
     BOOKING_PAYMENT_COLLECT_CASH: 'booking.payment.collect_cash',
     HANDOVER_PREPARE: 'handover.prepare',
+    HANDOVER_WALK_IN_ACCEPT: 'handover.walk_in.accept',
+    HANDOVER_WALK_IN_REPORT_ISSUE: 'handover.walk_in.report_issue',
     HANDOVER_RELEASE: 'handover.release',
 });
 

@@ -151,7 +151,7 @@ describe('customer case service', () => {
             expect.any(Object)
         );
         expect(handover.customer_response).toBe('ISSUE_REPORTED');
-        expect(handover.state).toBe('READY_FOR_CUSTOMER');
+        expect(handover.state).toBe('ON_HOLD');
         expect(notificationService.notifyCaseSubmitted).toHaveBeenCalled();
         expect(result.case.case_code).toBe(customerCase.case_code);
     });

@@ -15,6 +15,10 @@ jest.mock('../bookings/bookingPayment.service', () => ({
     confirmBookingPaid: jest.fn(),
 }));
 
+jest.mock('../booking-handovers/bookingHandoverPayment.policy', () => ({
+    assertPaymentCollectionAllowed: jest.fn(),
+}));
+
 jest.mock('../staff-profiles/staffProfile.model', () => ({
     findOne: jest.fn(),
 }));
@@ -41,6 +45,7 @@ jest.mock('./payos.service', () => ({
 
 const Booking = require('../bookings/booking.model');
 const bookingPaymentService = require('../bookings/bookingPayment.service');
+const bookingHandoverPaymentPolicy = require('../booking-handovers/bookingHandoverPayment.policy');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const PaymentTransaction = require('./paymentTransaction.model');
 const payosService = require('./payos.service');
@@ -95,6 +100,8 @@ describe('payment service createPayosPayment', () => {
         payosService.cancelPaymentLink.mockReset();
         payosService.verifyWebhook = jest.fn();
         bookingPaymentService.confirmBookingPaid.mockReset();
+        bookingHandoverPaymentPolicy.assertPaymentCollectionAllowed.mockReset();
+        bookingHandoverPaymentPolicy.assertPaymentCollectionAllowed.mockResolvedValue({});
         mockSession.withTransaction.mockImplementation(async (callback) => callback());
         mockSession.endSession.mockResolvedValue(undefined);
         jest.spyOn(Date, 'now').mockReturnValue(1780826400000);

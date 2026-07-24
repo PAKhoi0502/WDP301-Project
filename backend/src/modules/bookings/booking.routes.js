@@ -455,6 +455,13 @@ adminRouter.get(
 );
 
 adminRouter.patch(
+    '/:id/handover/walk-in-accept',
+    requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE),
+    validate(handoverOperationSchema),
+    bookingHandoverController.acceptWalkInHandover
+);
+
+adminRouter.patch(
     '/:id/handover/release',
     requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE),
     validate(handoverOperationSchema),

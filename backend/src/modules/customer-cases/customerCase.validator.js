@@ -2,6 +2,7 @@ const { z } = require('zod');
 
 const {
     CUSTOMER_CASE_CATEGORY_VALUES,
+    CUSTOMER_CASE_CATEGORIES,
     CUSTOMER_CASE_STATUS_VALUES,
     CUSTOMER_CASE_LIABILITY_STATUS_VALUES,
     CUSTOMER_CASE_LIABILITY_STATUSES,
@@ -21,6 +22,34 @@ const optionalText = (max) => z.preprocess(
     z.string().trim().max(max).optional()
 );
 
+const validateIssueEvidence = (data, context) => {
+    if (
+        data.category === CUSTOMER_CASE_CATEGORIES.VEHICLE_DAMAGE
+        && !data.damage_location
+    ) {
+        context.addIssue({
+            code: 'custom',
+            path: ['damage_location'],
+            message: 'Damage location is required for vehicle damage',
+        });
+    }
+
+    if (
+        [
+            CUSTOMER_CASE_CATEGORIES.VEHICLE_DAMAGE,
+            CUSTOMER_CASE_CATEGORIES.MISSING_PROPERTY,
+            CUSTOMER_CASE_CATEGORIES.SAFETY_CONCERN,
+        ].includes(data.category)
+        && data.upload_ids.length === 0
+    ) {
+        context.addIssue({
+            code: 'custom',
+            path: ['upload_ids'],
+            message: 'Image evidence is required for this issue category',
+        });
+    }
+};
+
 const bookingParamSchema = z.object({
     params: z.object({ id: objectIdField }).strict(),
 });
@@ -35,14 +64,17 @@ const createCustomerCaseSchema = z.object({
     body: z.object({
         category: z.enum(CUSTOMER_CASE_CATEGORY_VALUES),
         description: z.string().trim().min(10).max(2000),
+        damage_location: optionalText(500),
         desired_resolution: optionalText(1000),
         discovered_at: z.string().datetime({ offset: true }).optional(),
         vehicle_received: z.boolean().default(false),
         upload_ids: uniqueObjectIds,
-    }).strict().refine(
-        (data) => !data.discovered_at || new Date(data.discovered_at).getTime() <= Date.now() + 5 * 60 * 1000,
-        { path: ['discovered_at'], message: 'Discovered time cannot be in the future' }
-    ),
+    }).strict()
+        .refine(
+            (data) => !data.discovered_at || new Date(data.discovered_at).getTime() <= Date.now() + 5 * 60 * 1000,
+            { path: ['discovered_at'], message: 'Discovered time cannot be in the future' }
+        )
+        .superRefine(validateIssueEvidence),
 });
 
 const idParamSchema = z.object({
@@ -153,7 +185,6 @@ const recordWalkInResolutionResponseSchema = z.object({
     params: z.object({ id: objectIdField }).strict(),
     body: z.object({
         resolution_id: objectIdField,
-        verification_token: z.string().min(32).max(200),
         accepted: z.boolean(),
         note: optionalText(2000),
     }).strict(),
@@ -189,31 +220,22 @@ const slaDashboardSchema = z.object({
     }).strict(),
 });
 
-const walkInOtpRequestSchema = z.object({
-    body: z.object({ booking_id: objectIdField }).strict(),
-});
-
-const walkInOtpVerifySchema = z.object({
-    body: z.object({
-        challenge_id: objectIdField,
-        otp: z.string().regex(/^\d{6}$/),
-    }).strict(),
-});
-
 const createWalkInCustomerCaseSchema = z.object({
     body: z.object({
         booking_id: objectIdField,
-        verification_token: z.string().min(32).max(200),
         category: z.enum(CUSTOMER_CASE_CATEGORY_VALUES),
         description: z.string().trim().min(10).max(2000),
+        damage_location: optionalText(500),
         desired_resolution: optionalText(1000),
         discovered_at: z.string().datetime({ offset: true }).optional(),
         vehicle_received: z.boolean().default(false),
         upload_ids: uniqueObjectIds,
-    }).strict().refine(
-        (data) => !data.discovered_at || new Date(data.discovered_at).getTime() <= Date.now() + 5 * 60 * 1000,
-        { path: ['discovered_at'], message: 'Discovered time cannot be in the future' }
-    ),
+    }).strict()
+        .refine(
+            (data) => !data.discovered_at || new Date(data.discovered_at).getTime() <= Date.now() + 5 * 60 * 1000,
+            { path: ['discovered_at'], message: 'Discovered time cannot be in the future' }
+        )
+        .superRefine(validateIssueEvidence),
 });
 
 module.exports = {
@@ -237,7 +259,5 @@ module.exports = {
     updateRefundSchema,
     reopenCustomerCaseSchema,
     slaDashboardSchema,
-    walkInOtpRequestSchema,
-    walkInOtpVerifySchema,
     createWalkInCustomerCaseSchema,
 };

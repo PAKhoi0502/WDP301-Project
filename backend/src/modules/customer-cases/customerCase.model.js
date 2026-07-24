@@ -29,7 +29,6 @@ const customerCaseSchema = new mongoose.Schema(
         reporter_name: { type: String, trim: true, maxlength: 120, default: null },
         reporter_phone: { type: String, trim: true, maxlength: 20, default: null },
         created_by_staff_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-        phone_verified_at: { type: Date, default: null },
         category: { type: String, enum: CUSTOMER_CASE_CATEGORY_VALUES, required: true },
         priority: { type: String, enum: CUSTOMER_CASE_PRIORITY_VALUES, required: true },
         priority_rank: { type: Number, min: 1, max: 3, required: true },
@@ -51,6 +50,12 @@ const customerCaseSchema = new mongoose.Schema(
             trim: true,
             minlength: [10, 'Description must be at least 10 characters'],
             maxlength: [2000, 'Description must not exceed 2000 characters'],
+        },
+        damage_location: {
+            type: String,
+            trim: true,
+            maxlength: [500, 'Damage location must not exceed 500 characters'],
+            default: null,
         },
         desired_resolution: {
             type: String,
@@ -137,8 +142,8 @@ customerCaseSchema.pre('validate', function (next) {
         this.invalidate('customer_id', 'Registered customer case requires a customer');
     }
 
-    if (this.is_walk_in_case && (!this.reporter_phone || !this.created_by_staff_id || !this.phone_verified_at)) {
-        this.invalidate('reporter_phone', 'Walk-in case requires verified reporter and staff information');
+    if (this.is_walk_in_case && (!this.reporter_phone || !this.created_by_staff_id)) {
+        this.invalidate('reporter_phone', 'Walk-in case requires reporter and staff information');
     }
 
     if (

@@ -63,6 +63,12 @@ schema.pre('validate', function (next) {
         if (actionTypes.includes(CUSTOMER_CASE_RESOLUTION_ACTION_TYPES.NO_COMPENSATION) && this.actions.length > 1) {
             this.invalidate('actions', 'No-compensation cannot be combined with another action');
         }
+        if (
+            actionTypes.includes(CUSTOMER_CASE_RESOLUTION_ACTION_TYPES.REFUND)
+            && actionTypes.includes(CUSTOMER_CASE_RESOLUTION_ACTION_TYPES.WAIVE_CHARGE)
+        ) {
+            this.invalidate('actions', 'Refund and charge waiver cannot be combined');
+        }
         this.actions.forEach((action) => {
             if (action.action_type === CUSTOMER_CASE_RESOLUTION_ACTION_TYPES.REFUND
                 && (!action.amount || !action.refund_method)) {
@@ -75,6 +81,12 @@ schema.pre('validate', function (next) {
             if (action.action_type === CUSTOMER_CASE_RESOLUTION_ACTION_TYPES.REWORK
                 && !action.rework_start_time) {
                 this.invalidate('actions', 'Rework action requires a start time');
+            }
+            if (
+                action.action_type === CUSTOMER_CASE_RESOLUTION_ACTION_TYPES.WAIVE_CHARGE
+                && !action.amount
+            ) {
+                this.invalidate('actions', 'Charge waiver action requires an amount');
             }
         });
     }

@@ -141,4 +141,33 @@ describe('booking module', () => {
             },
         });
     });
+
+    it('accepts a fully waived booking with complete audit information', async () => {
+        const booking = createBooking({
+            final_price: 0,
+            payment_status: 'WAIVED',
+            pre_waiver_final_price: 250000,
+            waived_amount: 250000,
+            payment_waived_at: new Date(),
+            payment_waived_by_id: new mongoose.Types.ObjectId(),
+            payment_waiver_case_id: new mongoose.Types.ObjectId(),
+            payment_waiver_reason: 'Garage accepts responsibility for vehicle damage.',
+        });
+
+        await expect(booking.validate()).resolves.toBeUndefined();
+    });
+
+    it('rejects waiver amounts that do not reconcile with final price', async () => {
+        const booking = createBooking({
+            final_price: 150000,
+            pre_waiver_final_price: 250000,
+            waived_amount: 50000,
+        });
+
+        await expect(booking.validate()).rejects.toMatchObject({
+            errors: {
+                waived_amount: expect.anything(),
+            },
+        });
+    });
 });

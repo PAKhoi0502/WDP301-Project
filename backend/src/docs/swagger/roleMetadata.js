@@ -237,6 +237,7 @@ addStaffOperationPolicies({
     operations: [
         'GET /admin/bookings/{id}/handover',
         'PATCH /admin/bookings/{id}/handover/ready',
+        'PATCH /admin/bookings/{id}/handover/walk-in-accept',
         'PATCH /admin/bookings/{id}/handover/release',
     ],
     capabilities: [STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE],
@@ -278,8 +279,6 @@ addStaffOperationPolicies({
     ],
     [
         [
-            'POST /staff/customer-cases/walk-in/otp/request',
-            'POST /staff/customer-cases/walk-in/otp/verify',
             'POST /staff/customer-cases/walk-in',
         ],
         STAFF_CAPABILITIES.CUSTOMER_CASE_CREATE_WALK_IN,
@@ -667,6 +666,7 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'GET /admin/bookings/{id}/handover',
             'PATCH /admin/bookings/{id}/handover/ready',
+            'PATCH /admin/bookings/{id}/handover/walk-in-accept',
             'PATCH /admin/bookings/{id}/handover/release',
         ],
     },
@@ -682,8 +682,6 @@ const ROUTE_GROUPS = Object.freeze([
             'POST /admin/customer-cases/{id}/evidence',
             'POST /admin/customer-cases/{id}/messages',
             'GET /staff/customer-cases/sla-dashboard',
-            'POST /staff/customer-cases/walk-in/otp/request',
-            'POST /staff/customer-cases/walk-in/otp/verify',
             'POST /staff/customer-cases/walk-in',
             'PATCH /staff/customer-cases/{id}/technical-assessment/assign',
             'GET /staff/customer-cases/{id}/technical-assessment',

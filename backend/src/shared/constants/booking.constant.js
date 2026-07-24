@@ -86,6 +86,7 @@ const BOOKING_PAYMENT_STATUS = Object.freeze({
     UNPAID: 'UNPAID',
     PENDING: 'PENDING',
     PAID: 'PAID',
+    WAIVED: 'WAIVED',
 });
 
 const BOOKING_PAYMENT_STATUS_VALUES = Object.freeze(Object.values(BOOKING_PAYMENT_STATUS));

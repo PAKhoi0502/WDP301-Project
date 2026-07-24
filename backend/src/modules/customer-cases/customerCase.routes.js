@@ -19,8 +19,6 @@ const {
     updateRefundSchema,
     reopenCustomerCaseSchema,
     slaDashboardSchema,
-    walkInOtpRequestSchema,
-    walkInOtpVerifySchema,
     createWalkInCustomerCaseSchema,
 } = require('./customerCase.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
@@ -50,18 +48,6 @@ staffRouter.get(
     requireStaffCapabilities(STAFF_CAPABILITIES.CUSTOMER_CASE_SLA_READ_GARAGE),
     validate(slaDashboardSchema),
     customerCaseController.getSlaDashboard
-);
-staffRouter.post(
-    '/walk-in/otp/request',
-    requireStaffCapabilities(STAFF_CAPABILITIES.CUSTOMER_CASE_CREATE_WALK_IN),
-    validate(walkInOtpRequestSchema),
-    customerCaseController.requestWalkInOtp
-);
-staffRouter.post(
-    '/walk-in/otp/verify',
-    requireStaffCapabilities(STAFF_CAPABILITIES.CUSTOMER_CASE_CREATE_WALK_IN),
-    validate(walkInOtpVerifySchema),
-    customerCaseController.verifyWalkInOtp
 );
 staffRouter.post(
     '/walk-in',

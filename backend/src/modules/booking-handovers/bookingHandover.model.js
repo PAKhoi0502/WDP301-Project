@@ -5,6 +5,7 @@ const {
     BOOKING_HANDOVER_STATE_VALUES,
     BOOKING_HANDOVER_RESPONSES,
     BOOKING_HANDOVER_RESPONSE_VALUES,
+    BOOKING_HANDOVER_RESPONSE_SOURCE_VALUES,
 } = require('../../shared/constants/customerCase.constant');
 
 const bookingHandoverSchema = new mongoose.Schema(
@@ -51,6 +52,22 @@ const bookingHandoverSchema = new mongoose.Schema(
             default: null,
         },
         customer_responded_at: { type: Date, default: null },
+        customer_response_source: {
+            type: String,
+            enum: [...BOOKING_HANDOVER_RESPONSE_SOURCE_VALUES, null],
+            default: null,
+        },
+        customer_response_recorded_by_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+        customer_response_note: {
+            type: String,
+            trim: true,
+            maxlength: [1000, 'Customer response note must not exceed 1000 characters'],
+            default: null,
+        },
         accepted_at: { type: Date, default: null },
         released_at: { type: Date, default: null },
         released_by_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

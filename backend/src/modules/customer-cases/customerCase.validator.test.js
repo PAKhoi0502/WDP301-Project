@@ -16,12 +16,29 @@ describe('customer case validators', () => {
             body: {
                 category: 'VEHICLE_DAMAGE',
                 description: 'A new scratch is visible on the left door.',
+                damage_location: 'Left door',
                 vehicle_received: false,
                 upload_ids: [id],
             },
         });
 
         expect(result.success).toBe(true);
+    });
+
+    it('requires location and image evidence for reported vehicle damage', () => {
+        const result = createWalkInCustomerCaseSchema.safeParse({
+            body: {
+                booking_id: id,
+                category: 'VEHICLE_DAMAGE',
+                description: 'A new scratch is visible on the left door.',
+            },
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error.issues).toEqual(expect.arrayContaining([
+            expect.objectContaining({ path: ['body', 'damage_location'] }),
+            expect.objectContaining({ path: ['body', 'upload_ids'] }),
+        ]));
     });
 
     it('rejects duplicate evidence ids', () => {
@@ -74,7 +91,7 @@ describe('customer case validators', () => {
         expect(result.success).toBe(true);
     });
 
-    it('requires the booking-bound verification token for walk-in case creation', () => {
+    it('allows staff to create a walk-in case without OTP or signature', () => {
         const result = createWalkInCustomerCaseSchema.safeParse({
             body: {
                 booking_id: id,
@@ -83,7 +100,7 @@ describe('customer case validators', () => {
             },
         });
 
-        expect(result.success).toBe(false);
+        expect(result.success).toBe(true);
     });
 
     it('requires only processable refund statuses at the API boundary', () => {

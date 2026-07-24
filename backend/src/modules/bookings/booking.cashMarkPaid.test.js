@@ -24,9 +24,14 @@ jest.mock('../payments/payment.service', () => ({
     resolvePendingPayosPaymentForCash: jest.fn(),
 }));
 
+jest.mock('../booking-handovers/bookingHandoverPayment.policy', () => ({
+    assertPaymentCollectionAllowed: jest.fn(),
+}));
+
 const Booking = require('./booking.model');
 const bookingPaymentService = require('./bookingPayment.service');
 const paymentService = require('../payments/payment.service');
+const bookingHandoverPaymentPolicy = require('../booking-handovers/bookingHandoverPayment.policy');
 const bookingService = require('./booking.service');
 
 describe('booking cash mark paid flow', () => {
@@ -62,6 +67,7 @@ describe('booking cash mark paid flow', () => {
             resolution: 'NONE',
             payment: null,
         });
+        bookingHandoverPaymentPolicy.assertPaymentCollectionAllowed.mockResolvedValue({});
         bookingPaymentService.confirmBookingPaid.mockResolvedValue({
             wash_history: { id: 'wash-history-id' },
             loyalty: { id: 'loyalty-id' },
@@ -76,6 +82,7 @@ describe('booking cash mark paid flow', () => {
         const booking = createBooking();
 
         Booking.findById
+            .mockReturnValueOnce(createFindByIdSessionQuery(booking))
             .mockReturnValueOnce(createFindByIdSessionQuery(booking))
             .mockReturnValueOnce(createFindByIdSessionQuery({
                 ...booking,
@@ -123,6 +130,7 @@ describe('booking cash mark paid flow', () => {
         });
         Booking.findById
             .mockReturnValueOnce(createFindByIdSessionQuery(booking))
+            .mockReturnValueOnce(createFindByIdSessionQuery(booking))
             .mockReturnValueOnce(createFindByIdSessionQuery({
                 ...booking,
                 payment_method: 'CASH',
@@ -145,10 +153,11 @@ describe('booking cash mark paid flow', () => {
         });
 
         paymentService.resolvePendingPayosPaymentForCash.mockRejectedValueOnce(error);
+        Booking.findById.mockReturnValueOnce(createFindByIdSessionQuery(createBooking()));
 
         await expect(bookingService.markPaid(adminUser, bookingId)).rejects.toBe(error);
 
-        expect(Booking.findById).not.toHaveBeenCalled();
+        expect(Booking.findById).toHaveBeenCalledTimes(1);
         expect(bookingPaymentService.confirmBookingPaid).not.toHaveBeenCalled();
     });
 });

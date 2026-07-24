@@ -63,6 +63,11 @@ const isIncidentHold = (booking) => (
     || Boolean(booking.active_incident_id)
 );
 
+const isFinanciallySettled = (booking) => [
+    BOOKING_PAYMENT_STATUS.PAID,
+    BOOKING_PAYMENT_STATUS.WAIVED,
+].includes(booking.payment_status);
+
 const areAllServiceItemsDone = (booking) => (
     (booking.booking_items || []).length > 0
     && (booking.booking_items || []).every((item) => (
@@ -177,7 +182,7 @@ const getWorkflowPhase = ({ booking, inspections, handover, serviceSteps }) => {
         return BOOKING_WORKFLOW_PHASES.WAITING_CUSTOMER_ACCEPTANCE;
     }
 
-    if (booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
+    if (!isFinanciallySettled(booking)) {
         return BOOKING_WORKFLOW_PHASES.WAITING_PAYMENT;
     }
 
@@ -227,7 +232,7 @@ const getWorkflowBlockers = ({ booking, inspections, handover, serviceSteps }) =
 
     if (
         handover?.customer_response === BOOKING_HANDOVER_RESPONSES.ACCEPTED
-        && booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID
+        && !isFinanciallySettled(booking)
     ) {
         blockers.push(BOOKING_WORKFLOW_BLOCKERS.PAYMENT_REQUIRED);
     }
@@ -337,6 +342,8 @@ const getAvailableActions = ({ booking, inspections, handover, serviceSteps, sta
         hasCapability(staffContext, STAFF_CAPABILITIES.BOOKING_PAYMENT_COLLECT_CASH)
         && booking.status === BOOKING_STATUS.COMPLETED
         && booking.payment_status === BOOKING_PAYMENT_STATUS.UNPAID
+        && handover?.state === BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER
+        && handover.customer_response === BOOKING_HANDOVER_RESPONSES.ACCEPTED
     ) {
         actions.push(BOOKING_WORKFLOW_ACTIONS.BOOKING_PAYMENT_COLLECT_CASH);
     }
@@ -352,10 +359,28 @@ const getAvailableActions = ({ booking, inspections, handover, serviceSteps, sta
     }
 
     if (
+        booking.is_walk_in
+        && handover?.state === BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER
+        && handover.customer_response === BOOKING_HANDOVER_RESPONSES.PENDING
+        && hasCapability(staffContext, STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE)
+    ) {
+        actions.push(BOOKING_WORKFLOW_ACTIONS.HANDOVER_WALK_IN_ACCEPT);
+    }
+
+    if (
+        booking.is_walk_in
+        && handover?.state === BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER
+        && handover.customer_response !== BOOKING_HANDOVER_RESPONSES.ISSUE_REPORTED
+        && hasCapability(staffContext, STAFF_CAPABILITIES.CUSTOMER_CASE_CREATE_WALK_IN)
+    ) {
+        actions.push(BOOKING_WORKFLOW_ACTIONS.HANDOVER_WALK_IN_REPORT_ISSUE);
+    }
+
+    if (
         hasCapability(staffContext, STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE)
         && handover?.state === BOOKING_HANDOVER_STATES.READY_FOR_CUSTOMER
         && handover.customer_response === BOOKING_HANDOVER_RESPONSES.ACCEPTED
-        && booking.payment_status === BOOKING_PAYMENT_STATUS.PAID
+        && isFinanciallySettled(booking)
     ) {
         actions.push(BOOKING_WORKFLOW_ACTIONS.HANDOVER_RELEASE);
     }

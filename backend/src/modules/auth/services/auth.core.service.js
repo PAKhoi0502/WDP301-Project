@@ -320,9 +320,9 @@ const register = async (payload) => {
 const requestPhoneVerification = async (payload) => {
     if (payload.purpose === PHONE_VERIFICATION_PURPOSES.WALK_IN_CUSTOMER_CASE) {
         throw new AppError(
-            'Use the customer case walk-in OTP endpoint for this purpose',
+            'Walk-in customer cases no longer require phone verification',
             400,
-            'WALK_IN_CASE_DEDICATED_OTP_ENDPOINT_REQUIRED'
+            'WALK_IN_CASE_OTP_NOT_REQUIRED'
         );
     }
 
