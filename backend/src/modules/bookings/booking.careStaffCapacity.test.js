@@ -34,6 +34,20 @@ jest.mock('../service-packages/servicePackage.model', () => ({
     findById: jest.fn(),
     find: jest.fn(),
 }));
+jest.mock('../service-price-rules/servicePriceRule.service', () => ({
+    applyResolvedRule: jest.fn(async ({ servicePackage }) => ({
+        ...(servicePackage.toObject ? servicePackage.toObject() : servicePackage),
+        pricing_rule: null,
+        pricing_source: 'LEGACY_BASE_PRICE',
+    })),
+    toVehicleSnapshot: jest.fn((vehicle = {}) => ({
+        vehicle_type: vehicle.vehicle_type,
+        engine_type: vehicle.engine_type || null,
+        motorbike_cc_group: vehicle.motorbike_cc_group || null,
+        car_body_type: vehicle.car_body_type || null,
+        seat_count: vehicle.seat_count || null,
+    })),
+}));
 jest.mock('../vehicle-inspections/vehicleInspection.model', () => ({
     exists: jest.fn(),
     findOne: jest.fn(),
@@ -88,6 +102,7 @@ const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
 const loyaltyService = require('../loyalty/loyalty.service');
 const bookingViolationService = require('../booking-violations/bookingViolation.service');
+const servicePriceRuleService = require('../service-price-rules/servicePriceRule.service');
 const bookingService = require('./booking.service');
 
 const createFindSortLeanQuery = (result = []) => ({
@@ -221,6 +236,18 @@ describe('booking care staff capacity', () => {
 
     beforeEach(() => {
         jest.resetAllMocks();
+        servicePriceRuleService.applyResolvedRule.mockImplementation(async ({ servicePackage }) => ({
+            ...(servicePackage.toObject ? servicePackage.toObject() : servicePackage),
+            pricing_rule: null,
+            pricing_source: 'LEGACY_BASE_PRICE',
+        }));
+        servicePriceRuleService.toVehicleSnapshot.mockImplementation((vehicle = {}) => ({
+            vehicle_type: vehicle.vehicle_type,
+            engine_type: vehicle.engine_type || null,
+            motorbike_cc_group: vehicle.motorbike_cc_group || null,
+            car_body_type: vehicle.car_body_type || null,
+            seat_count: vehicle.seat_count || null,
+        }));
         Garage.findById.mockResolvedValue(garage);
         ServicePackage.findById.mockResolvedValue(careStaffServicePackage);
         ServicePackage.find.mockImplementation((filter) => {

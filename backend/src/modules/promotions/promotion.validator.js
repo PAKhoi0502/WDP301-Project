@@ -106,6 +106,7 @@ const validatePromotionSchema = z.object({
         .object({
             promotion_code: codeField,
             service_package_id: objectIdField,
+            quote_id: objectIdField.optional(),
         })
         .strict(),
 });

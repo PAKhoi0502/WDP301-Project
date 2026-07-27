@@ -8,6 +8,8 @@ const LoyaltyRedeemRule = require('./loyaltyRedeemRule.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const Promotion = require('../promotions/promotion.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
+const servicePriceRuleService = require('../service-price-rules/servicePriceRule.service');
+const customerVoucherService = require('../customer-vouchers/customerVoucher.service');
 const LoyaltyMapper = require('./loyalty.mapper');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
@@ -840,6 +842,15 @@ const downgradeInactiveCustomerTiers = async ({ limit = 50 } = {}) => {
 
 const calculateRedeemPreview = async (customerId, payload = {}) => {
     const servicePackage = await getActiveServicePackageById(payload.service_package_id);
+    const quote = payload.quote_id
+        ? await servicePriceRuleService.getActiveQuote({
+            quoteId: payload.quote_id,
+            customerId,
+        })
+        : null;
+    if (quote && quote.service_package_id.toString() !== servicePackage._id.toString()) {
+        throw new AppError('Price quote does not match service package', 409, 'PRICE_QUOTE_CHANGED');
+    }
     const loyalty = await getOrCreateCustomerLoyalty(customerId);
     const redeemRule = await getActiveRedeemRule();
     const promotion = await getPromotionForRedeemPreview({
@@ -847,7 +858,7 @@ const calculateRedeemPreview = async (customerId, payload = {}) => {
         promotion_code: payload.promotion_code,
     });
 
-    const originalPrice = servicePackage.base_price;
+    const originalPrice = quote?.subtotal ?? servicePackage.base_price;
     let promotionDiscountAmount = 0;
 
     if (promotion) {
@@ -863,14 +874,22 @@ const calculateRedeemPreview = async (customerId, payload = {}) => {
     }
 
     const priceAfterPromotion = Math.max(originalPrice - promotionDiscountAmount, 0);
+    const voucherResult = await customerVoucherService.previewVoucherForBooking({
+        customerId,
+        code: payload.voucher_code,
+        servicePackage,
+        orderAmount: priceAfterPromotion,
+    });
+    const voucherDiscountAmount = voucherResult?.discount_amount || 0;
+    const priceAfterVoucher = Math.max(priceAfterPromotion - voucherDiscountAmount, 0);
     const usedPoints = payload.used_points || 0;
     const pointsDiscountAmount = calculatePointsDiscountAmount({
         usedPoints,
         availablePoints: loyalty.available_points,
-        priceAfterPromotion,
+        priceAfterPromotion: priceAfterVoucher,
         redeemRule,
     });
-    const discountAmount = promotionDiscountAmount + pointsDiscountAmount;
+    const discountAmount = promotionDiscountAmount + voucherDiscountAmount + pointsDiscountAmount;
     const finalPrice = Math.max(originalPrice - discountAmount, 0);
 
     return LoyaltyMapper.toRedeemPreviewDto({

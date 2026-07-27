@@ -9,6 +9,7 @@ const Garage = require('../garages/garage.model');
 const WashBay = require('../wash-bays/washBay.model');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
+const servicePriceRuleService = require('../service-price-rules/servicePriceRule.service');
 const BookingIncident = require('../booking-incidents/bookingIncident.model');
 const VehicleInspection = require('../vehicle-inspections/vehicleInspection.model');
 const BookingHandover = require('../booking-handovers/bookingHandover.model');
@@ -314,7 +315,7 @@ const getBookingRuleForCustomer = async (customerId) => {
 const populateBookingQuery = (query) => {
     return query
         .populate('customer_id', 'full_name email phone role is_active')
-        .populate('vehicle_id', 'raw_license_plate normalized_license_plate vehicle_type engine_type brand model color is_active')
+        .populate('vehicle_id', 'raw_license_plate normalized_license_plate vehicle_type engine_type motorbike_cc_group car_body_type seat_count brand model color is_active')
         .populate('garage_id', 'name garage_code address city opening_time closing_time slot_interval_minutes late_grace_minutes is_active')
         .populate('wash_bay_id', 'name bay_code vehicle_type status is_active')
         .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes countdown_duration_seconds transition_mode wash_bay_duration_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes is_active')
@@ -559,9 +560,22 @@ const assertNoDuplicateBookingItems = (serviceItems = []) => {
     }
 };
 
-const resolveBookingServiceItems = async ({ servicePackage, addOnServiceIds = [], vehicleType }) => {
+const resolveBookingServiceItems = async ({
+    servicePackage,
+    addOnServiceIds = [],
+    vehicleType,
+    vehicleSnapshot = { vehicle_type: vehicleType },
+    garageId = null,
+    effectiveAt = new Date(),
+}) => {
     const serviceItems = [];
     let includedServices = [];
+    const resolvedPrimaryServicePackage = await servicePriceRuleService.applyResolvedRule({
+        servicePackage,
+        garageId,
+        vehicleSnapshot,
+        effectiveAt,
+    });
 
     if (servicePackage.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
         includedServices = await loadActiveServicePackagesByIds(servicePackage.included_service_ids || []);
@@ -569,6 +583,15 @@ const resolveBookingServiceItems = async ({ servicePackage, addOnServiceIds = []
         if (includedServices.length === 0) {
             throw new AppError('Combo service package must include at least one service', 400, 'COMBO_INCLUDED_SERVICES_REQUIRED');
         }
+
+        includedServices = await Promise.all(includedServices.map((item) => (
+            servicePriceRuleService.applyResolvedRule({
+                servicePackage: item,
+                garageId,
+                vehicleSnapshot,
+                effectiveAt,
+            })
+        )));
 
         includedServices.forEach((item) => {
             serviceItems.push({
@@ -580,14 +603,22 @@ const resolveBookingServiceItems = async ({ servicePackage, addOnServiceIds = []
         });
     } else {
         serviceItems.push({
-            servicePackage,
+            servicePackage: resolvedPrimaryServicePackage,
             source: 'PRIMARY',
             parentComboId: null,
-            priceSnapshot: servicePackage.base_price,
+            priceSnapshot: resolvedPrimaryServicePackage.base_price,
         });
     }
 
-    const addOnServices = await loadActiveServicePackagesByIds(addOnServiceIds || []);
+    let addOnServices = await loadActiveServicePackagesByIds(addOnServiceIds || []);
+    addOnServices = await Promise.all(addOnServices.map((item) => (
+        servicePriceRuleService.applyResolvedRule({
+            servicePackage: item,
+            garageId,
+            vehicleSnapshot,
+            effectiveAt,
+        })
+    )));
 
     addOnServices.forEach((item) => {
         if (item.service_type === SERVICE_PACKAGE_TYPES.COMBO) {
@@ -606,6 +637,7 @@ const resolveBookingServiceItems = async ({ servicePackage, addOnServiceIds = []
     assertNoDuplicateBookingItems(serviceItems);
 
     return {
+        servicePackage: resolvedPrimaryServicePackage,
         serviceItems,
         addOnServices,
     };
@@ -646,6 +678,9 @@ const buildBookingItems = ({ startTime, serviceItems, garage }) => {
             parent_combo_id: item.parentComboId || null,
             name_snapshot: servicePackage.name,
             price_snapshot: item.priceSnapshot,
+            service_price_rule_id: servicePackage.pricing_rule?.id || null,
+            price_rule_version: servicePackage.pricing_rule?.version || null,
+            pricing_source: servicePackage.pricing_source || 'LEGACY_BASE_PRICE',
             duration_minutes: servicePackage.duration_minutes,
             countdown_duration_seconds: servicePackage.countdown_duration_seconds
                 || servicePackage.duration_minutes * 60,
@@ -1064,6 +1099,9 @@ const buildBookingBasePayload = ({
     return {
         garage_id: garage._id,
         service_package_id: servicePackage._id,
+        service_price_rule_id: servicePackage.pricing_rule?.id || null,
+        price_rule_version: servicePackage.pricing_rule?.version || null,
+        pricing_source: servicePackage.pricing_source || 'LEGACY_BASE_PRICE',
         vehicle_type: vehicleType,
         booking_date: startOfBookingDate(startTime),
         start_time: startTime,
@@ -2579,10 +2617,18 @@ const getAvailableSlots = async ({
     }
 
     const vehicleType = vehicle?.vehicle_type || servicePackage.vehicle_type;
-    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+    const {
+        servicePackage: pricedServicePackage,
+        serviceItems,
+        addOnServices,
+    } = await resolveBookingServiceItems({
         servicePackage,
         addOnServiceIds: add_on_service_ids,
         vehicleType,
+        vehicleSnapshot: vehicle
+            ? servicePriceRuleService.toVehicleSnapshot(vehicle)
+            : { vehicle_type: vehicleType },
+        garageId: garage._id,
     });
     const requestedDates = Array.from(
         { length: requestedDayCount },
@@ -2642,7 +2688,7 @@ const getAvailableSlots = async ({
         while (currentStartTime < closingDate && currentStartTime <= bookingWindowEnd) {
             const bookingPlan = buildBookingPlan({
                 startTime: currentStartTime,
-                servicePackage,
+                servicePackage: pricedServicePackage,
                 serviceItems,
                 addOnServices,
                 garage,
@@ -2908,6 +2954,9 @@ const buildCustomerBookingCreatePayload = ({ basePayload, customerId, vehicle })
         guest_email: null,
         license_plate: vehicle.raw_license_plate,
         normalized_license_plate: vehicle.normalized_license_plate,
+        quoted_vehicle_snapshot: servicePriceRuleService.toVehicleSnapshot(vehicle),
+        verified_vehicle_snapshot: null,
+        pricing_review_status: 'REVIEW_REQUIRED',
         created_by_staff_id: null,
     };
 };
@@ -3034,23 +3083,49 @@ const createCustomerBooking = async (customerId, payload = {}) => {
 
     assertServicePackageMatchesVehicleType(servicePackage, vehicle.vehicle_type);
 
-    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+    const vehicleSnapshot = servicePriceRuleService.toVehicleSnapshot(vehicle);
+    const {
+        servicePackage: pricedServicePackage,
+        serviceItems,
+        addOnServices,
+    } = await resolveBookingServiceItems({
         servicePackage,
         addOnServiceIds: createPayload.add_on_service_ids || [],
         vehicleType: vehicle.vehicle_type,
+        vehicleSnapshot,
+        garageId: garage._id,
+        effectiveAt: startTime,
     });
     const bookingPlan = buildBookingPlan({
         startTime,
-        servicePackage,
+        servicePackage: pricedServicePackage,
         serviceItems,
         addOnServices,
         garage,
     });
+    const quote = createPayload.quote_id
+        ? await servicePriceRuleService.getActiveQuote({
+            quoteId: createPayload.quote_id,
+            customerId,
+        })
+        : null;
+
+    if (quote) {
+        servicePriceRuleService.assertQuoteMatchesPlan({
+            quote,
+            garageId: garage._id,
+            vehicleId: vehicle._id,
+            vehicleSnapshot,
+            servicePackage: pricedServicePackage,
+            addOnServices,
+            bookingPlan,
+        });
+    }
 
     const promotionResult = await promotionService.validatePromotionForBooking({
         promotion_code: createPayload.promotion_code,
         customer_id: customerId,
-        servicePackage,
+        servicePackage: pricedServicePackage,
         vehicleType: vehicle.vehicle_type,
         orderAmount: bookingPlan.originalPrice,
         bookingStartTime: startTime,
@@ -3063,7 +3138,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
     const voucherResult = await customerVoucherService.previewVoucherForBooking({
         customerId,
         code: createPayload.voucher_code,
-        servicePackage,
+        servicePackage: pricedServicePackage,
         orderAmount: priceAfterPromotion,
     });
     const priceAfterVoucher = Math.max(
@@ -3077,7 +3152,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
     });
     const basePayload = buildBookingBasePayload({
         garage,
-        servicePackage,
+        servicePackage: pricedServicePackage,
         bookingPlan,
         startTime,
         vehicleType: vehicle.vehicle_type,
@@ -3105,7 +3180,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
 
     let booking;
 
-    if (basePayload.used_points > 0 || voucherResult) {
+    if (basePayload.used_points > 0 || voucherResult || quote) {
         const session = await mongoose.startSession();
 
         try {
@@ -3113,7 +3188,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
                 const transactionalVoucherResult = await customerVoucherService.previewVoucherForBooking({
                     customerId,
                     code: createPayload.voucher_code,
-                    servicePackage,
+                    servicePackage: pricedServicePackage,
                     orderAmount: priceAfterPromotion,
                     session,
                 });
@@ -3129,7 +3204,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
                 });
                 const transactionalBasePayload = buildBookingBasePayload({
                     garage,
-                    servicePackage,
+                    servicePackage: pricedServicePackage,
                     bookingPlan,
                     startTime,
                     vehicleType: vehicle.vehicle_type,
@@ -3165,6 +3240,14 @@ const createCustomerBooking = async (customerId, payload = {}) => {
                         priceAfterPromotion: transactionalPriceAfterVoucher,
                         actorId: customerId,
                         expectedPointsDiscountAmount: transactionalBasePayload.points_discount_amount,
+                        session,
+                    });
+                }
+
+                if (quote) {
+                    await servicePriceRuleService.consumeQuote({
+                        quoteId: quote._id,
+                        bookingId: booking._id,
                         session,
                     });
                 }
@@ -3212,31 +3295,62 @@ const createWalkInBooking = async (user, payload = {}) => {
         createPayload.vehicle_type
     );
 
-    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+    const vehicleSnapshot = {
+        vehicle_type: createPayload.vehicle_type,
+        engine_type: createPayload.engine_type || null,
+        motorbike_cc_group: createPayload.motorbike_cc_group || null,
+        car_body_type: createPayload.car_body_type || null,
+        seat_count: createPayload.seat_count || null,
+    };
+    const {
+        servicePackage: pricedServicePackage,
+        serviceItems,
+        addOnServices,
+    } = await resolveBookingServiceItems({
         servicePackage,
         addOnServiceIds: createPayload.add_on_service_ids || [],
         vehicleType: createPayload.vehicle_type,
+        vehicleSnapshot,
+        garageId: garage._id,
+        effectiveAt: startTime,
     });
     const bookingPlan = buildBookingPlan({
         startTime,
-        servicePackage,
+        servicePackage: pricedServicePackage,
         serviceItems,
         addOnServices,
         garage,
     });
+    const quote = createPayload.quote_id
+        ? await servicePriceRuleService.getActiveQuote({
+            quoteId: createPayload.quote_id,
+            staffUserId: user._id,
+        })
+        : null;
+
+    if (quote) {
+        servicePriceRuleService.assertQuoteMatchesPlan({
+            quote,
+            garageId: garage._id,
+            vehicleSnapshot,
+            servicePackage: pricedServicePackage,
+            addOnServices,
+            bookingPlan,
+        });
+    }
 
     const promotionResult = await promotionService.validatePromotionForBooking({
         promotion_code: createPayload.promotion_code,
         customer_id: null,
         guest_phone_normalized: normalizedGuestPhone,
-        servicePackage,
+        servicePackage: pricedServicePackage,
         vehicleType: createPayload.vehicle_type,
         orderAmount: bookingPlan.originalPrice,
         bookingStartTime: startTime,
     });
     const basePayload = buildBookingBasePayload({
         garage,
-        servicePackage,
+        servicePackage: pricedServicePackage,
         bookingPlan,
         startTime,
         vehicleType: createPayload.vehicle_type,
@@ -3320,6 +3434,9 @@ const createWalkInBooking = async (user, payload = {}) => {
         guest_email: normalizeEmail(createPayload.guest_email),
         license_plate: normalizeRequiredText(createPayload.license_plate),
         normalized_license_plate: normalizedLicensePlate,
+        quoted_vehicle_snapshot: vehicleSnapshot,
+        verified_vehicle_snapshot: serveNow ? vehicleSnapshot : null,
+        pricing_review_status: serveNow ? 'NOT_REQUIRED' : 'REVIEW_REQUIRED',
         created_by_staff_id: user._id,
         ...(serveNow ? {
             status: BOOKING_STATUS.CHECKED_IN,
@@ -3332,7 +3449,7 @@ const createWalkInBooking = async (user, payload = {}) => {
 
     let booking;
 
-    if (promotionResult?.promotion) {
+    if (promotionResult?.promotion || quote) {
         const session = await mongoose.startSession();
 
         try {
@@ -3341,7 +3458,7 @@ const createWalkInBooking = async (user, payload = {}) => {
                     promotion_code: createPayload.promotion_code,
                     customer_id: null,
                     guest_phone_normalized: normalizedGuestPhone,
-                    servicePackage,
+                    servicePackage: pricedServicePackage,
                     vehicleType: createPayload.vehicle_type,
                     orderAmount: bookingPlan.originalPrice,
                     bookingStartTime: startTime,
@@ -3349,7 +3466,7 @@ const createWalkInBooking = async (user, payload = {}) => {
                 });
                 const transactionalBasePayload = buildBookingBasePayload({
                     garage,
-                    servicePackage,
+                    servicePackage: pricedServicePackage,
                     bookingPlan,
                     startTime,
                     vehicleType: createPayload.vehicle_type,
@@ -3363,13 +3480,23 @@ const createWalkInBooking = async (user, payload = {}) => {
 
                 [booking] = documents;
 
-                await promotionUsageService.reservePromotionUsageForBooking({
-                    booking,
-                    promotion: transactionalPromotionResult.promotion,
-                    guestPhoneNormalized: normalizedGuestPhone,
-                    actorId: user._id,
-                    session,
-                });
+                if (transactionalPromotionResult?.promotion) {
+                    await promotionUsageService.reservePromotionUsageForBooking({
+                        booking,
+                        promotion: transactionalPromotionResult.promotion,
+                        guestPhoneNormalized: normalizedGuestPhone,
+                        actorId: user._id,
+                        session,
+                    });
+                }
+
+                if (quote) {
+                    await servicePriceRuleService.consumeQuote({
+                        quoteId: quote._id,
+                        bookingId: booking._id,
+                        session,
+                    });
+                }
             });
         } finally {
             await session.endSession();
@@ -4640,6 +4767,302 @@ const createIncidentCompensationVoucher = async (
 };
 
 
+const normalizePricingSnapshot = (snapshot = {}) => servicePriceRuleService.toVehicleSnapshot(snapshot);
+
+const pricingSnapshotsEqual = (left, right) => {
+    return JSON.stringify(normalizePricingSnapshot(left)) === JSON.stringify(normalizePricingSnapshot(right));
+};
+
+const applyPriceReviewPlan = ({ booking, pricedServicePackage, bookingPlan, vehicleSnapshot }) => {
+    const discountAmount = booking.discount_amount || 0;
+    const adjustedFinalPrice = Math.max(bookingPlan.originalPrice - discountAmount, 0);
+
+    booking.service_price_rule_id = pricedServicePackage.pricing_rule?.id || null;
+    booking.price_rule_version = pricedServicePackage.pricing_rule?.version || null;
+    booking.pricing_source = pricedServicePackage.pricing_source || 'LEGACY_BASE_PRICE';
+    booking.booking_items = bookingPlan.bookingItems;
+    booking.add_on_service_ids = bookingPlan.addOnServiceIds;
+    booking.end_time = addMinutes(booking.start_time, bookingPlan.totalDurationMinutes);
+    booking.wash_bay_start_time = bookingPlan.wash_bay_start_time;
+    booking.wash_bay_end_time = bookingPlan.wash_bay_end_time;
+    booking.wash_bay_work_end_time = bookingPlan.wash_bay_work_end_time;
+    booking.wash_bay_reserved_until = bookingPlan.wash_bay_reserved_until;
+    booking.requires_care_staff = bookingPlan.requires_care_staff;
+    booking.care_staff_type = bookingPlan.care_staff_type;
+    booking.care_staff_required_count = bookingPlan.care_staff_required_count;
+    booking.care_staff_start_time = bookingPlan.care_staff_start_time;
+    booking.care_staff_end_time = bookingPlan.care_staff_end_time;
+    booking.care_staff_work_end_time = bookingPlan.care_staff_work_end_time;
+    booking.care_staff_reserved_until = bookingPlan.care_staff_reserved_until;
+    booking.original_price = bookingPlan.originalPrice;
+    booking.final_price = adjustedFinalPrice;
+    booking.verified_vehicle_snapshot = vehicleSnapshot;
+    booking.pricing_review_status = 'CUSTOMER_ACCEPTED';
+
+    return adjustedFinalPrice;
+};
+
+const buildVehiclePriceReview = async (user, bookingId, vehicleSnapshot) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+    assertBookingHasNoActiveIncident(booking);
+    assertBookingStatusIn(
+        booking,
+        [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED],
+        'BOOKING_VEHICLE_PRICE_REVIEW_NOT_ALLOWED'
+    );
+
+    if (vehicleSnapshot.vehicle_type !== booking.vehicle_type) {
+        throw new AppError(
+            'Actual vehicle type must match the service package vehicle type',
+            409,
+            'BOOKING_VEHICLE_TYPE_CHANGED'
+        );
+    }
+
+    const previousVehicleSnapshot = normalizePricingSnapshot(
+        booking.verified_vehicle_snapshot
+        || booking.quoted_vehicle_snapshot
+        || { vehicle_type: booking.vehicle_type }
+    );
+    const normalizedVehicleSnapshot = normalizePricingSnapshot(vehicleSnapshot);
+    const classificationChanged = !pricingSnapshotsEqual(
+        previousVehicleSnapshot,
+        normalizedVehicleSnapshot
+    );
+
+    if (!classificationChanged) {
+        return {
+            booking,
+            previousVehicleSnapshot,
+            vehicleSnapshot: normalizedVehicleSnapshot,
+            classificationChanged: false,
+            priceChanged: false,
+            durationChanged: false,
+            requiresCustomerConfirmation: false,
+            previousOriginalPrice: booking.original_price,
+            adjustedOriginalPrice: booking.original_price,
+            previousFinalPrice: booking.final_price,
+            adjustedFinalPrice: booking.final_price,
+            previousDurationMinutes: Math.round(
+                (new Date(booking.end_time).getTime() - new Date(booking.start_time).getTime()) / 60000
+            ),
+            adjustedDurationMinutes: Math.round(
+                (new Date(booking.end_time).getTime() - new Date(booking.start_time).getTime()) / 60000
+            ),
+            pricedServicePackage: null,
+            bookingPlan: null,
+        };
+    }
+
+    const [garage, servicePackage] = await Promise.all([
+        getActiveGarage(booking.garage_id),
+        getActiveServicePackage(booking.service_package_id),
+    ]);
+    assertServicePackageMatchesVehicleType(servicePackage, normalizedVehicleSnapshot.vehicle_type);
+    const {
+        servicePackage: pricedServicePackage,
+        serviceItems,
+        addOnServices,
+    } = await resolveBookingServiceItems({
+        servicePackage,
+        addOnServiceIds: booking.add_on_service_ids || [],
+        vehicleType: normalizedVehicleSnapshot.vehicle_type,
+        vehicleSnapshot: normalizedVehicleSnapshot,
+        garageId: garage._id,
+        effectiveAt: booking.start_time,
+    });
+    const bookingPlan = buildBookingPlan({
+        startTime: booking.start_time,
+        servicePackage: pricedServicePackage,
+        serviceItems,
+        addOnServices,
+        garage,
+    });
+    const adjustedEndTime = addMinutes(booking.start_time, bookingPlan.totalDurationMinutes);
+
+    assertBookingInsideGarageBusinessHours(
+        garage,
+        booking.start_time,
+        getLatestPlannedEnd({
+            end_time: adjustedEndTime,
+            wash_bay_reserved_until: bookingPlan.wash_bay_reserved_until,
+            care_staff_reserved_until: bookingPlan.care_staff_reserved_until,
+        })
+    );
+    await assertVehicleNoOverlap({
+        ...(booking.vehicle_id
+            ? { vehicleId: booking.vehicle_id }
+            : {
+                normalizedLicensePlate: booking.normalized_license_plate,
+                vehicleType: booking.vehicle_type,
+            }),
+        startTime: booking.start_time,
+        endTime: adjustedEndTime,
+        excludedBookingId: booking._id,
+    });
+    await assertGarageCapacityAvailable({
+        garageId: garage._id,
+        vehicleType: normalizedVehicleSnapshot.vehicle_type,
+        bookingItems: bookingPlan.bookingItems,
+        excludedBookingId: booking._id,
+    });
+
+    const adjustedFinalPrice = Math.max(
+        bookingPlan.originalPrice - (booking.discount_amount || 0),
+        0
+    );
+    const previousDurationMinutes = Math.round(
+        (new Date(booking.end_time).getTime() - new Date(booking.start_time).getTime()) / 60000
+    );
+
+    return {
+        booking,
+        previousVehicleSnapshot,
+        vehicleSnapshot: normalizedVehicleSnapshot,
+        classificationChanged: true,
+        priceChanged: booking.original_price !== bookingPlan.originalPrice,
+        durationChanged: previousDurationMinutes !== bookingPlan.totalDurationMinutes,
+        requiresCustomerConfirmation: true,
+        previousOriginalPrice: booking.original_price,
+        adjustedOriginalPrice: bookingPlan.originalPrice,
+        previousFinalPrice: booking.final_price,
+        adjustedFinalPrice,
+        previousDurationMinutes,
+        adjustedDurationMinutes: bookingPlan.totalDurationMinutes,
+        pricedServicePackage,
+        bookingPlan,
+    };
+};
+
+const toVehiclePriceReviewDto = (review) => ({
+    booking_id: review.booking._id.toString(),
+    previous_vehicle_snapshot: review.previousVehicleSnapshot,
+    verified_vehicle_snapshot: review.vehicleSnapshot,
+    classification_changed: review.classificationChanged,
+    price_changed: review.priceChanged,
+    duration_changed: review.durationChanged,
+    requires_customer_confirmation: review.requiresCustomerConfirmation,
+    capacity_available: true,
+    previous_original_price: review.previousOriginalPrice,
+    adjusted_original_price: review.adjustedOriginalPrice,
+    previous_final_price: review.previousFinalPrice,
+    adjusted_final_price: review.adjustedFinalPrice,
+    price_difference: review.adjustedFinalPrice - review.previousFinalPrice,
+    previous_duration_minutes: review.previousDurationMinutes,
+    adjusted_duration_minutes: review.adjustedDurationMinutes,
+});
+
+const reviewBookingVehiclePrice = async (user, bookingId, vehicleSnapshot, auditContext = {}) => {
+    const review = await buildVehiclePriceReview(user, bookingId, vehicleSnapshot);
+    const beforeStatus = review.booking.pricing_review_status;
+
+    review.booking.verified_vehicle_snapshot = review.requiresCustomerConfirmation
+        ? null
+        : review.vehicleSnapshot;
+    review.booking.pricing_review_status = review.requiresCustomerConfirmation
+        ? 'REVIEW_REQUIRED'
+        : 'NOT_REQUIRED';
+    await review.booking.save();
+
+    await auditLogService.recordAuditEvent({
+        actorId: user._id,
+        action: AUDIT_ACTIONS.BOOKING_VEHICLE_PRICE_REVIEWED,
+        resourceType: AUDIT_RESOURCE_TYPES.BOOKING,
+        resourceId: review.booking._id,
+        before: {
+            pricing_review_status: beforeStatus,
+        },
+        after: {
+            pricing_review_status: review.booking.pricing_review_status,
+            ...toVehiclePriceReviewDto(review),
+        },
+        ip: auditContext.ip,
+        userAgent: auditContext.userAgent,
+    });
+
+    return toVehiclePriceReviewDto(review);
+};
+
+const confirmBookingVehiclePrice = async (
+    user,
+    bookingId,
+    { vehicle_snapshot: vehicleSnapshot, customer_confirmed: customerConfirmed, reason },
+    auditContext = {}
+) => {
+    if (!customerConfirmed) {
+        throw new AppError(
+            'Customer confirmation is required for vehicle price adjustment',
+            400,
+            'BOOKING_PRICE_CUSTOMER_CONFIRMATION_REQUIRED'
+        );
+    }
+
+    const review = await buildVehiclePriceReview(user, bookingId, vehicleSnapshot);
+    if (!review.requiresCustomerConfirmation) {
+        throw new AppError(
+            'Vehicle classification does not require a price adjustment',
+            409,
+            'BOOKING_PRICE_REVIEW_NOT_REQUIRED'
+        );
+    }
+    if (
+        review.priceChanged
+        && review.booking.payment_status !== BOOKING_PAYMENT_STATUS.UNPAID
+    ) {
+        throw new AppError(
+            'Paid booking price cannot be adjusted at check-in',
+            409,
+            'BOOKING_PAID_PRICE_ADJUSTMENT_NOT_ALLOWED'
+        );
+    }
+
+    const before = review.booking.toObject();
+    applyPriceReviewPlan({
+        booking: review.booking,
+        pricedServicePackage: review.pricedServicePackage,
+        bookingPlan: review.bookingPlan,
+        vehicleSnapshot: review.vehicleSnapshot,
+    });
+    review.booking.price_adjustments.push({
+        previous_vehicle_snapshot: review.previousVehicleSnapshot,
+        verified_vehicle_snapshot: review.vehicleSnapshot,
+        previous_original_price: review.previousOriginalPrice,
+        adjusted_original_price: review.adjustedOriginalPrice,
+        previous_final_price: review.previousFinalPrice,
+        adjusted_final_price: review.adjustedFinalPrice,
+        customer_confirmed: true,
+        reason: normalizeRequiredText(reason),
+        adjusted_by: user._id,
+        adjusted_at: new Date(),
+    });
+    await review.booking.save();
+
+    await auditLogService.recordAuditEvent({
+        actorId: user._id,
+        action: AUDIT_ACTIONS.BOOKING_VEHICLE_PRICE_CONFIRMED,
+        resourceType: AUDIT_RESOURCE_TYPES.BOOKING,
+        resourceId: review.booking._id,
+        before,
+        after: {
+            pricing_review_status: review.booking.pricing_review_status,
+            verified_vehicle_snapshot: review.booking.verified_vehicle_snapshot,
+            original_price: review.booking.original_price,
+            final_price: review.booking.final_price,
+            end_time: review.booking.end_time,
+        },
+        ip: auditContext.ip,
+        userAgent: auditContext.userAgent,
+    });
+
+    const populatedBooking = await getBookingDocumentById(review.booking._id);
+    return {
+        review: toVehiclePriceReviewDto(review),
+        booking: BookingMapper.toBookingDto(populatedBooking),
+    };
+};
+
 const checkInBooking = async (
     user,
     bookingId,
@@ -4652,6 +5075,14 @@ const checkInBooking = async (
     await assertStaffCanAccessBooking(user, booking);
     assertBookingHasNoActiveIncident(booking);
     assertBookingStatusIn(booking, [BOOKING_STATUS.PENDING, BOOKING_STATUS.CONFIRMED], 'BOOKING_CHECK_IN_NOT_ALLOWED');
+
+    if (booking.pricing_review_status === 'REVIEW_REQUIRED') {
+        throw new AppError(
+            'Vehicle classification must be reviewed before check-in',
+            409,
+            'BOOKING_VEHICLE_PRICE_REVIEW_REQUIRED'
+        );
+    }
 
     if (booking.arrived_at) {
         throw new AppError(
@@ -5118,15 +5549,31 @@ const createReworkBooking = async ({
     ]);
     const startTime = parseDateTime(rawStartTime, 'rework_start_time');
     assertServicePackageMatchesVehicleType(servicePackage, originalBooking.vehicle_type);
-    const { serviceItems, addOnServices } = await resolveBookingServiceItems({
+    const reworkVehicleSnapshot = originalBooking.verified_vehicle_snapshot
+        || originalBooking.quoted_vehicle_snapshot
+        || { vehicle_type: originalBooking.vehicle_type };
+    const {
+        servicePackage: pricedServicePackage,
+        serviceItems,
+        addOnServices,
+    } = await resolveBookingServiceItems({
         servicePackage,
         addOnServiceIds: [],
         vehicleType: originalBooking.vehicle_type,
+        vehicleSnapshot: reworkVehicleSnapshot,
+        garageId: garage._id,
+        effectiveAt: startTime,
     });
-    const bookingPlan = buildBookingPlan({ startTime, servicePackage, serviceItems, addOnServices, garage });
+    const bookingPlan = buildBookingPlan({
+        startTime,
+        servicePackage: pricedServicePackage,
+        serviceItems,
+        addOnServices,
+        garage,
+    });
     const basePayload = buildBookingBasePayload({
         garage,
-        servicePackage,
+        servicePackage: pricedServicePackage,
         bookingPlan,
         startTime,
         vehicleType: originalBooking.vehicle_type,
@@ -6358,6 +6805,8 @@ module.exports = {
     recordBookingIncidentCustomerDecision,
     resolveMyBookingIncident,
     createIncidentCompensationVoucher,
+    reviewBookingVehiclePrice,
+    confirmBookingVehiclePrice,
     checkInBooking,
     getLateArrivalOptions,
     resolveLateArrival,

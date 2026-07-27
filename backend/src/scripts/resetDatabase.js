@@ -21,6 +21,8 @@ const PaymentTransaction = require('../modules/payments/paymentTransaction.model
 const PromotionUsage = require('../modules/promotion-usages/promotionUsage.model');
 const Promotion = require('../modules/promotions/promotion.model');
 const ServicePackage = require('../modules/service-packages/servicePackage.model');
+const ServicePriceRule = require('../modules/service-price-rules/servicePriceRule.model');
+const PriceQuote = require('../modules/service-price-rules/priceQuote.model');
 const StaffProfile = require('../modules/staff-profiles/staffProfile.model');
 const Survey = require('../modules/surveys/survey.model');
 const SurveyResponse = require('../modules/surveys/surveyResponse.model');
@@ -67,6 +69,7 @@ const resetTargets = Object.freeze([
     { group: 'Runtime booking', model: CustomerBookingViolation, seed: '-', note: 'Customer booking violation score summary' },
     { group: 'Runtime booking', model: BookingWaitlist, seed: '-', note: 'Customer waitlist entries and offers' },
     { group: 'Runtime booking', model: Booking, seed: '-', note: 'Customer and walk-in bookings' },
+    { group: 'Runtime pricing', model: PriceQuote, seed: '-', note: 'Short-lived server price quotes' },
     { group: 'Auth transient', model: RefreshToken, seed: '-', note: 'Login sessions' },
     { group: 'Auth transient', model: PhoneVerification, seed: '-', note: 'Phone OTP challenges and rate limits' },
     { group: 'Auth transient', model: PasswordResetToken, seed: '-', note: 'Password reset tokens' },
@@ -77,6 +80,7 @@ const resetTargets = Object.freeze([
     { group: 'Seed data', model: Vehicle, seed: 'seedVehicle.js', note: 'Depends on customer users' },
     { group: 'Seed data', model: Promotion, seed: '-', note: 'Admin-created promotions' },
     { group: 'Seed data', model: ServicePackage, seed: 'seedServicePackage.js', note: 'Global service catalog' },
+    { group: 'Seed data', model: ServicePriceRule, seed: 'seedServicePriceRule.js', note: 'Global and garage vehicle-classification prices' },
     { group: 'Seed data', model: LoyaltyRedeemRule, seed: 'seedLoyaltyRedeemRule.js', note: 'Loyalty redeem config' },
     { group: 'Seed data', model: TierRule, seed: 'seedTierRule.js', note: 'Loyalty tier config' },
     { group: 'Seed data', model: Garage, seed: 'seedGarage.js', note: 'Demo garages' },

@@ -107,8 +107,13 @@ const redeemPreviewSchema = z.object({
     body: z
         .object({
             service_package_id: objectIdField,
+            quote_id: optionalObjectIdField,
             promotion_id: optionalObjectIdField,
             promotion_code: promotionCodeField,
+            voucher_code: z.preprocess(
+                emptyToUndefined,
+                z.string().trim().min(6).max(40).optional()
+            ),
             used_points: z.coerce.number().int().min(0),
         })
         .strict(),

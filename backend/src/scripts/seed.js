@@ -7,6 +7,7 @@ const seedStaffProfile = require('./seedStaffProfile');
 const seedWashBay = require('./seedWashBay');
 const seedVehicle = require('./seedVehicle');
 const seedServicePackage = require('./seedServicePackage');
+const seedServicePriceRule = require('./seedServicePriceRule');
 const seedTierRule = require('./seedTierRule');
 const seedLoyaltyRedeemRule = require('./seedLoyaltyRedeemRule');
 const { resetDatabase } = require('./resetDatabase');
@@ -35,6 +36,7 @@ const run = async () => {
         await seedWashBay();
         await seedVehicle();
         await seedServicePackage();
+        await seedServicePriceRule();
         await seedTierRule();
         await seedLoyaltyRedeemRule();
 

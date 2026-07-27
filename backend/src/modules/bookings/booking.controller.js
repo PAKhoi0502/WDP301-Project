@@ -158,6 +158,36 @@ const checkInBooking = asyncHandler(async (req, res) => {
     });
 });
 
+const reviewBookingVehiclePrice = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const result = await bookingService.reviewBookingVehiclePrice(
+        req.user,
+        id,
+        req.validated.body.vehicle_snapshot,
+        getAuditRequestContext(req)
+    );
+
+    return sendSuccess(res, {
+        message: 'Review booking vehicle price successfully',
+        data: result,
+    });
+});
+
+const confirmBookingVehiclePrice = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const result = await bookingService.confirmBookingVehiclePrice(
+        req.user,
+        id,
+        req.validated.body,
+        getAuditRequestContext(req)
+    );
+
+    return sendSuccess(res, {
+        message: 'Confirm booking vehicle price successfully',
+        data: result,
+    });
+});
+
 const getLateArrivalOptions = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
     const { query } = req.validated;
@@ -488,6 +518,8 @@ module.exports = {
     getAllBookings,
     getBookingById,
     createWalkInBooking,
+    reviewBookingVehiclePrice,
+    confirmBookingVehiclePrice,
     checkInBooking,
     getLateArrivalOptions,
     resolveLateArrival,

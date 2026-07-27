@@ -4,6 +4,7 @@ const Promotion = require('./promotion.model');
 const PromotionMapper = require('./promotion.mapper');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
+const servicePriceRuleService = require('../service-price-rules/servicePriceRule.service');
 const loyaltyService = require('../loyalty/loyalty.service');
 const { AppError } = require('../../shared/utils/appError');
 const {
@@ -691,14 +692,26 @@ const validatePromotionForBooking = async ({
     };
 };
 
-const validatePromotion = async (customerId, { promotion_code, service_package_id } = {}) => {
+const validatePromotion = async (
+    customerId,
+    { promotion_code, service_package_id, quote_id } = {}
+) => {
     const servicePackage = await getServicePackageById(service_package_id);
+    const quote = quote_id
+        ? await servicePriceRuleService.getActiveQuote({
+            quoteId: quote_id,
+            customerId,
+        })
+        : null;
+    if (quote && quote.service_package_id.toString() !== servicePackage._id.toString()) {
+        throw new AppError('Price quote does not match service package', 409, 'PRICE_QUOTE_CHANGED');
+    }
     const result = await validatePromotionForBooking({
         promotion_code,
         customer_id: customerId,
         servicePackage,
-        vehicleType: servicePackage.vehicle_type,
-        orderAmount: servicePackage.base_price,
+        vehicleType: quote?.vehicle_snapshot?.vehicle_type || servicePackage.vehicle_type,
+        orderAmount: quote?.subtotal ?? servicePackage.base_price,
         bookingStartTime: new Date(),
     });
 

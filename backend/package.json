@@ -18,6 +18,8 @@
     "migrate:walk-in-promotions": "node src/scripts/migrateWalkInPromotionClaims.js",
     "migrate:service-countdowns": "node src/scripts/migrateServiceCountdowns.js",
     "migrate:service-countdowns:dry-run": "node src/scripts/migrateServiceCountdowns.js --dry-run",
+    "migrate:service-price-rules": "node src/scripts/migrateServicePriceRules.js",
+    "migrate:service-price-rules:dry-run": "node src/scripts/migrateServicePriceRules.js --dry-run",
     "migrate:payment-initiators": "node src/scripts/migratePaymentInitiators.js",
     "migrate:payment-initiators:dry-run": "node src/scripts/migratePaymentInitiators.js --dry-run",
     "migrate:staff-type-change-sources": "node src/scripts/migrateStaffTypeChangeSources.js",

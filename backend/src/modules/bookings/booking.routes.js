@@ -15,6 +15,8 @@ const {
     cancelBookingSchema,
     markNoShowSchema,
     bookingOperationSchema,
+    reviewVehiclePriceSchema,
+    confirmVehiclePriceSchema,
     startServiceSchema,
     getLateArrivalOptionsSchema,
     resolveLateArrivalSchema,
@@ -452,6 +454,20 @@ adminRouter.get(
     requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_HANDOVER_MANAGE_GARAGE),
     validate(handoverBookingParamSchema),
     bookingHandoverController.getStaffHandover
+);
+
+adminRouter.post(
+    '/:id/vehicle-price-review',
+    requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_CHECK_IN),
+    validate(reviewVehiclePriceSchema),
+    bookingController.reviewBookingVehiclePrice
+);
+
+adminRouter.patch(
+    '/:id/vehicle-price-review/confirm',
+    requireStaffCapabilities(STAFF_CAPABILITIES.BOOKING_CHECK_IN),
+    validate(confirmVehiclePriceSchema),
+    bookingController.confirmBookingVehiclePrice
 );
 
 adminRouter.patch(

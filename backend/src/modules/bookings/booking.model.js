@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 
-const { VEHICLE_TYPE_VALUES } = require('../../shared/constants/vehicle.constant');
+const {
+    VEHICLE_TYPE_VALUES,
+    ENGINE_TYPE_VALUES,
+    MOTORBIKE_CC_GROUP_VALUES,
+    CAR_BODY_TYPE_VALUES,
+} = require('../../shared/constants/vehicle.constant');
 const { STAFF_TYPE_VALUES } = require('../../shared/constants/staff.constant');
 const {
     BOOKING_STATUS,
@@ -55,6 +60,38 @@ const bookingItemCareStaffAssignmentSchema = new mongoose.Schema(
     }
 );
 
+const vehiclePricingSnapshotSchema = new mongoose.Schema(
+    {
+        vehicle_type: {
+            type: String,
+            enum: VEHICLE_TYPE_VALUES,
+            required: true,
+        },
+        engine_type: {
+            type: String,
+            enum: ENGINE_TYPE_VALUES,
+            default: null,
+        },
+        motorbike_cc_group: {
+            type: String,
+            enum: MOTORBIKE_CC_GROUP_VALUES,
+            default: null,
+        },
+        car_body_type: {
+            type: String,
+            enum: CAR_BODY_TYPE_VALUES,
+            default: null,
+        },
+        seat_count: {
+            type: Number,
+            min: 1,
+            max: 60,
+            default: null,
+        },
+    },
+    { _id: false }
+);
+
 const bookingItemSchema = new mongoose.Schema(
     {
         item_key: {
@@ -67,6 +104,24 @@ const bookingItemSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'ServicePackage',
             required: [true, 'Service package is required'],
+        },
+
+        service_price_rule_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'ServicePriceRule',
+            default: null,
+        },
+
+        price_rule_version: {
+            type: Number,
+            min: [1, 'Price rule version must be at least 1'],
+            default: null,
+        },
+
+        pricing_source: {
+            type: String,
+            enum: ['SERVICE_PRICE_RULE', 'LEGACY_BASE_PRICE', 'REWORK'],
+            default: 'LEGACY_BASE_PRICE',
         },
 
         source: {
@@ -387,6 +442,75 @@ const bookingSchema = new mongoose.Schema(
             required: [true, 'Vehicle type is required'],
         },
 
+        quoted_vehicle_snapshot: {
+            type: vehiclePricingSnapshotSchema,
+            default: null,
+        },
+
+        verified_vehicle_snapshot: {
+            type: vehiclePricingSnapshotSchema,
+            default: null,
+        },
+
+        pricing_review_status: {
+            type: String,
+            enum: ['NOT_REQUIRED', 'REVIEW_REQUIRED', 'CUSTOMER_ACCEPTED'],
+            default: 'NOT_REQUIRED',
+        },
+
+        price_adjustments: {
+            type: [{
+                previous_vehicle_snapshot: {
+                    type: vehiclePricingSnapshotSchema,
+                    required: true,
+                },
+                verified_vehicle_snapshot: {
+                    type: vehiclePricingSnapshotSchema,
+                    required: true,
+                },
+                previous_original_price: {
+                    type: Number,
+                    required: true,
+                    min: 0,
+                },
+                adjusted_original_price: {
+                    type: Number,
+                    required: true,
+                    min: 0,
+                },
+                previous_final_price: {
+                    type: Number,
+                    required: true,
+                    min: 0,
+                },
+                adjusted_final_price: {
+                    type: Number,
+                    required: true,
+                    min: 0,
+                },
+                customer_confirmed: {
+                    type: Boolean,
+                    required: true,
+                },
+                reason: {
+                    type: String,
+                    trim: true,
+                    maxlength: 500,
+                    required: true,
+                },
+                adjusted_by: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: 'User',
+                    required: true,
+                },
+                adjusted_at: {
+                    type: Date,
+                    required: true,
+                },
+            }],
+            default: [],
+        },
+
         created_by_staff_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
@@ -415,6 +539,24 @@ const bookingSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: 'ServicePackage',
             required: [true, 'Service package is required'],
+        },
+
+        service_price_rule_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'ServicePriceRule',
+            default: null,
+        },
+
+        price_rule_version: {
+            type: Number,
+            min: [1, 'Price rule version must be at least 1'],
+            default: null,
+        },
+
+        pricing_source: {
+            type: String,
+            enum: ['SERVICE_PRICE_RULE', 'LEGACY_BASE_PRICE', 'REWORK'],
+            default: 'LEGACY_BASE_PRICE',
         },
 
         add_on_service_ids: [

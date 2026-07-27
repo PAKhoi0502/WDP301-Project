@@ -3,6 +3,7 @@ const { randomBytes } = require('crypto');
 const CustomerVoucher = require('./customerVoucher.model');
 const CustomerVoucherMapper = require('./customerVoucher.mapper');
 const ServicePackage = require('../service-packages/servicePackage.model');
+const servicePriceRuleService = require('../service-price-rules/servicePriceRule.service');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const notificationService = require('../notifications/notification.service');
 const auditLogService = require('../audit-logs/auditLog.service');
@@ -364,24 +365,37 @@ const getMyVouchers = async (customerId, { status, garage_id, page = 1, limit = 
     };
 };
 
-const validateMyVoucher = async (customerId, { code, service_package_id, order_amount }) => {
+const validateMyVoucher = async (
+    customerId,
+    { code, service_package_id, order_amount, quote_id }
+) => {
     const servicePackage = await ServicePackage.findById(service_package_id);
 
     if (!servicePackage || !servicePackage.is_active) {
         throw new AppError('Service package not found', 404, 'SERVICE_PACKAGE_NOT_FOUND');
     }
 
+    const quote = quote_id
+        ? await servicePriceRuleService.getActiveQuote({
+            quoteId: quote_id,
+            customerId,
+        })
+        : null;
+    if (quote && quote.service_package_id.toString() !== servicePackage._id.toString()) {
+        throw new AppError('Price quote does not match service package', 409, 'PRICE_QUOTE_CHANGED');
+    }
+    const effectiveOrderAmount = quote?.subtotal ?? order_amount;
     const result = await previewVoucherForBooking({
         customerId,
         code,
         servicePackage,
-        orderAmount: order_amount,
+        orderAmount: effectiveOrderAmount,
     });
 
     return {
         voucher: CustomerVoucherMapper.toCustomerVoucherDto(result.voucher),
         discount_amount: result.discount_amount,
-        final_amount: Math.max(order_amount - result.discount_amount, 0),
+        final_amount: Math.max(effectiveOrderAmount - result.discount_amount, 0),
     };
 };
 

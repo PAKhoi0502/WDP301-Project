@@ -74,7 +74,7 @@ const optionalSeatCountField = z.preprocess(
 
         return value;
     },
-    z.coerce.number().int().min(1).max(60).nullable().optional()
+    z.coerce.number().int().min(2).max(16).nullable().optional()
 );
 
 const atLeastOneField = (data) => Object.values(data).some((value) => value !== undefined);
@@ -85,7 +85,7 @@ const vehiclePayloadRule = (data) => {
     }
 
     if (data.vehicle_type === VEHICLE_TYPES.CAR) {
-        return !!data.car_body_type && !data.motorbike_cc_group;
+        return !!data.car_body_type && !!data.seat_count && !data.motorbike_cc_group;
     }
 
     return false;
@@ -97,7 +97,7 @@ const createVehicleShape = {
     engine_type: engineTypeField,
     motorbike_cc_group: motorbikeCcGroupField.optional(),
     car_body_type: carBodyTypeField.optional(),
-    seat_count: z.coerce.number().int().min(1).max(60).optional(),
+    seat_count: z.coerce.number().int().min(2).max(16).optional(),
     brand: optionalStringField,
     model: optionalStringField,
     color: optionalColorField,

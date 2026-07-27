@@ -275,6 +275,18 @@ const assertVehiclePayloadValid = (payload = {}) => {
             );
         }
 
+        if (
+            !Number.isInteger(payload.seat_count)
+            || payload.seat_count < 2
+            || payload.seat_count > 16
+        ) {
+            throw new AppError(
+                'Seat count from 2 to 16 is required for car',
+                400,
+                'CAR_SEAT_COUNT_REQUIRED'
+            );
+        }
+
         if (payload.motorbike_cc_group) {
             throw new AppError(
                 'Motorbike fields are not allowed for car',

@@ -1,6 +1,12 @@
 const { z } = require('zod');
 
-const { VEHICLE_TYPE_VALUES } = require('../../shared/constants/vehicle.constant');
+const {
+    VEHICLE_TYPES,
+    VEHICLE_TYPE_VALUES,
+    ENGINE_TYPE_VALUES,
+    MOTORBIKE_CC_GROUP_VALUES,
+    CAR_BODY_TYPE_VALUES,
+} = require('../../shared/constants/vehicle.constant');
 const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 const {
     BOOKING_STATUS_VALUES,
@@ -83,6 +89,80 @@ const optionalTextField = (max = 100) => z.preprocess(
     emptyToUndefined,
     z.string().trim().max(max).optional()
 );
+
+const nullableClassificationEnum = (values) => z.preprocess(
+    (value) => value === '' || value === undefined ? null : value,
+    z.enum(values).nullable()
+);
+
+const nullableSeatCount = z.preprocess(
+    (value) => value === '' || value === undefined ? null : value,
+    z.coerce.number().int().min(2).max(16).nullable()
+);
+
+const vehiclePricingClassificationShape = {
+    vehicle_type: z.enum(VEHICLE_TYPE_VALUES),
+    engine_type: nullableClassificationEnum(ENGINE_TYPE_VALUES).default(null),
+    motorbike_cc_group: nullableClassificationEnum(MOTORBIKE_CC_GROUP_VALUES).default(null),
+    car_body_type: nullableClassificationEnum(CAR_BODY_TYPE_VALUES).default(null),
+    seat_count: nullableSeatCount.default(null),
+};
+
+const validateVehiclePricingClassification = (data, context) => {
+    if (!data.engine_type) {
+        context.addIssue({
+            code: 'custom',
+            path: ['engine_type'],
+            message: 'Engine type is required for vehicle pricing',
+        });
+    }
+
+    if (data.vehicle_type === VEHICLE_TYPES.CAR) {
+        if (!data.car_body_type) {
+            context.addIssue({
+                code: 'custom',
+                path: ['car_body_type'],
+                message: 'Car body type is required for car pricing',
+            });
+        }
+        if (!data.seat_count) {
+            context.addIssue({
+                code: 'custom',
+                path: ['seat_count'],
+                message: 'Seat count is required for car pricing',
+            });
+        }
+        if (data.motorbike_cc_group) {
+            context.addIssue({
+                code: 'custom',
+                path: ['motorbike_cc_group'],
+                message: 'Motorbike displacement is not allowed for car',
+            });
+        }
+    }
+
+    if (data.vehicle_type === VEHICLE_TYPES.MOTORBIKE) {
+        if (!data.motorbike_cc_group) {
+            context.addIssue({
+                code: 'custom',
+                path: ['motorbike_cc_group'],
+                message: 'Motorbike displacement is required for motorbike pricing',
+            });
+        }
+        if (data.car_body_type || data.seat_count) {
+            context.addIssue({
+                code: 'custom',
+                path: ['vehicle_type'],
+                message: 'Car classification fields are not allowed for motorbike',
+            });
+        }
+    }
+};
+
+const vehiclePricingClassificationSchema = z
+    .object(vehiclePricingClassificationShape)
+    .strict()
+    .superRefine(validateVehiclePricingClassification);
 
 const optionalPromotionCodeField = z.preprocess(
     emptyToUndefined,
@@ -199,6 +279,7 @@ const createCustomerBookingSchema = z.object({
             vehicle_id: objectIdField,
             service_package_id: objectIdField,
             add_on_service_ids: z.array(objectIdField).default([]),
+            quote_id: objectIdField.optional(),
             start_time: isoDateTimeField,
             promotion_code: optionalPromotionCodeField,
             voucher_code: optionalVoucherCodeField,
@@ -224,12 +305,15 @@ const createWalkInBookingSchema = z.object({
                 z.string().trim().email().max(120).optional()
             ),
             license_plate: z.string().trim().min(3).max(30),
-            vehicle_type: z.enum(VEHICLE_TYPE_VALUES),
+            ...vehiclePricingClassificationShape,
+            quote_id: objectIdField.optional(),
             promotion_code: optionalPromotionCodeField,
             note: optionalTextField(1000),
         })
         .strict()
         .superRefine((data, context) => {
+            validateVehiclePricingClassification(data, context);
+
             if (!data.serve_now && !data.start_time) {
                 context.addIssue({
                     code: 'custom',
@@ -288,6 +372,34 @@ const bookingOperationSchema = z.object({
         })
         .strict()
         .default({}),
+});
+
+const reviewVehiclePriceSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object({
+            vehicle_snapshot: vehiclePricingClassificationSchema,
+        })
+        .strict(),
+});
+
+const confirmVehiclePriceSchema = z.object({
+    params: z
+        .object({
+            id: objectIdField,
+        })
+        .strict(),
+    body: z
+        .object({
+            vehicle_snapshot: vehiclePricingClassificationSchema,
+            customer_confirmed: z.literal(true),
+            reason: z.string().trim().min(3).max(500),
+        })
+        .strict(),
 });
 
 const startServiceSchema = z.object({
@@ -472,6 +584,8 @@ module.exports = {
     cancelBookingSchema,
     markNoShowSchema,
     bookingOperationSchema,
+    reviewVehiclePriceSchema,
+    confirmVehiclePriceSchema,
     startServiceSchema,
     getLateArrivalOptionsSchema,
     resolveLateArrivalSchema,

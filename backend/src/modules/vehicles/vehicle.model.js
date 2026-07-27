@@ -59,8 +59,8 @@ const vehicleSchema = new mongoose.Schema(
 
         seat_count: {
             type: Number,
-            min: [1, 'Seat count must be at least 1'],
-            max: [60, 'Seat count must not exceed 60'],
+            min: [2, 'Seat count must be at least 2'],
+            max: [16, 'Seat count must not exceed 16'],
             default: null,
         },
 

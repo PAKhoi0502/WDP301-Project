@@ -138,6 +138,9 @@ describe('walk-in booking validator', () => {
         start_time: '2026-06-11T12:00:00+07:00',
         license_plate: '59A-123.45',
         vehicle_type: 'CAR',
+        engine_type: 'GASOLINE',
+        car_body_type: 'SEDAN',
+        seat_count: 5,
     };
 
     it('allows booking without guest identity fields', () => {

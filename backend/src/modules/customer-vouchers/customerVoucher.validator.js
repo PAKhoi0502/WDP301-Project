@@ -28,8 +28,14 @@ const validateVoucherSchema = z.object({
     body: z.object({
         code: z.string().trim().min(6).max(40),
         service_package_id: objectIdField,
-        order_amount: z.coerce.number().int().min(0),
-    }).strict(),
+        order_amount: z.coerce.number().int().min(0).optional(),
+        quote_id: objectIdField.optional(),
+    }).strict().refine(
+        (data) => data.order_amount !== undefined || data.quote_id,
+        {
+            message: 'order_amount or quote_id is required',
+        }
+    ),
 });
 
 const createCompensationVoucherBodySchema = z.object({
