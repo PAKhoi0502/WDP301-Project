@@ -467,10 +467,18 @@ const createFromHandover = async (user, bookingId, payload = {}, auditContext = 
     return getCaseDetail(createdCase, { customerView: true });
 };
 
-const buildListFilter = ({ status, category, booking_id, case_code, assigned_to_id } = {}) => {
+const buildListFilter = ({
+    status,
+    category,
+    priority,
+    booking_id,
+    case_code,
+    assigned_to_id,
+} = {}) => {
     const filter = {};
     if (status) filter.status = status;
     if (category) filter.category = category;
+    if (priority) filter.priority = priority;
     if (booking_id) filter.booking_id = booking_id;
     if (case_code) filter.case_code = case_code;
     if (assigned_to_id) filter.assigned_to_id = assigned_to_id;

@@ -248,4 +248,23 @@ describe('customer case service', () => {
             caseId
         )).rejects.toMatchObject({ errorCode: 'CUSTOMER_CASE_GARAGE_ACCESS_REQUIRED' });
     });
+
+    it('filters garage customer cases by priority', async () => {
+        CustomerCase.find.mockReturnValue(chainQuery([]));
+        CustomerCase.countDocuments.mockResolvedValue(0);
+
+        await customerCaseService.getStaffCases(
+            { is_admin: false, garage_id: garageId },
+            { priority: 'HIGH', page: 1, limit: 20 }
+        );
+
+        expect(CustomerCase.find).toHaveBeenCalledWith({
+            garage_id: garageId,
+            priority: 'HIGH',
+        });
+        expect(CustomerCase.countDocuments).toHaveBeenCalledWith({
+            garage_id: garageId,
+            priority: 'HIGH',
+        });
+    });
 });
