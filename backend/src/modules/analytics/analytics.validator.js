@@ -37,6 +37,19 @@ const analyticsQuerySchema = z.object({
     query: analyticsQueryField,
 });
 
+const staffAnalyticsQuerySchema = z.object({
+    query: z
+        .object({
+            from: optionalDateField,
+            to: optionalDateField,
+            group_by: z.enum(ANALYTICS_GROUP_BY_VALUES).default('DAY'),
+        })
+        .strict()
+        .refine((data) => !data.from || !data.to || data.from <= data.to, {
+            message: 'from must be before or equal to to',
+        }),
+});
+
 const surveyAnalyticsSchema = z.object({
     params: z
         .object({
@@ -48,5 +61,6 @@ const surveyAnalyticsSchema = z.object({
 
 module.exports = {
     analyticsQuerySchema,
+    staffAnalyticsQuerySchema,
     surveyAnalyticsSchema,
 };

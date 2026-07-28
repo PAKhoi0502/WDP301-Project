@@ -71,6 +71,60 @@ describe('analytics service', () => {
         expect(WashHistory.aggregate).toHaveBeenCalledTimes(1);
     });
 
+    it('scopes staff overview to the assigned garage and redacts revenue', async () => {
+        const garageId = '507f1f77bcf86cd799439011';
+        Booking.aggregate.mockResolvedValue([
+            {
+                total_bookings: 4,
+                completed_bookings: 3,
+                canceled_bookings: 1,
+                no_show_bookings: 0,
+                registered_customer_bookings: 2,
+                walk_in_bookings: 2,
+                unique_registered_customers: ['customer-1'],
+            },
+        ]);
+        WashHistory.aggregate.mockResolvedValue([
+            {
+                total_revenue: 400000,
+                original_revenue: 450000,
+                total_discount: 50000,
+                paid_booking_count: 3,
+            },
+        ]);
+
+        const result = await analyticsService.getStaffOverview(
+            { garage_id: '507f1f77bcf86cd799439099' },
+            { garageId, includeRevenue: false }
+        );
+        const bookingPipeline = Booking.aggregate.mock.calls[0][0];
+        const revenuePipeline = WashHistory.aggregate.mock.calls[0][0];
+
+        expect(bookingPipeline[0].$match.garage_id.toString()).toBe(garageId);
+        expect(revenuePipeline[0].$match.garage_id.toString()).toBe(garageId);
+        expect(result.metrics).toMatchObject({
+            total_bookings: 4,
+            completed_bookings: 3,
+            completion_rate: 75,
+        });
+        expect(result.metrics).not.toHaveProperty('total_revenue');
+        expect(result.metrics).not.toHaveProperty('original_revenue');
+        expect(result.metrics).not.toHaveProperty('total_discount');
+        expect(result.metrics).not.toHaveProperty('average_order_value');
+    });
+
+    it('rejects an unscoped staff overview request', async () => {
+        await expect(
+            analyticsService.getStaffOverview({}, { includeRevenue: false })
+        ).rejects.toMatchObject({
+            statusCode: 403,
+            errorCode: 'STAFF_GARAGE_REQUIRED',
+        });
+
+        expect(Booking.aggregate).not.toHaveBeenCalled();
+        expect(WashHistory.aggregate).not.toHaveBeenCalled();
+    });
+
     it('returns booking trends and duration metrics', async () => {
         Booking.aggregate.mockResolvedValue([
             {

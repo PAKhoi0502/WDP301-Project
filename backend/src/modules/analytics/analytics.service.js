@@ -191,6 +191,43 @@ const getOverview = async (filters = {}) => {
     };
 };
 
+const getStaffOverview = async (
+    filters = {},
+    { garageId, includeRevenue = false } = {}
+) => {
+    if (!garageId) {
+        throw new AppError(
+            'Staff garage assignment is required',
+            403,
+            'STAFF_GARAGE_REQUIRED'
+        );
+    }
+
+    const overview = await getOverview({
+        ...filters,
+        garage_id: garageId,
+    });
+
+    if (includeRevenue) {
+        return overview;
+    }
+
+    const metrics = { ...overview.metrics };
+    [
+        'total_revenue',
+        'original_revenue',
+        'total_discount',
+        'average_order_value',
+    ].forEach((key) => {
+        delete metrics[key];
+    });
+
+    return {
+        ...overview,
+        metrics,
+    };
+};
+
 const getBookingAnalytics = async (filters = {}) => {
     const match = buildMatch(filters, 'start_time');
     const [result = {}] = await Booking.aggregate([
@@ -1334,6 +1371,7 @@ const getPaymentAnalytics = async (filters = {}) => {
 
 module.exports = {
     getOverview,
+    getStaffOverview,
     getBookingAnalytics,
     getRevenueAnalytics,
     getGarageAnalytics,

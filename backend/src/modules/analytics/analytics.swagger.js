@@ -3,6 +3,10 @@ const tags = [
         name: 'Admin Analytics',
         description: 'Admin operational analytics APIs',
     },
+    {
+        name: 'Staff Analytics',
+        description: 'Garage-scoped staff dashboard analytics APIs',
+    },
 ];
 
 const analyticsResponseSchema = {
@@ -40,6 +44,10 @@ const commonResponses = {
     403: { description: 'Forbidden' },
 };
 
+const staffParameters = commonParameters.filter(
+    (parameter) => ['from', 'to', 'group_by'].includes(parameter.name)
+);
+
 const createAnalyticsPath = (summary) => ({
     get: {
         tags: ['Admin Analytics'],
@@ -51,6 +59,15 @@ const createAnalyticsPath = (summary) => ({
 });
 
 const paths = {
+    '/staff/analytics/overview': {
+        get: {
+            tags: ['Staff Analytics'],
+            summary: 'Get garage-scoped staff dashboard overview',
+            security: [{ bearerAuth: [] }],
+            parameters: staffParameters,
+            responses: commonResponses,
+        },
+    },
     '/admin/analytics/overview': createAnalyticsPath('Get analytics overview'),
     '/admin/analytics/bookings': createAnalyticsPath('Get booking analytics'),
     '/admin/analytics/revenue': createAnalyticsPath('Get revenue analytics'),

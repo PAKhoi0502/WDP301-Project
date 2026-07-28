@@ -79,6 +79,8 @@ addStaffOperationPolicies({
     operations: [
         'GET /staff/workspace/bookings',
         'GET /staff/workspace/bookings/{bookingId}/workflow',
+        'GET /staff/workspace/wash-bays',
+        'GET /staff/analytics/overview',
     ],
     capabilities: [STAFF_CAPABILITIES.BOOKING_WORKFLOW_READ_GARAGE],
     resourceScope: 'garage',
@@ -560,6 +562,13 @@ const ROUTE_GROUPS = Object.freeze([
     },
     {
         roles: ['STAFF'],
+        feature: 'Garage wash bay workspace',
+        operations: [
+            'GET /staff/workspace/wash-bays',
+        ],
+    },
+    {
+        roles: ['STAFF'],
         feature: 'Inspection self-claim',
         scope: STAFF_GARAGE_SCOPE,
         operations: [
@@ -930,6 +939,13 @@ const ROUTE_GROUPS = Object.freeze([
             'GET /admin/analytics/wash-bays',
             'GET /admin/analytics/payments',
             'GET /admin/analytics/surveys/{surveyId}',
+        ],
+    },
+    {
+        roles: ['STAFF'],
+        feature: 'Garage dashboard analytics',
+        operations: [
+            'GET /staff/analytics/overview',
         ],
     },
     {

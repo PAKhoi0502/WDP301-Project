@@ -323,6 +323,24 @@ const getWashBaysByGarage = async (garageId, { page = 1, limit = 20, search, veh
     };
 };
 
+const getWashBaysForGarageWorkspace = async (garageId) => {
+    if (!garageId) {
+        throw new AppError(
+            'Staff garage assignment is required',
+            403,
+            'STAFF_GARAGE_REQUIRED'
+        );
+    }
+
+    await getGarageDocument(garageId);
+
+    const washBays = await WashBay.find({ garage_id: garageId })
+        .populate('garage_id', 'name garage_code address city is_active')
+        .sort({ bay_code: 1 });
+
+    return WashBayMapper.toWashBayDtoList(washBays);
+};
+
 const getAvailableWashBaysByGarage = async (garageId, { vehicle_type } = {}) => {
     await getGarageDocument(garageId);
 
@@ -455,6 +473,7 @@ module.exports = {
     assertGarageSupportsVehicleType,
     getAllWashBays,
     getWashBaysByGarage,
+    getWashBaysForGarageWorkspace,
     getAvailableWashBaysByGarage,
     getWashBayById,
     createWashBay,
