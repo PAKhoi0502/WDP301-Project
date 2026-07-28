@@ -47,6 +47,8 @@ router.use('/staff/bookings', bookingRoutes.staffRouter);
 router.use('/staff/tasks', bookingRoutes.staffTaskRouter);
 router.use('/staff/booking-arrivals', bookingArrivalRoutes.staffRouter);
 router.use('/staff/workspace/bookings', staffBookingWorkflowRoutes);
+router.use('/staff/workspace/wash-bays', washBayRoutes.staffRouter);
+router.use('/staff/analytics', analyticsRoutes.staffRouter);
 router.use('/waitlists', bookingWaitlistRoutes.customerRouter);
 router.use('/promotions', promotionRoutes.publicRouter);
 router.use('/promotions', promotionRoutes.customerRouter);

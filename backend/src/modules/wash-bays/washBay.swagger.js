@@ -234,6 +234,25 @@ const schemas = {
             },
         },
     },
+    StaffWashBayListResponse: {
+        type: 'object',
+        properties: {
+            success: {
+                type: 'boolean',
+                example: true,
+            },
+            message: {
+                type: 'string',
+                example: 'Get staff workspace wash bays successfully',
+            },
+            data: {
+                type: 'array',
+                items: {
+                    $ref: '#/components/schemas/WashBay',
+                },
+            },
+        },
+    },
 };
 
 const unauthorizedResponse = {
@@ -365,6 +384,41 @@ const paginationParameters = [
 ];
 
 const paths = {
+    '/staff/workspace/wash-bays': {
+        get: {
+            tags: ['WashBays'],
+            summary: 'Get wash bays in the assigned staff garage',
+            security: [
+                {
+                    bearerAuth: [],
+                },
+            ],
+            responses: {
+                200: {
+                    description: 'Get staff workspace wash bays successfully',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/StaffWashBayListResponse',
+                            },
+                        },
+                    },
+                },
+                401: unauthorizedResponse,
+                403: forbiddenResponse,
+                404: {
+                    description: 'Garage not found',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                $ref: '#/components/schemas/ErrorResponse',
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
     '/admin/wash-bays': {
         get: {
             tags: ['WashBays'],

@@ -100,6 +100,10 @@ const getWashBaysSchema = z.object({
         .strict(),
 });
 
+const getStaffWashBaysSchema = z.object({
+    query: z.object({}).strict(),
+});
+
 const createWashBaySchema = z.object({
     body: z
         .object({
@@ -154,6 +158,7 @@ module.exports = {
     garageIdParamSchema,
     availableWashBaysByGarageSchema,
     getWashBaysSchema,
+    getStaffWashBaysSchema,
     createWashBaySchema,
     updateWashBaySchema,
     updateWashBayStatusSchema,

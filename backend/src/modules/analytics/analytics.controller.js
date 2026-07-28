@@ -1,6 +1,7 @@
 const analyticsService = require('./analytics.service');
 const { asyncHandler } = require('../../shared/utils/asyncHandler');
 const { sendSuccess } = require('../../shared/utils/apiResponse');
+const { STAFF_CAPABILITIES } = require('../../shared/constants/staff.constant');
 
 const createAnalyticsHandler = (serviceMethod, message) => asyncHandler(async (req, res) => {
     const result = await serviceMethod(req.validated.query);
@@ -15,6 +16,24 @@ const getOverview = createAnalyticsHandler(
     analyticsService.getOverview,
     'Get analytics overview successfully'
 );
+
+const getStaffOverview = asyncHandler(async (req, res) => {
+    const includeRevenue = req.staffContext.capabilities.includes(
+        STAFF_CAPABILITIES.PAYMENT_MANAGE_GARAGE
+    );
+    const result = await analyticsService.getStaffOverview(
+        req.validated.query,
+        {
+            garageId: req.staffContext.garage_id,
+            includeRevenue,
+        }
+    );
+
+    return sendSuccess(res, {
+        message: 'Get staff dashboard overview successfully',
+        data: result,
+    });
+});
 
 const getBookingAnalytics = createAnalyticsHandler(
     analyticsService.getBookingAnalytics,
@@ -65,6 +84,7 @@ const getSurveyAnalytics = asyncHandler(async (req, res) => {
 
 module.exports = {
     getOverview,
+    getStaffOverview,
     getBookingAnalytics,
     getRevenueAnalytics,
     getGarageAnalytics,

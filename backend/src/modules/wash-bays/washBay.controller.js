@@ -27,6 +27,17 @@ const getWashBaysByGarage = asyncHandler(async (req, res) => {
     });
 });
 
+const getStaffWorkspaceWashBays = asyncHandler(async (req, res) => {
+    const result = await washBayService.getWashBaysForGarageWorkspace(
+        req.staffContext.garage_id
+    );
+
+    return sendSuccess(res, {
+        message: 'Get staff workspace wash bays successfully',
+        data: result,
+    });
+});
+
 const getAvailableWashBaysByGarage = asyncHandler(async (req, res) => {
     const { garageId } = req.validated.params;
     const { query } = req.validated;
@@ -99,6 +110,7 @@ const deactivateWashBay = asyncHandler(async (req, res) => {
 module.exports = {
     getAllWashBays,
     getWashBaysByGarage,
+    getStaffWorkspaceWashBays,
     getAvailableWashBaysByGarage,
     getWashBayById,
     createWashBay,

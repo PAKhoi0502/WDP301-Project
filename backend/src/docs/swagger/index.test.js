@@ -104,6 +104,25 @@ describe('OpenAPI staff capability contract', () => {
             $ref: '#/components/schemas/StaffBookingWorkflowDetail',
         });
     });
+
+    it('publishes garage-scoped staff dashboard data contracts', () => {
+        const analyticsOperation = openApiSpec.paths['/staff/analytics/overview'].get;
+        const washBaysOperation = openApiSpec.paths['/staff/workspace/wash-bays'].get;
+
+        expect(analyticsOperation.parameters.map((parameter) => parameter.name)).toEqual([
+            'from',
+            'to',
+            'group_by',
+        ]);
+        expect(analyticsOperation['x-required-capabilities']).toEqual([
+            STAFF_CAPABILITIES.BOOKING_WORKFLOW_READ_GARAGE,
+        ]);
+        expect(analyticsOperation['x-resource-scope']).toBe('garage');
+        expect(washBaysOperation['x-required-capabilities']).toEqual([
+            STAFF_CAPABILITIES.BOOKING_WORKFLOW_READ_GARAGE,
+        ]);
+        expect(washBaysOperation['x-resource-scope']).toBe('garage');
+    });
 });
 
 describe('OpenAPI role metadata', () => {
