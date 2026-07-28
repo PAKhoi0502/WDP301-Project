@@ -3,6 +3,7 @@ const { z } = require('zod');
 const {
     CUSTOMER_CASE_CATEGORY_VALUES,
     CUSTOMER_CASE_CATEGORIES,
+    CUSTOMER_CASE_PRIORITY_VALUES,
     CUSTOMER_CASE_STATUS_VALUES,
     CUSTOMER_CASE_LIABILITY_STATUS_VALUES,
     CUSTOMER_CASE_LIABILITY_STATUSES,
@@ -85,6 +86,7 @@ const listCustomerCasesSchema = z.object({
     query: z.object({
         status: z.enum(CUSTOMER_CASE_STATUS_VALUES).optional(),
         category: z.enum(CUSTOMER_CASE_CATEGORY_VALUES).optional(),
+        priority: z.enum(CUSTOMER_CASE_PRIORITY_VALUES).optional(),
         booking_id: objectIdField.optional(),
         case_code: z.string().trim().regex(/^CC-\d{8}-[A-F0-9]{8}$/i, 'Invalid case code').transform((value) => value.toUpperCase()).optional(),
         assigned_to_id: objectIdField.optional(),

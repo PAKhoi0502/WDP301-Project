@@ -1,5 +1,6 @@
 const {
     createCustomerCaseSchema,
+    listCustomerCasesSchema,
     addEvidenceSchema,
     concludeCustomerCaseSchema,
     proposeResolutionSchema,
@@ -23,6 +24,19 @@ describe('customer case validators', () => {
         });
 
         expect(result.success).toBe(true);
+    });
+
+    it('accepts a supported customer case priority filter', () => {
+        const result = listCustomerCasesSchema.safeParse({
+            query: {
+                priority: 'HIGH',
+                page: '1',
+                limit: '20',
+            },
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data.query.priority).toBe('HIGH');
     });
 
     it('requires location and image evidence for reported vehicle damage', () => {
