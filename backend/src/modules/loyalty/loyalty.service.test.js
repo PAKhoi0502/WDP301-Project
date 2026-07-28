@@ -102,6 +102,9 @@ describe('loyalty service business rules', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         jest.restoreAllMocks();
+        PointTransaction.findOne.mockReturnValue(
+            createQueryMock(null)
+        );
     });
 
     it('earns points from the main package and add-ons, updates totals, and reviews tier', async () => {
@@ -200,6 +203,53 @@ describe('loyalty service business rules', () => {
                 current_tier: 'GOLD',
                 tier_changed: true,
             },
+        });
+    });
+
+    it('reuses an existing earn transaction without updating loyalty twice', async () => {
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            total_points: 45,
+            available_points: 45,
+            total_spent: 100000,
+            total_visits: 1,
+        });
+        const pointTransaction = {
+            _id: new mongoose.Types.ObjectId(),
+            customer_id: customerId,
+            booking_id: bookingId,
+            type: 'EARN',
+            points: 45,
+            remaining_points: 45,
+            balance_before: 0,
+            balance_after: 45,
+        };
+
+        PointTransaction.findOne.mockReturnValue(
+            createQueryMock(pointTransaction)
+        );
+        CustomerLoyalty.findOne.mockReturnValue(
+            createQueryMock(loyalty)
+        );
+
+        const result = await loyaltyService.processBookingLoyalty({
+            booking: {
+                _id: bookingId,
+                customer_id: customerId,
+                original_price: 100000,
+                final_price: 100000,
+            },
+            servicePackage: {
+                points_earned: 45,
+            },
+        });
+
+        expect(PointTransaction.create).not.toHaveBeenCalled();
+        expect(loyalty.save).not.toHaveBeenCalled();
+        expect(result).toMatchObject({
+            earned_points: 45,
+            already_processed: true,
+            tier_review: null,
         });
     });
 

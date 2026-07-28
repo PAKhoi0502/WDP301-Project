@@ -2,6 +2,16 @@ const mongoose = require('mongoose');
 
 const loyaltyRedeemRuleSchema = new mongoose.Schema(
     {
+        rule_code: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            minlength: [3, 'Redeem rule code must be at least 3 characters'],
+            maxlength: [100, 'Redeem rule code must not exceed 100 characters'],
+            match: [/^[A-Z0-9_]+$/, 'Redeem rule code is invalid'],
+            immutable: true,
+        },
+
         point_value_amount: {
             type: Number,
             required: [true, 'Point value amount is required'],
@@ -41,6 +51,7 @@ const loyaltyRedeemRuleSchema = new mongoose.Schema(
     }
 );
 
+loyaltyRedeemRuleSchema.index({ rule_code: 1 }, { unique: true, sparse: true });
 loyaltyRedeemRuleSchema.index({ is_active: 1, created_at: -1 });
 
 loyaltyRedeemRuleSchema.pre('save', async function (next) {

@@ -23,6 +23,15 @@ const optionalInteger = (min, max, message) => ({
 
 const servicePriceRuleSchema = new mongoose.Schema(
     {
+        rule_code: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            minlength: [3, 'Price rule code must be at least 3 characters'],
+            maxlength: [180, 'Price rule code must not exceed 180 characters'],
+            match: [/^[A-Z0-9_]+$/, 'Price rule code is invalid'],
+            immutable: true,
+        },
         service_package_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'ServicePackage',
@@ -111,6 +120,7 @@ const servicePriceRuleSchema = new mongoose.Schema(
     }
 );
 
+servicePriceRuleSchema.index({ rule_code: 1 }, { unique: true, sparse: true });
 servicePriceRuleSchema.index({
     service_package_id: 1,
     garage_id: 1,

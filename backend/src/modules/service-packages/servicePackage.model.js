@@ -72,6 +72,16 @@ const stepTemplateSchema = new mongoose.Schema(
 
 const servicePackageSchema = new mongoose.Schema(
     {
+        service_code: {
+            type: String,
+            trim: true,
+            uppercase: true,
+            minlength: [3, 'Service package code must be at least 3 characters'],
+            maxlength: [100, 'Service package code must not exceed 100 characters'],
+            match: [/^[A-Z0-9_]+$/, 'Service package code is invalid'],
+            immutable: true,
+        },
+
         name: {
             type: String,
             required: [true, 'Service package name is required'],
@@ -214,6 +224,7 @@ const servicePackageSchema = new mongoose.Schema(
     }
 );
 
+servicePackageSchema.index({ service_code: 1 }, { unique: true, sparse: true });
 servicePackageSchema.index({ name: 1, vehicle_type: 1 }, { unique: true });
 servicePackageSchema.index({ vehicle_type: 1, service_type: 1, is_active: 1 });
 servicePackageSchema.index({ requires_wash_bay: 1, is_active: 1 });

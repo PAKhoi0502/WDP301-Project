@@ -1,105 +1,116 @@
 const Garage = require('../modules/garages/garage.model');
+const { GARAGE_SEEDS, toGaragePayload } = require('./seedCatalog');
+const { atLocalDayAndMinute, getSeedReferenceDate } = require('./seedTime');
 
-const seedGarages = [
-    {
-        name: 'Garage A',
-        garage_code: 'GAR001',
-        address: '123 Nguyen Hue Street',
-        ward: 'Ben Nghe',
-        district: 'District 1',
-        city: 'Ho Chi Minh City',
-        phone: '0900000991',
-        email: 'garage.a@example.com',
-        latitude: 10.7769,
-        longitude: 106.7009,
-        opening_time: '08:00',
-        closing_time: '18:00',
-        slot_interval_minutes: 30,
-        late_grace_minutes: 15,
-        description: 'Demo garage A with motorbike and car wash bays',
-        is_active: true,
-    },
-    {
-        name: 'Garage B',
-        garage_code: 'GAR002',
-        address: '456 Vo Van Ngan Street',
-        ward: 'Linh Chieu',
-        district: 'Thu Duc City',
-        city: 'Ho Chi Minh City',
-        phone: '0900000992',
-        email: 'garage.b@example.com',
-        latitude: 10.8494,
-        longitude: 106.7538,
-        opening_time: '07:00',
-        closing_time: '19:00',
-        slot_interval_minutes: 30,
-        late_grace_minutes: 15,
-        description: 'Demo garage B with motorbike and car wash bays',
-        is_active: true,
-    },
-    {
-        name: 'Garage C',
-        garage_code: 'GAR003',
-        address: '789 Le Van Viet Street',
-        ward: 'Tang Nhon Phu A',
-        district: 'Thu Duc City',
-        city: 'Ho Chi Minh City',
-        phone: '0900000993',
-        email: 'garage.c@example.com',
-        latitude: 10.8456,
-        longitude: 106.7812,
-        opening_time: '07:00',
-        closing_time: '18:00',
-        slot_interval_minutes: 30,
-        late_grace_minutes: 15,
-        description: 'Demo garage C with car wash bays only',
-        is_active: true,
-    },
-    {
-        name: 'Garage D',
-        garage_code: 'GAR004',
-        address: '321 Pham Van Dong Street',
-        ward: 'Hiep Binh Chanh',
-        district: 'Thu Duc City',
-        city: 'Ho Chi Minh City',
-        phone: '0900000994',
-        email: 'garage.d@example.com',
-        latitude: 10.8335,
-        longitude: 106.7234,
-        opening_time: '07:00',
-        closing_time: '18:00',
-        slot_interval_minutes: 30,
-        late_grace_minutes: 15,
-        description: 'Demo garage D with motorbike wash bays only',
-        is_active: true,
-    },
-];
+const assertUniqueSeedGarages = (garages) => {
+    const codes = new Set();
+    const emails = new Set();
+    const phones = new Set();
 
-const seedGarage = async () => {
-    console.log('== Seeding garages ==');
-
-    for (const garage of seedGarages) {
-        const existingGarage = await Garage.findOne({
-            garage_code: garage.garage_code,
-        }).select('_id');
-
-        if (existingGarage) {
-            await Garage.updateOne(
-                { _id: existingGarage._id },
-                { $set: garage },
-                { runValidators: true }
-            );
-
-            console.log(`Updated garage: ${garage.garage_code}`);
-            continue;
+    for (const garage of garages) {
+        if (codes.has(garage.garage_code)) {
+            throw new Error(`Duplicate seed garage code: ${garage.garage_code}`);
         }
 
-        await Garage.create(garage);
+        if (emails.has(garage.email)) {
+            throw new Error(`Duplicate seed garage email: ${garage.email}`);
+        }
 
-        console.log(`Created garage: ${garage.garage_code}`);
+        if (phones.has(garage.phone)) {
+            throw new Error(`Duplicate seed garage phone: ${garage.phone}`);
+        }
+
+        codes.add(garage.garage_code);
+        emails.add(garage.email);
+        phones.add(garage.phone);
+    }
+};
+
+const seedGarage = async ({
+    session = null,
+    referenceDate = getSeedReferenceDate(),
+    dryRun = false,
+} = {}) => {
+    console.log('== Seeding garages ==');
+
+    assertUniqueSeedGarages(GARAGE_SEEDS);
+
+    const garages = GARAGE_SEEDS.map((definition, index) => {
+        const payload = toGaragePayload(definition);
+        const createdAt = atLocalDayAndMinute({
+            referenceDate,
+            dayOffset: -180 + index * 11,
+            minuteOfDay: 8 * 60 + index * 37,
+        });
+        const validationError = new Garage({
+            ...payload,
+            created_at: createdAt,
+            updated_at: createdAt,
+        }).validateSync();
+
+        if (validationError) {
+            throw validationError;
+        }
+
+        return {
+            payload,
+            created_at: createdAt,
+        };
+    });
+
+    if (dryRun) {
+        const summary = {
+            dry_run: true,
+            planned: garages.length,
+            garage_codes: garages.map(({ payload }) => payload.garage_code),
+        };
+
+        console.table([{
+            planned: summary.planned,
+            opening_time: '07:00',
+            closing_time: '19:00',
+        }]);
+
+        return summary;
     }
 
+    const operations = garages.map(({ payload, created_at }) => ({
+        updateOne: {
+            filter: { garage_code: payload.garage_code },
+            update: {
+                $set: payload,
+                $setOnInsert: {
+                    created_at,
+                    updated_at: created_at,
+                },
+            },
+            upsert: true,
+            timestamps: false,
+        },
+    }));
+    const result = await Garage.bulkWrite(operations, {
+        ordered: true,
+        session,
+    });
+    const summary = {
+        dry_run: false,
+        planned: garages.length,
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+        inserted: result.upsertedCount,
+        garage_codes: garages.map(({ payload }) => payload.garage_code),
+    };
+
+    console.table([{
+        planned: summary.planned,
+        matched: summary.matched,
+        modified: summary.modified,
+        inserted: summary.inserted,
+    }]);
     console.log('Garages seeding completed');
+
+    return summary;
 };
 
 module.exports = seedGarage;
+module.exports.assertUniqueSeedGarages = assertUniqueSeedGarages;

@@ -57,6 +57,7 @@ const toRuleDto = (rule) => {
     const plain = rule?.toObject ? rule.toObject() : rule;
     return {
         id: toId(plain._id),
+        rule_code: plain.rule_code || null,
         service_package_id: toId(plain.service_package_id),
         garage_id: toId(plain.garage_id),
         vehicle_type: plain.vehicle_type,

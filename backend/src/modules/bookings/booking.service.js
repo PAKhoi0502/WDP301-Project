@@ -3180,20 +3180,41 @@ const createCustomerBooking = async (customerId, payload = {}) => {
 
     let booking;
 
-    if (basePayload.used_points > 0 || voucherResult || quote) {
+    if (
+        basePayload.used_points > 0
+        || promotionResult?.promotion
+        || voucherResult
+        || quote
+    ) {
         const session = await mongoose.startSession();
 
         try {
             await session.withTransaction(async () => {
+                const transactionalPromotionResult =
+                    await promotionService.validatePromotionForBooking({
+                        promotion_code: createPayload.promotion_code,
+                        customer_id: customerId,
+                        servicePackage: pricedServicePackage,
+                        vehicleType: vehicle.vehicle_type,
+                        orderAmount: bookingPlan.originalPrice,
+                        bookingStartTime: startTime,
+                        session,
+                    });
+                const transactionalPriceAfterPromotion =
+                    getPriceAfterPromotion({
+                        originalPrice: bookingPlan.originalPrice,
+                        promotionResult: transactionalPromotionResult,
+                    });
                 const transactionalVoucherResult = await customerVoucherService.previewVoucherForBooking({
                     customerId,
                     code: createPayload.voucher_code,
                     servicePackage: pricedServicePackage,
-                    orderAmount: priceAfterPromotion,
+                    orderAmount: transactionalPriceAfterPromotion,
                     session,
                 });
                 const transactionalPriceAfterVoucher = Math.max(
-                    priceAfterPromotion - (transactionalVoucherResult?.discount_amount || 0),
+                    transactionalPriceAfterPromotion
+                        - (transactionalVoucherResult?.discount_amount || 0),
                     0
                 );
                 const transactionalRedeemResult = await loyaltyService.calculateBookingRedeemDiscount({
@@ -3209,7 +3230,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
                     startTime,
                     vehicleType: vehicle.vehicle_type,
                     note: createPayload.note,
-                    promotionResult,
+                    promotionResult: transactionalPromotionResult,
                     voucherResult: transactionalVoucherResult,
                     redeemResult: transactionalRedeemResult,
                 });
@@ -3222,6 +3243,16 @@ const createCustomerBooking = async (customerId, payload = {}) => {
                     }),
                     session
                 );
+
+                if (transactionalPromotionResult?.promotion) {
+                    await promotionUsageService.reservePromotionUsageForBooking({
+                        booking,
+                        promotion: transactionalPromotionResult.promotion,
+                        guestPhoneNormalized: null,
+                        actorId: customerId,
+                        session,
+                    });
+                }
 
                 if (transactionalVoucherResult) {
                     await customerVoucherService.reserveVoucherForBooking({

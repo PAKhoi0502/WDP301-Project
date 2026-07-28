@@ -285,6 +285,11 @@ const schemas = {
                 type: 'string',
                 example: '665f1b7b2a5f9d0012a11111',
             },
+            service_code: {
+                type: 'string',
+                nullable: true,
+                example: 'CAR_WASH_BASIC',
+            },
             name: {
                 type: 'string',
                 example: 'Premium car wash',

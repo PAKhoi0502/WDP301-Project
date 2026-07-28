@@ -94,6 +94,15 @@ const pointTransactionSchema = new mongoose.Schema(
 
 pointTransactionSchema.index({ customer_id: 1, created_at: -1 });
 pointTransactionSchema.index({ booking_id: 1 });
+pointTransactionSchema.index(
+    { booking_id: 1, type: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            booking_id: { $type: 'objectId' },
+        },
+    }
+);
 pointTransactionSchema.index({ type: 1 });
 pointTransactionSchema.index({ expires_at: 1, remaining_points: 1 });
 pointTransactionSchema.index({ created_by: 1 });

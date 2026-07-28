@@ -1,152 +1,190 @@
 const Garage = require('../modules/garages/garage.model');
 const WashBay = require('../modules/wash-bays/washBay.model');
-const { VEHICLE_TYPES } = require('../shared/constants/vehicle.constant');
-const { WASH_BAY_STATUS } = require('../shared/constants/washBay.constant');
+const {
+    buildWashBayDefinitions,
+} = require('./seedWashBaysVehiclesCatalog');
+const { getSeedReferenceDate } = require('./seedTime');
 
-const buildWashBays = ({ garage_code, motorbikeCount, carCount }) => {
-    const washBays = [];
+const assertUniqueWashBayDefinitions = (definitions) => {
+    const businessKeys = new Set();
 
-    for (let index = 1; index <= motorbikeCount; index += 1) {
-        const bayNumber = String(index).padStart(2, '0');
+    for (const definition of definitions) {
+        const businessKey = `${definition.garage_code}:${definition.bay_code}`;
 
-        washBays.push({
-            garage_code,
-            name: `Motorbike Bay ${bayNumber}`,
-            bay_code: `MB-${bayNumber}`,
-            vehicle_type: VEHICLE_TYPES.MOTORBIKE,
-            status: WASH_BAY_STATUS.AVAILABLE,
-            is_active: true,
-        });
-    }
+        if (businessKeys.has(businessKey)) {
+            throw new Error(`Duplicate wash bay definition: ${businessKey}`);
+        }
 
-    for (let index = 1; index <= carCount; index += 1) {
-        const bayNumber = String(index).padStart(2, '0');
-
-        washBays.push({
-            garage_code,
-            name: `Car Bay ${bayNumber}`,
-            bay_code: `CAR-${bayNumber}`,
-            vehicle_type: VEHICLE_TYPES.CAR,
-            status: WASH_BAY_STATUS.AVAILABLE,
-            is_active: true,
-        });
-    }
-
-    return washBays;
-};
-
-const seedWashBays = [
-    ...buildWashBays({
-        garage_code: 'GAR001',
-        motorbikeCount: 2,
-        carCount: 3,
-    }),
-    ...buildWashBays({
-        garage_code: 'GAR002',
-        motorbikeCount: 3,
-        carCount: 2,
-    }),
-    ...buildWashBays({
-        garage_code: 'GAR003',
-        motorbikeCount: 0,
-        carCount: 2,
-    }),
-    ...buildWashBays({
-        garage_code: 'GAR004',
-        motorbikeCount: 2,
-        carCount: 0,
-    }),
-];
-
-const deactivateUnusedSeedWashBays = async (garageIds, activeBayCodesByGarageId) => {
-    for (const garageId of garageIds) {
-        const activeBayCodes = activeBayCodesByGarageId.get(String(garageId)) || [];
-
-        await WashBay.updateMany(
-            {
-                garage_id: garageId,
-                bay_code: { $nin: activeBayCodes },
-            },
-            {
-                $set: {
-                    status: WASH_BAY_STATUS.INACTIVE,
-                    current_booking_id: null,
-                    is_active: false,
-                },
-            },
-            {
-                runValidators: true,
-            }
-        );
+        businessKeys.add(businessKey);
     }
 };
 
-const seedWashBay = async () => {
+const summarizeWashBays = (definitions) => {
+    const byGarage = {};
+
+    for (const definition of definitions) {
+        const garage = byGarage[definition.garage_code] || {
+            total: 0,
+            vehicle_types: {},
+        };
+
+        garage.total += 1;
+        garage.vehicle_types[definition.vehicle_type] = (
+            garage.vehicle_types[definition.vehicle_type] || 0
+        ) + 1;
+        byGarage[definition.garage_code] = garage;
+    }
+
+    return {
+        planned: definitions.length,
+        garages: Object.keys(byGarage).length,
+        by_garage: byGarage,
+    };
+};
+
+const seedWashBay = async ({
+    session = null,
+    referenceDate = getSeedReferenceDate(),
+    dryRun = false,
+} = {}) => {
     console.log('== Seeding wash bays ==');
 
-    const garageCodes = [...new Set(seedWashBays.map((washBay) => washBay.garage_code))];
-    const garages = await Garage.find({
-        garage_code: { $in: garageCodes },
+    const definitions = buildWashBayDefinitions(referenceDate);
+
+    assertUniqueWashBayDefinitions(definitions);
+
+    const summary = summarizeWashBays(definitions);
+
+    if (dryRun) {
+        console.table(
+            Object.entries(summary.by_garage).map(([garageCode, garage]) => ({
+                garage_code: garageCode,
+                total: garage.total,
+                ...garage.vehicle_types,
+            }))
+        );
+
+        return {
+            ...summary,
+            dry_run: true,
+        };
+    }
+
+    const garageQuery = Garage.find({
+        garage_code: {
+            $in: [...new Set(
+                definitions.map((definition) => definition.garage_code)
+            )],
+        },
     }).select('_id garage_code');
 
+    if (session) {
+        garageQuery.session(session);
+    }
+
+    const garages = await garageQuery.lean();
     const garageByCode = new Map(
         garages.map((garage) => [garage.garage_code, garage])
     );
-    const activeBayCodesByGarageId = new Map();
-
-    for (const washBay of seedWashBays) {
-        const garage = garageByCode.get(washBay.garage_code);
+    const records = definitions.map((definition) => {
+        const garage = garageByCode.get(definition.garage_code);
 
         if (!garage) {
-            console.log(`Skipped wash bay: ${washBay.garage_code} ${washBay.bay_code}`);
-            continue;
+            throw new Error(`Wash bay garage not found: ${definition.garage_code}`);
         }
-
-        const garageId = String(garage._id);
-        const currentBayCodes = activeBayCodesByGarageId.get(garageId) || [];
-
-        activeBayCodesByGarageId.set(garageId, [
-            ...currentBayCodes,
-            washBay.bay_code,
-        ]);
 
         const payload = {
             garage_id: garage._id,
-            name: washBay.name,
-            bay_code: washBay.bay_code,
-            vehicle_type: washBay.vehicle_type,
-            status: washBay.status,
-            current_booking_id: null,
-            is_active: washBay.is_active,
+            name: definition.name,
+            bay_code: definition.bay_code,
+            vehicle_type: definition.vehicle_type,
+            status: definition.status,
+            current_booking_id: definition.current_booking_id,
+            is_active: definition.is_active,
+            created_at: definition.created_at,
+            updated_at: definition.created_at,
         };
+        const validationError = new WashBay(payload).validateSync();
 
-        const existingWashBay = await WashBay.findOne({
-            garage_id: garage._id,
-            bay_code: washBay.bay_code,
-        }).select('_id');
-
-        if (existingWashBay) {
-            await WashBay.updateOne(
-                { _id: existingWashBay._id },
-                { $set: payload },
-                { runValidators: true }
-            );
-
-            console.log(`Updated wash bay: ${washBay.garage_code} ${washBay.bay_code}`);
-            continue;
+        if (validationError) {
+            throw validationError;
         }
 
-        await WashBay.create(payload);
+        return payload;
+    });
+    const existingQuery = WashBay.find({
+        $or: records.map((record) => ({
+            garage_id: record.garage_id,
+            bay_code: record.bay_code,
+        })),
+    }).select('garage_id bay_code vehicle_type status current_booking_id');
 
-        console.log(`Created wash bay: ${washBay.garage_code} ${washBay.bay_code}`);
+    if (session) {
+        existingQuery.session(session);
     }
 
-    await deactivateUnusedSeedWashBays(
-        garages.map((garage) => garage._id),
-        activeBayCodesByGarageId
+    const existingWashBays = await existingQuery.lean();
+    const expectedTypeByKey = new Map(
+        records.map((record) => [
+            `${record.garage_id}:${record.bay_code}`,
+            record.vehicle_type,
+        ])
     );
 
+    for (const washBay of existingWashBays) {
+        const businessKey = `${washBay.garage_id}:${washBay.bay_code}`;
+
+        if (washBay.vehicle_type !== expectedTypeByKey.get(businessKey)) {
+            throw new Error(`Wash bay vehicle type conflict: ${businessKey}`);
+        }
+    }
+
+    const operations = records.map((record) => ({
+        updateOne: {
+            filter: {
+                garage_id: record.garage_id,
+                bay_code: record.bay_code,
+            },
+            update: {
+                $set: {
+                    name: record.name,
+                    vehicle_type: record.vehicle_type,
+                },
+                $setOnInsert: {
+                    status: record.status,
+                    current_booking_id: record.current_booking_id,
+                    is_active: record.is_active,
+                    created_at: record.created_at,
+                    updated_at: record.updated_at,
+                },
+            },
+            upsert: true,
+            timestamps: false,
+        },
+    }));
+    const result = await WashBay.bulkWrite(operations, {
+        ordered: true,
+        session,
+    });
+    const completedSummary = {
+        ...summary,
+        dry_run: false,
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+        inserted: result.upsertedCount,
+    };
+
+    console.table([{
+        planned: completedSummary.planned,
+        matched: completedSummary.matched,
+        modified: completedSummary.modified,
+        inserted: completedSummary.inserted,
+    }]);
     console.log('Wash bays seeding completed');
+
+    return completedSummary;
 };
 
 module.exports = seedWashBay;
+module.exports.assertUniqueWashBayDefinitions = assertUniqueWashBayDefinitions;
+module.exports.summarizeWashBays = summarizeWashBays;

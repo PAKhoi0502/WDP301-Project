@@ -5,243 +5,169 @@ const { USER_ROLES } = require('../shared/constants/roles.constant');
 const {
     USER_ONBOARDING_STATUSES,
 } = require('../shared/constants/userOnboarding.constant');
-const { normalizePhone } = require('../shared/utils/phone');
+const { normalizePhone, isValidPhone } = require('../shared/utils/phone');
+const { buildSeedUsers } = require('./seedCatalog');
+const { getSeedReferenceDate } = require('./seedTime');
 
 const BCRYPT_SALT_ROUNDS = Number(process.env.BCRYPT_SALT_ROUNDS || 10);
 
-const seedUsers = [
-    {
-        full_name: 'System Admin',
-        email: 'admin@autowash.local',
-        phone: '0900000001',
-        password: process.env.SEED_ADMIN_PASSWORD || 'Admin@123',
-        role: USER_ROLES.ADMIN,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Garage Staff',
-        email: 'staff@autowash.local',
-        phone: '0900000002',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Wash Operator A One',
-        email: 'wash.a1@autowash.local',
-        phone: '0900000011',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Care Staff A One',
-        email: 'care.a1@autowash.local',
-        phone: '0900000003',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Care Staff A Two',
-        email: 'care.a2@autowash.local',
-        phone: '0900000004',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Care Staff B One',
-        email: 'care.b1@autowash.local',
-        phone: '0900000005',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Care Staff B Two',
-        email: 'care.b2@autowash.local',
-        phone: '0900000006',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Care Staff C One',
-        email: 'care.c1@autowash.local',
-        phone: '0900000007',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Care Staff C Two',
-        email: 'care.c2@autowash.local',
-        phone: '0900000008',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Care Staff D One',
-        email: 'care.d1@autowash.local',
-        phone: '0900000009',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Care Staff D Two',
-        email: 'care.d2@autowash.local',
-        phone: '0900000010',
-        password: process.env.SEED_STAFF_PASSWORD || 'Staff@123',
-        role: USER_ROLES.STAFF,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Nguyen Van An',
-        email: 'customer01@autowash.local',
-        phone: '0901000001',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Tran Thi Bich',
-        email: 'customer02@autowash.local',
-        phone: '0901000002',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Le Van Binh',
-        email: 'customer03@autowash.local',
-        phone: '0901000003',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Pham Thi Cam',
-        email: 'customer04@autowash.local',
-        phone: '0901000004',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Huynh Van Cuong',
-        email: 'customer05@autowash.local',
-        phone: '0901000005',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Dang Thi Diem',
-        email: 'customer06@autowash.local',
-        phone: '0901000006',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Bui Truong Giang',
-        email: 'customer07@autowash.local',
-        phone: '0901000007',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Vo Thi Han',
-        email: 'customer08@autowash.local',
-        phone: '0901000008',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Ngo Thu Hoai',
-        email: 'customer09@autowash.local',
-        phone: '0901000009',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-    {
-        full_name: 'Do Van Hung',
-        email: 'customer10@autowash.local',
-        phone: '0901000010',
-        password: process.env.SEED_CUSTOMER_PASSWORD || 'Customer@123',
-        role: USER_ROLES.CUSTOMER,
-        avatar_url: '',
-        is_active: true,
-    },
-];
+const getSeedPasswords = () => {
+    const passwords = {
+        ADMIN: process.env.SEED_ADMIN_PASSWORD?.trim(),
+        STAFF: process.env.SEED_STAFF_PASSWORD?.trim(),
+        CUSTOMER: process.env.SEED_CUSTOMER_PASSWORD?.trim(),
+    };
+    const missing = Object.entries(passwords)
+        .filter(([, value]) => !value)
+        .map(([key]) => `SEED_${key}_PASSWORD`);
 
-const seedUser = async () => {
-    console.log('== Seeding users ==');
-
-    for (const user of seedUsers) {
-        const password_hash = await bcrypt.hash(user.password, BCRYPT_SALT_ROUNDS);
-
-        const payload = {
-            full_name: user.full_name,
-            email: user.email.trim().toLowerCase(),
-            phone: normalizePhone(user.phone),
-            password_hash,
-            role: user.role,
-            avatar_url: user.avatar_url,
-            is_active: user.is_active,
-            phone_verified_at: new Date(),
-            onboarding_status: USER_ONBOARDING_STATUSES.ACTIVE,
-        };
-
-        const existingUser = await User.findOne({
-            phone: {
-                $in: [user.phone.trim(), payload.phone],
-            },
-        }).select('_id');
-
-        if (existingUser) {
-            await User.updateOne(
-                { _id: existingUser._id },
-                { $set: payload },
-                { runValidators: true }
-            );
-
-            console.log(`Updated user: ${payload.phone}`);
-            continue;
-        }
-
-        await User.create(payload);
-
-        console.log(`Created user: ${payload.phone}`);
+    if (missing.length > 0) {
+        throw new Error(`Missing required seed passwords: ${missing.join(', ')}`);
     }
 
+    return passwords;
+};
+
+const assertUniqueSeedUsers = (users) => {
+    const phones = new Set();
+    const emails = new Set();
+
+    for (const user of users) {
+        const phone = normalizePhone(user.phone);
+        const email = user.email.trim().toLowerCase();
+
+        if (!isValidPhone(phone)) {
+            throw new Error(`Invalid seed phone: ${user.phone}`);
+        }
+
+        if (phones.has(phone)) {
+            throw new Error(`Duplicate seed phone: ${phone}`);
+        }
+
+        if (emails.has(email)) {
+            throw new Error(`Duplicate seed email: ${email}`);
+        }
+
+        phones.add(phone);
+        emails.add(email);
+    }
+};
+
+const summarizeSeedUsers = (users) => {
+    const roleCounts = users.reduce((counts, user) => ({
+        ...counts,
+        [user.role]: (counts[user.role] || 0) + 1,
+    }), {});
+    const customers = users.filter((user) => user.role === USER_ROLES.CUSTOMER);
+    const customerDates = customers.map((user) => user.created_at.getTime());
+
+    return {
+        planned: users.length,
+        role_counts: roleCounts,
+        customer_created_from: new Date(Math.min(...customerDates)),
+        customer_created_to: new Date(Math.max(...customerDates)),
+    };
+};
+
+const seedUser = async ({
+    session = null,
+    referenceDate = getSeedReferenceDate(),
+    dryRun = false,
+} = {}) => {
+    console.log('== Seeding users ==');
+
+    const passwords = getSeedPasswords();
+    const users = buildSeedUsers(referenceDate);
+
+    assertUniqueSeedUsers(users);
+
+    const summary = summarizeSeedUsers(users);
+
+    if (dryRun) {
+        console.table([summary]);
+        return {
+            ...summary,
+            dry_run: true,
+        };
+    }
+
+    const [adminHash, staffHash, customerHash] = await Promise.all([
+        bcrypt.hash(passwords.ADMIN, BCRYPT_SALT_ROUNDS),
+        bcrypt.hash(passwords.STAFF, BCRYPT_SALT_ROUNDS),
+        bcrypt.hash(passwords.CUSTOMER, BCRYPT_SALT_ROUNDS),
+    ]);
+    const passwordHashByGroup = {
+        ADMIN: adminHash,
+        STAFF: staffHash,
+        CUSTOMER: customerHash,
+    };
+    const operations = users.map((user) => {
+        const phone = normalizePhone(user.phone);
+        const email = user.email.trim().toLowerCase();
+        const payload = {
+            full_name: user.full_name,
+            email,
+            phone,
+            role: user.role,
+            avatar_url: '',
+            is_active: true,
+            phone_verified_at: user.created_at,
+            onboarding_status: USER_ONBOARDING_STATUSES.ACTIVE,
+            last_login_at: null,
+        };
+        const validationError = new User({
+            ...payload,
+            password_hash: passwordHashByGroup[user.password_group],
+            password_changed_at: user.created_at,
+            created_at: user.created_at,
+            updated_at: user.created_at,
+        }).validateSync();
+
+        if (validationError) {
+            throw validationError;
+        }
+
+        return {
+            updateOne: {
+                filter: { phone },
+                update: {
+                    $set: payload,
+                    $setOnInsert: {
+                        password_hash: passwordHashByGroup[user.password_group],
+                        password_changed_at: user.created_at,
+                        created_at: user.created_at,
+                        updated_at: user.created_at,
+                    },
+                },
+                upsert: true,
+                timestamps: false,
+            },
+        };
+    });
+    const result = await User.bulkWrite(operations, {
+        ordered: true,
+        session,
+    });
+
+    const completedSummary = {
+        ...summary,
+        dry_run: false,
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+        inserted: result.upsertedCount,
+    };
+
+    console.table([{
+        planned: completedSummary.planned,
+        matched: completedSummary.matched,
+        modified: completedSummary.modified,
+        inserted: completedSummary.inserted,
+    }]);
     console.log('Users seeding completed');
+
+    return completedSummary;
 };
 
 module.exports = seedUser;
+module.exports.assertUniqueSeedUsers = assertUniqueSeedUsers;
+module.exports.summarizeSeedUsers = summarizeSeedUsers;

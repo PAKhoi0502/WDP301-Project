@@ -134,6 +134,7 @@ const toLoyaltyRedeemRuleDto = (redeemRule) => {
 
     return {
         id: plainRedeemRule._id?.toString() || plainRedeemRule.id || null,
+        rule_code: plainRedeemRule.rule_code || null,
         point_value_amount: plainRedeemRule.point_value_amount,
         min_redeem_points: plainRedeemRule.min_redeem_points,
         redeem_step: plainRedeemRule.redeem_step,

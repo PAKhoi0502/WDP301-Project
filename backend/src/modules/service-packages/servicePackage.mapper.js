@@ -33,6 +33,7 @@ const toIncludedServiceDto = (service) => {
 
     return {
         id: toId(service),
+        service_code: service.service_code || null,
         name: service.name,
         vehicle_type: service.vehicle_type,
         service_type: service.service_type,
@@ -63,6 +64,7 @@ const toServicePackageDto = (servicePackage) => {
 
     return {
         id: plainServicePackage._id?.toString() || plainServicePackage.id || null,
+        service_code: plainServicePackage.service_code || null,
         name: plainServicePackage.name,
         vehicle_type: plainServicePackage.vehicle_type,
         service_type: plainServicePackage.service_type,

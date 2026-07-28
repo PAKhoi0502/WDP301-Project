@@ -668,6 +668,33 @@ const processBookingLoyalty = async ({
             point_transaction: null,
             earned_points: 0,
             tier_review: null,
+            already_processed: false,
+        };
+    }
+
+    const existingEarnTransaction =
+        await findPointTransactionByBookingAndType({
+            bookingId: booking._id,
+            type: POINT_TRANSACTION_TYPES.EARN,
+            session,
+        });
+
+    if (existingEarnTransaction) {
+        const existingLoyalty = await getOrCreateCustomerLoyalty(
+            booking.customer_id,
+            session
+        );
+
+        return {
+            loyalty:
+                LoyaltyMapper.toCustomerLoyaltyDto(existingLoyalty),
+            point_transaction:
+                LoyaltyMapper.toPointTransactionDto(
+                    existingEarnTransaction
+                ),
+            earned_points: existingEarnTransaction.points,
+            tier_review: null,
+            already_processed: true,
         };
     }
 
@@ -727,6 +754,7 @@ const processBookingLoyalty = async ({
         point_transaction: LoyaltyMapper.toPointTransactionDto(pointTransaction),
         earned_points: earnedPoints,
         tier_review: tierReview,
+        already_processed: false,
     };
 };
 
