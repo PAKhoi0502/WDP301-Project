@@ -1,6 +1,7 @@
 const customerVoucherService = require('./customerVoucher.service');
 const { asyncHandler } = require('../../shared/utils/asyncHandler');
-const { sendSuccess } = require('../../shared/utils/apiResponse');
+const { sendSuccess, sendCreated } = require('../../shared/utils/apiResponse');
+const auditLogService = require('../audit-logs/auditLog.service');
 
 const getMyVouchers = asyncHandler(async (req, res) => {
     const result = await customerVoucherService.getMyVouchers(req.user._id, req.validated.query);
@@ -31,6 +32,19 @@ const getAdminVouchers = asyncHandler(async (req, res) => {
     });
 });
 
+const createAdminGiftVoucher = asyncHandler(async (req, res) => {
+    const result = await customerVoucherService.issueAdminGiftVoucher({
+        adminId: req.user._id,
+        payload: req.validated.body,
+        auditContext: auditLogService.getAuditRequestContext(req),
+    });
+
+    return sendCreated(res, {
+        message: 'Gift customer voucher successfully',
+        data: result,
+    });
+});
+
 const approveVoucher = asyncHandler(async (req, res) => {
     const result = await customerVoucherService.approveVoucher(req.user._id, req.validated.params.id);
 
@@ -53,6 +67,7 @@ module.exports = {
     getMyVouchers,
     validateMyVoucher,
     getAdminVouchers,
+    createAdminGiftVoucher,
     approveVoucher,
     revokeVoucher,
 };

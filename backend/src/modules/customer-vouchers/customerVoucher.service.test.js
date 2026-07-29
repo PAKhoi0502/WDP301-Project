@@ -10,6 +10,12 @@ jest.mock('./customerVoucher.model', () => ({
 jest.mock('../service-packages/servicePackage.model', () => ({
     findById: jest.fn(),
 }));
+jest.mock('../users/user.model', () => ({
+    findOne: jest.fn(),
+}));
+jest.mock('../garages/garage.model', () => ({
+    findOne: jest.fn(),
+}));
 jest.mock('../staff-profiles/staffProfile.model', () => ({
     findOne: jest.fn(),
 }));
@@ -22,6 +28,10 @@ jest.mock('../audit-logs/auditLog.service', () => ({
 
 const CustomerVoucher = require('./customerVoucher.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
+const User = require('../users/user.model');
+const Garage = require('../garages/garage.model');
+const notificationService = require('../notifications/notification.service');
+const auditLogService = require('../audit-logs/auditLog.service');
 const customerVoucherService = require('./customerVoucher.service');
 
 describe('customer voucher service', () => {
@@ -34,6 +44,15 @@ describe('customer voucher service', () => {
     beforeEach(() => {
         jest.resetAllMocks();
         process.env.GARAGE_COMPENSATION_STAFF_MAX_AMOUNT = '100000';
+        User.findOne.mockResolvedValue({
+            _id: customerId,
+            role: 'CUSTOMER',
+            is_active: true,
+        });
+        Garage.findOne.mockResolvedValue({
+            _id: garageId,
+            is_active: true,
+        });
     });
 
     afterAll(() => {
@@ -202,6 +221,75 @@ describe('customer voucher service', () => {
             expiresAt: new Date('2000-01-01T00:00:00.000Z'),
         })).rejects.toMatchObject({
             errorCode: 'CUSTOMER_VOUCHER_EXPIRATION_INVALID',
+        });
+        expect(CustomerVoucher.create).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin gift a customer-bound voucher directly', async () => {
+        CustomerVoucher.create.mockImplementation(async ([payload]) => [{
+            _id: '507f1f77bcf86cd799439016',
+            ...payload,
+        }]);
+
+        const voucher = await customerVoucherService.issueAdminGiftVoucher({
+            adminId: '507f1f77bcf86cd799439017',
+            payload: {
+                customer_id: customerId,
+                garage_id: garageId,
+                voucher_type: 'FIXED_AMOUNT',
+                value: 50000,
+                min_order_amount: 100000,
+                expires_at: '2999-01-01T00:00:00.000Z',
+                note: 'Tri ân khách hàng thân thiết',
+            },
+            auditContext: {
+                ip: '127.0.0.1',
+                userAgent: 'jest',
+            },
+        });
+
+        expect(voucher).toMatchObject({
+            customer_id: customerId,
+            garage_id: garageId,
+            source_type: 'ADMIN_GIFT',
+            source_booking_id: null,
+            source_incident_id: null,
+            status: 'ISSUED',
+        });
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(
+            expect.objectContaining({
+                action: 'CUSTOMER_VOUCHER_GIFTED',
+                resourceType: 'CUSTOMER_VOUCHER',
+            })
+        );
+        expect(notificationService.createInAppNotification).toHaveBeenCalledWith(
+            expect.objectContaining({
+                userId: customerId,
+                type: 'CUSTOMER_VOUCHER_ISSUED',
+                relatedType: 'CUSTOMER_VOUCHER',
+            })
+        );
+    });
+
+    it('rejects gifting a voucher to a locked customer', async () => {
+        User.findOne.mockResolvedValue({
+            _id: customerId,
+            role: 'CUSTOMER',
+            is_active: false,
+        });
+
+        await expect(customerVoucherService.issueAdminGiftVoucher({
+            adminId: '507f1f77bcf86cd799439017',
+            payload: {
+                customer_id: customerId,
+                garage_id: garageId,
+                voucher_type: 'FIXED_AMOUNT',
+                value: 50000,
+                expires_at: '2999-01-01T00:00:00.000Z',
+                note: 'Tri ân khách hàng thân thiết',
+            },
+        })).rejects.toMatchObject({
+            errorCode: 'CUSTOMER_VOUCHER_CUSTOMER_INACTIVE',
         });
         expect(CustomerVoucher.create).not.toHaveBeenCalled();
     });

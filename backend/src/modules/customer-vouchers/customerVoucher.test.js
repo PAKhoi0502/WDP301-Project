@@ -62,7 +62,27 @@ describe('customer voucher model', () => {
         });
 
         await expect(voucher.validate()).rejects.toMatchObject({
-            errors: { source_incident_id: expect.anything() },
+            errors: { source_type: expect.anything() },
+        });
+    });
+
+    it('accepts an admin gift without a booking or compensation source', async () => {
+        const voucher = createVoucher({
+            source_type: 'ADMIN_GIFT',
+            source_booking_id: null,
+            source_incident_id: null,
+        });
+
+        await expect(voucher.validate()).resolves.toBeUndefined();
+    });
+
+    it('rejects an admin gift that references a compensation source', async () => {
+        const voucher = createVoucher({
+            source_type: 'ADMIN_GIFT',
+        });
+
+        await expect(voucher.validate()).rejects.toMatchObject({
+            errors: { source_type: expect.anything() },
         });
     });
 });

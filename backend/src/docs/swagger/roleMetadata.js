@@ -816,7 +816,7 @@ const ROUTE_GROUPS = Object.freeze([
     },
     {
         roles: ['CUSTOMER'],
-        feature: 'My compensation vouchers',
+        feature: 'My customer vouchers',
         operations: [
             'GET /customer-vouchers',
             'POST /customer-vouchers/validate',
@@ -824,7 +824,7 @@ const ROUTE_GROUPS = Object.freeze([
     },
     {
         roles: ['STAFF', 'ADMIN'],
-        feature: 'Compensation voucher operations',
+        feature: 'Customer voucher operations',
         scope: STAFF_GARAGE_SCOPE,
         operations: [
             'GET /admin/customer-vouchers',
@@ -832,8 +832,9 @@ const ROUTE_GROUPS = Object.freeze([
     },
     {
         roles: ['ADMIN'],
-        feature: 'Compensation voucher operations',
+        feature: 'Customer voucher operations',
         operations: [
+            'POST /admin/customer-vouchers',
             'PATCH /admin/customer-vouchers/{id}/approve',
             'PATCH /admin/customer-vouchers/{id}/revoke',
         ],

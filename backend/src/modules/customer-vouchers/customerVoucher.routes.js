@@ -4,7 +4,9 @@ const customerVoucherController = require('./customerVoucher.controller');
 const {
     idParamSchema,
     getVouchersSchema,
+    getAdminVouchersSchema,
     validateVoucherSchema,
+    createAdminGiftVoucherSchema,
 } = require('./customerVoucher.validator');
 const { validate } = require('../../shared/middlewares/validate.middleware');
 const { authenticate, authorize } = require('../../shared/middlewares/auth.middleware');
@@ -34,8 +36,15 @@ adminRouter.use(authenticate, authorize(USER_ROLES.STAFF, USER_ROLES.ADMIN));
 adminRouter.get(
     '/',
     requireStaffCapabilities(STAFF_CAPABILITIES.VOUCHER_READ_GARAGE),
-    validate(getVouchersSchema),
+    validate(getAdminVouchersSchema),
     customerVoucherController.getAdminVouchers
+);
+
+adminRouter.post(
+    '/',
+    authorize(USER_ROLES.ADMIN),
+    validate(createAdminGiftVoucherSchema),
+    customerVoucherController.createAdminGiftVoucher
 );
 
 adminRouter.patch(

@@ -3,6 +3,7 @@ const { z } = require('zod');
 const {
     CUSTOMER_VOUCHER_TYPE_VALUES,
     CUSTOMER_VOUCHER_STATUS_VALUES,
+    CUSTOMER_VOUCHER_SOURCE_VALUES,
 } = require('../../shared/constants/customerVoucher.constant');
 
 const objectIdField = z.string().trim().regex(/^[a-f\d]{24}$/i, 'Invalid id');
@@ -24,6 +25,17 @@ const getVouchersSchema = z.object({
     }).strict(),
 });
 
+const getAdminVouchersSchema = z.object({
+    query: z.object({
+        status: z.enum(CUSTOMER_VOUCHER_STATUS_VALUES).optional(),
+        garage_id: objectIdField.optional(),
+        customer_id: objectIdField.optional(),
+        source: z.enum(CUSTOMER_VOUCHER_SOURCE_VALUES).optional(),
+        page: z.coerce.number().int().min(1).default(1),
+        limit: z.coerce.number().int().min(1).max(100).default(20),
+    }).strict(),
+});
+
 const validateVoucherSchema = z.object({
     body: z.object({
         code: z.string().trim().min(6).max(40),
@@ -38,15 +50,16 @@ const validateVoucherSchema = z.object({
     ),
 });
 
-const createCompensationVoucherBodySchema = z.object({
+const voucherDefinitionFields = {
     voucher_type: z.enum(CUSTOMER_VOUCHER_TYPE_VALUES),
     value: z.coerce.number().int().min(0),
     max_discount_amount: z.coerce.number().int().min(0).nullable().optional(),
     min_order_amount: z.coerce.number().int().min(0).default(0),
     service_package_id: objectIdField.nullable().optional(),
     expires_at: z.string().datetime({ offset: true }),
-    note: optionalTextField(1000),
-}).strict().superRefine((data, context) => {
+};
+
+const validateVoucherDefinition = (data, context) => {
     if (data.voucher_type !== 'FREE_SERVICE' && data.value <= 0) {
         context.addIssue({
             code: 'custom',
@@ -91,11 +104,40 @@ const createCompensationVoucherBodySchema = z.object({
             message: 'free service voucher value must be 0',
         });
     }
+};
+
+const createCompensationVoucherBodySchema = z.object({
+    ...voucherDefinitionFields,
+    note: optionalTextField(1000),
+}).strict().superRefine(validateVoucherDefinition);
+
+const createAdminGiftVoucherSchema = z.object({
+    body: z.object({
+        customer_id: objectIdField,
+        garage_id: objectIdField,
+        ...voucherDefinitionFields,
+        note: z.string().trim().min(5).max(1000),
+    }).strict().superRefine((data, context) => {
+        validateVoucherDefinition(data, context);
+
+        if (
+            data.voucher_type === 'PERCENTAGE'
+            && (data.max_discount_amount === null || data.max_discount_amount === undefined)
+        ) {
+            context.addIssue({
+                code: 'custom',
+                path: ['max_discount_amount'],
+                message: 'max_discount_amount is required for percentage gift voucher',
+            });
+        }
+    }),
 });
 
 module.exports = {
     idParamSchema,
     getVouchersSchema,
+    getAdminVouchersSchema,
     validateVoucherSchema,
     createCompensationVoucherBodySchema,
+    createAdminGiftVoucherSchema,
 };

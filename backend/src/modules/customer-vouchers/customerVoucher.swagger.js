@@ -1,6 +1,6 @@
 const tags = [{
     name: 'Customer Vouchers',
-    description: 'Customer-bound compensation vouchers',
+    description: 'Customer-bound compensation and admin gift vouchers',
 }];
 
 const customerVoucherSchema = {
@@ -10,7 +10,11 @@ const customerVoucherSchema = {
         code: { type: 'string' },
         customer_id: { type: 'string' },
         garage_id: { type: 'string' },
-        source_booking_id: { type: 'string' },
+        source_type: {
+            type: 'string',
+            enum: ['INCIDENT', 'CUSTOMER_CASE', 'ADMIN_GIFT'],
+        },
+        source_booking_id: { type: 'string', nullable: true },
         source_incident_id: { type: 'string', nullable: true },
         source_customer_case_id: { type: 'string', nullable: true },
         source_customer_case_resolution_id: { type: 'string', nullable: true },
@@ -65,6 +69,23 @@ const voucherListParameters = [
         name: 'limit',
         in: 'query',
         schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+    },
+];
+
+const adminVoucherListParameters = [
+    ...voucherListParameters,
+    {
+        name: 'customer_id',
+        in: 'query',
+        schema: { type: 'string' },
+    },
+    {
+        name: 'source',
+        in: 'query',
+        schema: {
+            type: 'string',
+            enum: ['INCIDENT', 'CUSTOMER_CASE', 'ADMIN_GIFT'],
+        },
     },
 ];
 
@@ -126,9 +147,67 @@ const paths = {
     '/admin/customer-vouchers': {
         get: {
             tags: ['Customer Vouchers'],
-            summary: 'List compensation vouchers',
-            parameters: voucherListParameters,
+            summary: 'List customer vouchers',
+            parameters: adminVoucherListParameters,
             responses: { 200: listResponse },
+        },
+        post: {
+            tags: ['Customer Vouchers'],
+            summary: 'Gift a voucher to one customer',
+            requestBody: {
+                required: true,
+                content: {
+                    'application/json': {
+                        schema: {
+                            type: 'object',
+                            required: [
+                                'customer_id',
+                                'garage_id',
+                                'voucher_type',
+                                'value',
+                                'expires_at',
+                                'note',
+                            ],
+                            properties: {
+                                customer_id: { type: 'string' },
+                                garage_id: { type: 'string' },
+                                voucher_type: {
+                                    type: 'string',
+                                    enum: ['FIXED_AMOUNT', 'PERCENTAGE', 'FREE_SERVICE'],
+                                },
+                                value: { type: 'integer', minimum: 0 },
+                                max_discount_amount: {
+                                    type: 'integer',
+                                    minimum: 0,
+                                    nullable: true,
+                                },
+                                min_order_amount: { type: 'integer', minimum: 0 },
+                                service_package_id: { type: 'string', nullable: true },
+                                expires_at: { type: 'string', format: 'date-time' },
+                                note: { type: 'string', minLength: 5, maxLength: 1000 },
+                            },
+                        },
+                    },
+                },
+            },
+            responses: {
+                201: {
+                    description: 'Customer voucher gifted',
+                    content: {
+                        'application/json': {
+                            schema: {
+                                type: 'object',
+                                properties: {
+                                    success: { type: 'boolean' },
+                                    data: {
+                                        $ref: '#/components/schemas/CustomerVoucher',
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         },
     },
     '/admin/customer-vouchers/{id}/approve': {

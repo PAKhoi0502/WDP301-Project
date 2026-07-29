@@ -5,6 +5,8 @@ const {
     CUSTOMER_VOUCHER_TYPE_VALUES,
     CUSTOMER_VOUCHER_STATUS,
     CUSTOMER_VOUCHER_STATUS_VALUES,
+    CUSTOMER_VOUCHER_SOURCES,
+    CUSTOMER_VOUCHER_SOURCE_VALUES,
 } = require('../../shared/constants/customerVoucher.constant');
 
 const customerVoucherSchema = new mongoose.Schema(
@@ -31,10 +33,16 @@ const customerVoucherSchema = new mongoose.Schema(
             required: [true, 'Voucher garage is required'],
         },
 
+        source_type: {
+            type: String,
+            enum: CUSTOMER_VOUCHER_SOURCE_VALUES,
+            default: null,
+        },
+
         source_booking_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Booking',
-            required: [true, 'Voucher source booking is required'],
+            default: null,
         },
 
         source_incident_id: {
@@ -159,6 +167,7 @@ const customerVoucherSchema = new mongoose.Schema(
 customerVoucherSchema.index({ code: 1 }, { unique: true });
 customerVoucherSchema.index({ customer_id: 1, status: 1, expires_at: 1 });
 customerVoucherSchema.index({ garage_id: 1, status: 1, created_at: -1 });
+customerVoucherSchema.index({ source_type: 1, created_at: -1 });
 customerVoucherSchema.index({ source_incident_id: 1, created_at: -1 });
 customerVoucherSchema.index({ source_customer_case_id: 1, created_at: -1 });
 customerVoucherSchema.index(
@@ -168,8 +177,33 @@ customerVoucherSchema.index(
 customerVoucherSchema.index({ reserved_booking_id: 1 });
 
 customerVoucherSchema.pre('validate', function (next) {
-    if (Boolean(this.source_incident_id) === Boolean(this.source_customer_case_id)) {
-        this.invalidate('source_incident_id', 'Voucher must reference exactly one compensation source');
+    if (!this.source_type) {
+        if (this.source_incident_id) {
+            this.source_type = CUSTOMER_VOUCHER_SOURCES.INCIDENT;
+        } else if (this.source_customer_case_id) {
+            this.source_type = CUSTOMER_VOUCHER_SOURCES.CUSTOMER_CASE;
+        }
+    }
+
+    if (this.source_type === CUSTOMER_VOUCHER_SOURCES.INCIDENT) {
+        if (!this.source_booking_id || !this.source_incident_id || this.source_customer_case_id) {
+            this.invalidate('source_type', 'Incident voucher source is invalid');
+        }
+    } else if (this.source_type === CUSTOMER_VOUCHER_SOURCES.CUSTOMER_CASE) {
+        if (!this.source_booking_id || !this.source_customer_case_id || this.source_incident_id) {
+            this.invalidate('source_type', 'Customer case voucher source is invalid');
+        }
+    } else if (this.source_type === CUSTOMER_VOUCHER_SOURCES.ADMIN_GIFT) {
+        if (
+            this.source_booking_id
+            || this.source_incident_id
+            || this.source_customer_case_id
+            || this.source_customer_case_resolution_id
+        ) {
+            this.invalidate('source_type', 'Admin gift voucher cannot reference a compensation source');
+        }
+    } else {
+        this.invalidate('source_type', 'Voucher source is required');
     }
 
     if (this.voucher_type === CUSTOMER_VOUCHER_TYPES.PERCENTAGE && this.value > 100) {

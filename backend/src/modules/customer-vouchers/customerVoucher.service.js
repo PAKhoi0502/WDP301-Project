@@ -3,6 +3,8 @@ const { randomBytes } = require('crypto');
 const CustomerVoucher = require('./customerVoucher.model');
 const CustomerVoucherMapper = require('./customerVoucher.mapper');
 const ServicePackage = require('../service-packages/servicePackage.model');
+const User = require('../users/user.model');
+const Garage = require('../garages/garage.model');
 const servicePriceRuleService = require('../service-price-rules/servicePriceRule.service');
 const StaffProfile = require('../staff-profiles/staffProfile.model');
 const notificationService = require('../notifications/notification.service');
@@ -12,6 +14,7 @@ const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const {
     CUSTOMER_VOUCHER_TYPES,
     CUSTOMER_VOUCHER_STATUS,
+    CUSTOMER_VOUCHER_SOURCES,
 } = require('../../shared/constants/customerVoucher.constant');
 const {
     NOTIFICATION_TYPES,
@@ -31,7 +34,7 @@ const generateVoucherCode = () => `CARE_${randomBytes(6).toString('hex').toUpper
 
 const populateVoucherQuery = (query) => query
     .populate('customer_id', 'full_name email phone')
-    .populate('garage_id', 'name code')
+    .populate('garage_id', 'name garage_code')
     .populate('service_package_id', 'name service_type vehicle_type base_price')
     .populate('issued_by_id', 'full_name email phone role')
     .populate('approved_by_id', 'full_name email phone role');
@@ -242,6 +245,7 @@ const issueCompensationVoucher = async ({
     incidentId,
     customerCaseId = null,
     customerCaseResolutionId = null,
+    sourceType = null,
     voucherType,
     value,
     maxDiscountAmount = null,
@@ -296,6 +300,10 @@ const issueCompensationVoucher = async ({
         code: generateVoucherCode(),
         customer_id: customerId,
         garage_id: garageId,
+        source_type: sourceType
+            || (customerCaseId
+                ? CUSTOMER_VOUCHER_SOURCES.CUSTOMER_CASE
+                : CUSTOMER_VOUCHER_SOURCES.INCIDENT),
         source_booking_id: bookingId,
         source_incident_id: incidentId,
         source_customer_case_id: customerCaseId,
@@ -320,6 +328,95 @@ const issueCompensationVoucher = async ({
     );
 
     return documents[0];
+};
+
+const issueAdminGiftVoucher = async ({
+    adminId,
+    payload,
+    auditContext = {},
+}) => {
+    const [customer, garage] = await Promise.all([
+        User.findOne({
+            _id: payload.customer_id,
+            role: USER_ROLES.CUSTOMER,
+        }),
+        Garage.findOne({
+            _id: payload.garage_id,
+            is_active: true,
+        }),
+    ]);
+
+    if (!customer) {
+        throw new AppError('Customer not found', 404, 'CUSTOMER_NOT_FOUND');
+    }
+
+    if (!customer.is_active) {
+        throw new AppError(
+            'Cannot gift a voucher to a locked customer account',
+            409,
+            'CUSTOMER_VOUCHER_CUSTOMER_INACTIVE'
+        );
+    }
+
+    if (!garage) {
+        throw new AppError('Active garage not found', 404, 'GARAGE_NOT_FOUND');
+    }
+
+    const voucher = await issueCompensationVoucher({
+        user: {
+            _id: adminId,
+            role: USER_ROLES.ADMIN,
+        },
+        customerId: customer._id,
+        garageId: garage._id,
+        bookingId: null,
+        incidentId: null,
+        sourceType: CUSTOMER_VOUCHER_SOURCES.ADMIN_GIFT,
+        voucherType: payload.voucher_type,
+        value: payload.value,
+        maxDiscountAmount: payload.max_discount_amount ?? null,
+        minOrderAmount: payload.min_order_amount || 0,
+        servicePackageId: payload.service_package_id || null,
+        expiresAt: new Date(payload.expires_at),
+        note: payload.note,
+    });
+
+    await auditLogService.recordAuditEvent({
+        actorId: adminId,
+        action: AUDIT_ACTIONS.CUSTOMER_VOUCHER_GIFTED,
+        resourceType: AUDIT_RESOURCE_TYPES.CUSTOMER_VOUCHER,
+        resourceId: voucher._id,
+        after: {
+            customer_id: customer._id,
+            garage_id: garage._id,
+            source_type: voucher.source_type,
+            voucher_type: voucher.voucher_type,
+            value: voucher.value,
+            max_discount_amount: voucher.max_discount_amount,
+            min_order_amount: voucher.min_order_amount,
+            service_package_id: voucher.service_package_id,
+            expires_at: voucher.expires_at,
+            note: voucher.note,
+        },
+        ip: auditContext.ip,
+        userAgent: auditContext.userAgent,
+    });
+
+    await notificationService.createInAppNotification({
+        userId: customer._id,
+        type: NOTIFICATION_TYPES.CUSTOMER_VOUCHER_ISSUED,
+        title: 'Bạn nhận được voucher mới',
+        message: `Carivo đã tặng bạn voucher ${voucher.code}.`,
+        relatedType: NOTIFICATION_RELATED_TYPES.CUSTOMER_VOUCHER,
+        relatedId: voucher._id,
+        metadata: {
+            voucher_id: voucher._id.toString(),
+            code: voucher.code,
+            expires_at: voucher.expires_at,
+        },
+    });
+
+    return CustomerVoucherMapper.toCustomerVoucherDto(voucher);
 };
 
 const getMyVouchers = async (customerId, { status, garage_id, page = 1, limit = 20 } = {}) => {
@@ -416,7 +513,17 @@ const getStaffGarageId = async (user) => {
     return staffProfile.garage_id;
 };
 
-const getAdminVouchers = async (user, { status, garage_id, page = 1, limit = 20 } = {}) => {
+const getAdminVouchers = async (
+    user,
+    {
+        status,
+        garage_id,
+        customer_id,
+        source,
+        page = 1,
+        limit = 20,
+    } = {}
+) => {
     const staffGarageId = await getStaffGarageId(user);
     const filter = {};
 
@@ -428,6 +535,30 @@ const getAdminVouchers = async (user, { status, garage_id, page = 1, limit = 20 
 
     if (status) {
         filter.status = status;
+    }
+
+    if (customer_id) {
+        filter.customer_id = customer_id;
+    }
+
+    if (source === CUSTOMER_VOUCHER_SOURCES.ADMIN_GIFT) {
+        filter.source_type = CUSTOMER_VOUCHER_SOURCES.ADMIN_GIFT;
+    } else if (source === CUSTOMER_VOUCHER_SOURCES.INCIDENT) {
+        filter.$or = [
+            { source_type: CUSTOMER_VOUCHER_SOURCES.INCIDENT },
+            {
+                source_type: { $exists: false },
+                source_incident_id: { $ne: null },
+            },
+        ];
+    } else if (source === CUSTOMER_VOUCHER_SOURCES.CUSTOMER_CASE) {
+        filter.$or = [
+            { source_type: CUSTOMER_VOUCHER_SOURCES.CUSTOMER_CASE },
+            {
+                source_type: { $exists: false },
+                source_customer_case_id: { $ne: null },
+            },
+        ];
     }
 
     const skip = (page - 1) * limit;
@@ -553,6 +684,7 @@ module.exports = {
     releaseVoucherForBooking,
     consumeVoucherForBooking,
     issueCompensationVoucher,
+    issueAdminGiftVoucher,
     getMyVouchers,
     validateMyVoucher,
     getAdminVouchers,
