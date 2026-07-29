@@ -1140,7 +1140,7 @@ const buildBookingBasePayload = ({
     };
 };
 
-const buildAdminSearchFilter = ({ search, status, garage_id, customer_id, vehicle_id, service_package_id, vehicle_type, is_walk_in, from, to } = {}) => {
+const buildAdminSearchFilter = ({ search, status, payment_status, garage_id, customer_id, vehicle_id, service_package_id, vehicle_type, is_walk_in, from, to } = {}) => {
     const filter = {};
 
     if (search) {
@@ -1158,6 +1158,10 @@ const buildAdminSearchFilter = ({ search, status, garage_id, customer_id, vehicl
 
     if (status) {
         filter.status = status;
+    }
+
+    if (payment_status) {
+        filter.payment_status = payment_status;
     }
 
     if (garage_id) {

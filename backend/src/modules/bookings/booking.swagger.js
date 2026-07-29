@@ -811,6 +811,7 @@ const paths = {
                 { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
                 { name: 'search', in: 'query', schema: { type: 'string' } },
                 { name: 'status', in: 'query', schema: { type: 'string' } },
+                { name: 'payment_status', in: 'query', schema: { type: 'string', enum: ['UNPAID', 'PENDING', 'PAID', 'WAIVED'] } },
                 { name: 'garage_id', in: 'query', schema: { type: 'string' } },
                 { name: 'customer_id', in: 'query', schema: { type: 'string' } },
                 { name: 'vehicle_id', in: 'query', schema: { type: 'string' } },

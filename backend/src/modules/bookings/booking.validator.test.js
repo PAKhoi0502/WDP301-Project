@@ -1,11 +1,41 @@
 const {
     getAvailableSlotsSchema,
+    getAdminBookingsSchema,
     getLateArrivalOptionsSchema,
     resolveLateArrivalSchema,
     createWalkInBookingSchema,
     serviceItemOperationSchema,
     pauseServiceItemSchema,
 } = require('./booking.validator');
+
+describe('admin booking list validator', () => {
+    it('accepts pagination and a supported payment status', () => {
+        const result = getAdminBookingsSchema.safeParse({
+            query: {
+                page: '2',
+                limit: '20',
+                payment_status: 'PAID',
+            },
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data.query).toMatchObject({
+            page: 2,
+            limit: 20,
+            payment_status: 'PAID',
+        });
+    });
+
+    it('rejects an unsupported payment status', () => {
+        const result = getAdminBookingsSchema.safeParse({
+            query: {
+                payment_status: 'REFUNDED',
+            },
+        });
+
+        expect(result.success).toBe(false);
+    });
+});
 
 describe('booking available slots validator', () => {
     const baseQuery = {
