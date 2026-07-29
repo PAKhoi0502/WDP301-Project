@@ -892,6 +892,7 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'POST /payments/bookings/{bookingId}/payos',
             'GET /payments/bookings/{bookingId}/payos',
+            'PATCH /payments/{paymentId}/cancel',
         ],
     },
     {

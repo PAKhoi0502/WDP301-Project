@@ -237,6 +237,35 @@ const paths = {
             },
         },
     },
+    '/payments/{paymentId}/cancel': {
+        patch: {
+            tags: ['Customer Payments'],
+            summary: 'Cancel a pending PayOS payment for an owned booking',
+            security: [{ bearerAuth: [] }],
+            parameters: [
+                { name: 'paymentId', in: 'path', required: true, schema: { type: 'string' } },
+            ],
+            requestBody: {
+                required: false,
+                content: {
+                    'application/json': {
+                        schema: cancelPaymentRequest,
+                    },
+                },
+            },
+            responses: {
+                200: {
+                    description: 'PayOS payment canceled',
+                    content: {
+                        'application/json': {
+                            schema: customerPayosPaymentResponse,
+                        },
+                    },
+                },
+                ...commonErrorResponses,
+            },
+        },
+    },
     '/admin/payments/bookings/{bookingId}/payos': {
         post: {
             tags: ['Admin Payments'],

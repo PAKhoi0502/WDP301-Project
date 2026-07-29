@@ -574,6 +574,88 @@ describe('payment service createPayosPayment', () => {
         expect(result.payment.status).toBe('CANCELED');
     });
 
+    it('lets a customer cancel a pending payment for an owned booking', async () => {
+        const customerUser = {
+            _id: '507f1f77bcf86cd799439021',
+            role: 'CUSTOMER',
+        };
+        const booking = createBooking({
+            customer_id: customerUser._id,
+            is_walk_in: false,
+            payment_method: 'PAYOS',
+            payment_status: 'PENDING',
+            paid_at: null,
+        });
+        const payment = {
+            _id: '507f1f77bcf86cd799439014',
+            booking_id: bookingId,
+            provider: 'PAYOS',
+            method: 'QR',
+            order_code: 178082640000012,
+            payment_link_id: 'payos-link-id',
+            checkout_url: 'https://pay.payos.vn/web/checkout/123',
+            qr_code: '000201010212',
+            amount: 120000,
+            currency: 'VND',
+            status: 'PENDING',
+            initiated_by_user_id: customerUser._id,
+            initiated_by_role: 'CUSTOMER',
+            initiated_channel: 'CUSTOMER_SELF_SERVICE',
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+
+        PaymentTransaction.findById.mockReturnValue(createSessionQueryMock(payment));
+        Booking.findById.mockReturnValue(createSessionQueryMock(booking));
+
+        const result = await paymentService.cancelPayosPayment(
+            customerUser,
+            payment._id,
+            { reason: 'Customer changed to cash payment' }
+        );
+
+        expect(payosService.cancelPaymentLink).toHaveBeenCalledWith(
+            178082640000012,
+            'Customer changed to cash payment'
+        );
+        expect(result.booking).toBeUndefined();
+        expect(result.reused).toBe(false);
+        expect(result.poll_after_ms).toBeNull();
+        expect(result.payment.status).toBe('CANCELED');
+        expect(result.payment.initiated_by_user_id).toBeUndefined();
+        expect(booking.payment_method).toBe('CASH');
+        expect(booking.payment_status).toBe('UNPAID');
+    });
+
+    it('hides another customer payment as not found during cancellation', async () => {
+        const customerUser = {
+            _id: '507f1f77bcf86cd799439021',
+            role: 'CUSTOMER',
+        };
+        const booking = createBooking({
+            customer_id: '507f1f77bcf86cd799439022',
+            is_walk_in: false,
+            payment_method: 'PAYOS',
+            payment_status: 'PENDING',
+        });
+        const payment = {
+            _id: '507f1f77bcf86cd799439014',
+            booking_id: bookingId,
+            status: 'PENDING',
+        };
+
+        PaymentTransaction.findById.mockReturnValue(createSessionQueryMock(payment));
+        Booking.findById.mockReturnValue(createSessionQueryMock(booking));
+
+        await expect(
+            paymentService.cancelPayosPayment(customerUser, payment._id)
+        ).rejects.toMatchObject({
+            statusCode: 404,
+            errorCode: 'BOOKING_NOT_FOUND',
+        });
+
+        expect(payosService.cancelPaymentLink).not.toHaveBeenCalled();
+    });
+
     it('resolves a booking pending PayOS payment for cash without creating a new link', async () => {
         const booking = createBooking({
             payment_method: 'PAYOS',

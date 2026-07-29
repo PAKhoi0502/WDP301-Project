@@ -39,6 +39,12 @@ customerRouter.get(
     paymentController.getPayosPaymentForBooking
 );
 
+customerRouter.patch(
+    '/:paymentId/cancel',
+    validate(cancelPaymentSchema),
+    paymentController.cancelPayosPayment
+);
+
 adminRouter.use(authenticate, authorize(USER_ROLES.STAFF, USER_ROLES.ADMIN));
 adminRouter.use(requireStaffCapabilities(STAFF_CAPABILITIES.PAYMENT_MANAGE_GARAGE));
 

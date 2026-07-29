@@ -710,7 +710,9 @@ const finishPayosPaymentCancel = async (
                 session,
             });
 
-            response = buildPaymentDetailResponse(booking, payment);
+            response = user.role === USER_ROLES.CUSTOMER
+                ? buildCustomerPaymentResponse(payment)
+                : buildPaymentDetailResponse(booking, payment);
         });
 
         return response;
