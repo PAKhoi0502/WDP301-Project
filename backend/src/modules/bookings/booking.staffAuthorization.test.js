@@ -156,6 +156,30 @@ describe('booking staff authorization filters', () => {
         expect(StaffProfile.findOne).not.toHaveBeenCalled();
     });
 
+    it('applies payment status and pagination to admin booking lists', async () => {
+        Booking.countDocuments.mockResolvedValue(45);
+
+        const result = await bookingService.getAllBookings({
+            _id: userId,
+            role: USER_ROLES.ADMIN,
+        }, {
+            payment_status: 'PAID',
+            page: 2,
+            limit: 20,
+        });
+
+        expect(Booking.find).toHaveBeenCalledWith({ payment_status: 'PAID' });
+        expect(Booking.countDocuments).toHaveBeenCalledWith({ payment_status: 'PAID' });
+        expect(query.skip).toHaveBeenCalledWith(20);
+        expect(query.limit).toHaveBeenCalledWith(20);
+        expect(result.meta).toEqual({
+            page: 2,
+            limit: 20,
+            total: 45,
+            total_pages: 3,
+        });
+    });
+
     it('includes the exact handover release signal in admin booking lists', async () => {
         const bookingId = '507f1f77bcf86cd799439014';
         const releasedAt = new Date('2026-07-25T00:00:00.000Z');

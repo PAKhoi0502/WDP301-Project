@@ -18,6 +18,18 @@ const toUserSummary = (value) => {
     };
 };
 
+const toCustomerSummary = (value) => {
+    const summary = toUserSummary(value);
+    if (!summary) {
+        return null;
+    }
+
+    return {
+        ...summary,
+        phone: value.phone,
+    };
+};
+
 const toUploadSummary = (value) => {
     if (!value) {
         return null;
@@ -74,7 +86,7 @@ const toCustomerCaseDto = (customerCase, { customerView = false, includeSnapshot
         handover_id: toId(item.handover_id),
         garage_id: toId(item.garage_id),
         customer_id: toId(item.customer_id),
-        customer: toUserSummary(item.customer_id),
+        customer: toCustomerSummary(item.customer_id),
         vehicle_id: toId(item.vehicle_id),
         is_walk_in_case: item.is_walk_in_case === true,
         reporter_name: item.reporter_name,

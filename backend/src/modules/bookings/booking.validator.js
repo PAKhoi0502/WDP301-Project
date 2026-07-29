@@ -10,6 +10,7 @@ const {
 const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 const {
     BOOKING_STATUS_VALUES,
+    BOOKING_PAYMENT_STATUS_VALUES,
     BOOKING_LATE_RESOLUTION_VALUES,
     BOOKING_LATE_RESOLUTION,
 } = require('../../shared/constants/booking.constant');
@@ -260,6 +261,7 @@ const getAdminBookingsSchema = z.object({
             ...paginationQueryFields,
             search: optionalTextField(100),
             status: z.enum(BOOKING_STATUS_VALUES).optional(),
+            payment_status: z.enum(BOOKING_PAYMENT_STATUS_VALUES).optional(),
             garage_id: optionalObjectIdField,
             customer_id: optionalObjectIdField,
             vehicle_id: optionalObjectIdField,

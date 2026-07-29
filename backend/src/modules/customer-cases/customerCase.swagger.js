@@ -230,6 +230,7 @@ const requestBody = (schema) => ({
 const listParameters = [
     { name: 'status', in: 'query', schema: { type: 'string' } },
     { name: 'category', in: 'query', schema: { type: 'string' } },
+    { name: 'priority', in: 'query', schema: { type: 'string', enum: ['NORMAL', 'HIGH', 'CRITICAL'] } },
     { name: 'booking_id', in: 'query', schema: { type: 'string' } },
     { name: 'case_code', in: 'query', schema: { type: 'string', example: 'CC-20260718-A1B2C3D4' } },
     { name: 'assigned_to_id', in: 'query', schema: { type: 'string' } },
