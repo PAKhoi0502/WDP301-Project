@@ -112,9 +112,11 @@ const washHistorySchema = new mongoose.Schema(
 );
 
 washHistorySchema.index({ customer_id: 1, created_at: -1 });
+washHistorySchema.index({ customer_id: 1, paid_at: -1 });
 washHistorySchema.index({ vehicle_id: 1, created_at: -1 });
 washHistorySchema.index({ garage_id: 1, created_at: -1 });
 washHistorySchema.index({ service_package_id: 1 });
+washHistorySchema.index({ service_package_id: 1, customer_id: 1, paid_at: -1 });
 washHistorySchema.index({ paid_at: -1 });
 
 washHistorySchema.methods.toJSON = function () {

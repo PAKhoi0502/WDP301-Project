@@ -40,6 +40,11 @@ const getBookingAnalytics = createAnalyticsHandler(
     'Get booking analytics successfully'
 );
 
+const getCustomerAnalytics = createAnalyticsHandler(
+    analyticsService.getCustomerAnalytics,
+    'Get customer analytics successfully'
+);
+
 const getRevenueAnalytics = createAnalyticsHandler(
     analyticsService.getRevenueAnalytics,
     'Get revenue analytics successfully'
@@ -86,6 +91,7 @@ module.exports = {
     getOverview,
     getStaffOverview,
     getBookingAnalytics,
+    getCustomerAnalytics,
     getRevenueAnalytics,
     getGarageAnalytics,
     getServiceAnalytics,

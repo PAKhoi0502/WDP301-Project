@@ -100,6 +100,7 @@ userSchema.index(
 
 userSchema.index({ phone: 1 }, { unique: true });
 userSchema.index({ role: 1 });
+userSchema.index({ role: 1, created_at: -1 });
 userSchema.index({ is_active: 1 });
 userSchema.index({ onboarding_status: 1 });
 

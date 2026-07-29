@@ -32,6 +32,7 @@ staffRouter.get(
 
 adminRouter.get('/overview', validate(analyticsQuerySchema), analyticsController.getOverview);
 adminRouter.get('/bookings', validate(analyticsQuerySchema), analyticsController.getBookingAnalytics);
+adminRouter.get('/customers', validate(analyticsQuerySchema), analyticsController.getCustomerAnalytics);
 adminRouter.get('/revenue', validate(analyticsQuerySchema), analyticsController.getRevenueAnalytics);
 adminRouter.get('/garages', validate(analyticsQuerySchema), analyticsController.getGarageAnalytics);
 adminRouter.get('/services', validate(analyticsQuerySchema), analyticsController.getServiceAnalytics);

@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const Booking = require('../bookings/booking.model');
+const User = require('../users/user.model');
 const WashHistory = require('../wash-histories/washHistory.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
 const Survey = require('../surveys/survey.model');
@@ -9,6 +10,7 @@ const PaymentTransaction = require('../payments/paymentTransaction.model');
 const {
     BOOKING_STATUS,
 } = require('../../shared/constants/booking.constant');
+const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const {
     PROMOTION_USAGE_STATUS,
 } = require('../../shared/constants/promotion.constant');
@@ -190,6 +192,97 @@ const getOverview = async (filters = {}) => {
         generated_at: new Date(),
     };
 };
+
+const buildCustomerProfileStages = () => [
+    { $match: { customer_id: { $ne: null } } },
+    {
+        $group: {
+            _id: {
+                customer_id: '$customer_id',
+                service_package_id: '$service_package_id',
+            },
+            usage_count: { $sum: 1 },
+            service_spent: { $sum: '$amount_paid' },
+            last_visit_at: { $max: '$paid_at' },
+        },
+    },
+    {
+        $lookup: {
+            from: 'service_packages',
+            localField: '_id.service_package_id',
+            foreignField: '_id',
+            as: 'service_package',
+        },
+    },
+    { $unwind: { path: '$service_package', preserveNullAndEmptyArrays: true } },
+    {
+        $sort: {
+            '_id.customer_id': 1,
+            usage_count: -1,
+            service_spent: -1,
+            '_id.service_package_id': 1,
+        },
+    },
+    {
+        $group: {
+            _id: '$_id.customer_id',
+            total_visits: { $sum: '$usage_count' },
+            total_spent: { $sum: '$service_spent' },
+            distinct_service_count: { $sum: 1 },
+            favorite_service_id: { $first: '$_id.service_package_id' },
+            favorite_service_name: { $first: '$service_package.name' },
+            favorite_service_usage_count: { $first: '$usage_count' },
+            last_visit_at: { $max: '$last_visit_at' },
+        },
+    },
+    {
+        $lookup: {
+            from: 'users',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'customer',
+        },
+    },
+    { $unwind: { path: '$customer', preserveNullAndEmptyArrays: true } },
+    {
+        $project: {
+            _id: 0,
+            customer_id: '$_id',
+            full_name: { $ifNull: ['$customer.full_name', ''] },
+            is_active: { $ifNull: ['$customer.is_active', false] },
+            total_visits: 1,
+            total_spent: 1,
+            average_order_value: {
+                $cond: [
+                    { $gt: ['$total_visits', 0] },
+                    { $divide: ['$total_spent', '$total_visits'] },
+                    0,
+                ],
+            },
+            distinct_service_count: 1,
+            favorite_service_id: 1,
+            favorite_service_name: { $ifNull: ['$favorite_service_name', ''] },
+            favorite_service_usage_count: 1,
+            last_visit_at: 1,
+        },
+    },
+];
+
+const mapCustomerRows = (rows = []) => rows.map((row) => ({
+    customer_id: row.customer_id?.toString?.() || row.customer_id || null,
+    full_name: row.full_name || '',
+    is_active: Boolean(row.is_active),
+    total_visits: row.total_visits || 0,
+    total_spent: round(row.total_spent),
+    average_order_value: round(row.average_order_value),
+    distinct_service_count: row.distinct_service_count || 0,
+    favorite_service: {
+        id: row.favorite_service_id?.toString?.() || row.favorite_service_id || null,
+        name: row.favorite_service_name || '',
+        usage_count: row.favorite_service_usage_count || 0,
+    },
+    last_visit_at: row.last_visit_at || null,
+}));
 
 const getStaffOverview = async (
     filters = {},
@@ -389,6 +482,479 @@ const getBookingAnalytics = async (filters = {}) => {
         garage_distribution: mapKeyCount(result.garage_distribution),
         vehicle_type_distribution: mapKeyCount(result.vehicle_type_distribution),
         time_of_day_distribution: mapKeyCount(result.time_of_day_distribution),
+        generated_at: new Date(),
+    };
+};
+
+const getCustomerAnalytics = async (filters = {}) => {
+    const accountDateMatch = {};
+
+    if (filters.from || filters.to) {
+        accountDateMatch.created_at = {};
+
+        if (filters.from) {
+            accountDateMatch.created_at.$gte = filters.from;
+        }
+
+        if (filters.to) {
+            accountDateMatch.created_at.$lte = filters.to;
+        }
+    }
+
+    const paidActivityMatch = {
+        $expr: { $eq: ['$customer_id', '$$customerId'] },
+    };
+
+    if (filters.to) {
+        paidActivityMatch.paid_at = { $lte: filters.to };
+    }
+
+    const bookingMatch = buildMatch(filters, 'start_time');
+    const washHistoryMatch = buildMatch(filters, 'paid_at');
+    const profileStages = buildCustomerProfileStages();
+
+    const [accountRows, bookingRows, customerRows] = await Promise.all([
+        User.aggregate([
+            { $match: { role: USER_ROLES.CUSTOMER } },
+            {
+                $facet: {
+                    account_metrics: [
+                        {
+                            $group: {
+                                _id: null,
+                                total_customers: { $sum: 1 },
+                                active_accounts: {
+                                    $sum: { $cond: ['$is_active', 1, 0] },
+                                },
+                                locked_accounts: {
+                                    $sum: { $cond: ['$is_active', 0, 1] },
+                                },
+                                verified_accounts: {
+                                    $sum: {
+                                        $cond: [
+                                            { $ne: ['$phone_verified_at', null] },
+                                            1,
+                                            0,
+                                        ],
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    registrations: [
+                        { $match: accountDateMatch },
+                        { $count: 'new_customers' },
+                    ],
+                    registration_trend: [
+                        { $match: accountDateMatch },
+                        {
+                            $group: {
+                                _id: getDateGroupExpression(
+                                    '$created_at',
+                                    filters.group_by
+                                ),
+                                count: { $sum: 1 },
+                            },
+                        },
+                        { $sort: { _id: 1 } },
+                    ],
+                    funnel: [
+                        { $match: accountDateMatch },
+                        {
+                            $lookup: {
+                                from: 'wash_histories',
+                                let: {
+                                    customerId: '$_id',
+                                },
+                                pipeline: [
+                                    { $match: paidActivityMatch },
+                                    {
+                                        $group: {
+                                            _id: null,
+                                            paid_visits: { $sum: 1 },
+                                            first_paid_at: { $min: '$paid_at' },
+                                        },
+                                    },
+                                ],
+                                as: 'paid_activity',
+                            },
+                        },
+                        {
+                            $set: {
+                                paid_visits: {
+                                    $ifNull: [
+                                        { $first: '$paid_activity.paid_visits' },
+                                        0,
+                                    ],
+                                },
+                                first_paid_at: {
+                                    $first: '$paid_activity.first_paid_at',
+                                },
+                            },
+                        },
+                        {
+                            $group: {
+                                _id: null,
+                                registered_customers: { $sum: 1 },
+                                activated_customers: {
+                                    $sum: {
+                                        $cond: [
+                                            { $gt: ['$paid_visits', 0] },
+                                            1,
+                                            0,
+                                        ],
+                                    },
+                                },
+                                repeat_customers: {
+                                    $sum: {
+                                        $cond: [
+                                            { $gte: ['$paid_visits', 2] },
+                                            1,
+                                            0,
+                                        ],
+                                    },
+                                },
+                                average_days_to_first_paid_visit: {
+                                    $avg: {
+                                        $cond: [
+                                            {
+                                                $and: [
+                                                    { $ne: ['$first_paid_at', null] },
+                                                    {
+                                                        $gte: [
+                                                            '$first_paid_at',
+                                                            '$created_at',
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                            {
+                                                $dateDiff: {
+                                                    startDate: '$created_at',
+                                                    endDate: '$first_paid_at',
+                                                    unit: 'day',
+                                                },
+                                            },
+                                            null,
+                                        ],
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                },
+            },
+        ]),
+        Booking.aggregate([
+            { $match: bookingMatch },
+            {
+                $group: {
+                    _id: null,
+                    total_bookings: { $sum: 1 },
+                    walk_in_bookings: {
+                        $sum: { $cond: ['$is_walk_in', 1, 0] },
+                    },
+                    registered_customer_bookings: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$is_walk_in', false] },
+                                        { $ne: ['$customer_id', null] },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                    walk_in_completed_bookings: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        '$is_walk_in',
+                                        {
+                                            $eq: [
+                                                '$status',
+                                                BOOKING_STATUS.COMPLETED,
+                                            ],
+                                        },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                    registered_completed_bookings: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$is_walk_in', false] },
+                                        { $ne: ['$customer_id', null] },
+                                        {
+                                            $eq: [
+                                                '$status',
+                                                BOOKING_STATUS.COMPLETED,
+                                            ],
+                                        },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                },
+            },
+        ]),
+        WashHistory.aggregate([
+            { $match: washHistoryMatch },
+            {
+                $facet: {
+                    metrics: [
+                        {
+                            $group: {
+                                _id: null,
+                                total_paid_visits: { $sum: 1 },
+                                total_revenue: { $sum: '$amount_paid' },
+                                registered_paid_visits: {
+                                    $sum: {
+                                        $cond: [
+                                            { $ne: ['$customer_id', null] },
+                                            1,
+                                            0,
+                                        ],
+                                    },
+                                },
+                                walk_in_paid_visits: {
+                                    $sum: {
+                                        $cond: [
+                                            { $eq: ['$customer_id', null] },
+                                            1,
+                                            0,
+                                        ],
+                                    },
+                                },
+                                registered_revenue: {
+                                    $sum: {
+                                        $cond: [
+                                            { $ne: ['$customer_id', null] },
+                                            '$amount_paid',
+                                            0,
+                                        ],
+                                    },
+                                },
+                                walk_in_revenue: {
+                                    $sum: {
+                                        $cond: [
+                                            { $eq: ['$customer_id', null] },
+                                            '$amount_paid',
+                                            0,
+                                        ],
+                                    },
+                                },
+                                paying_customers: {
+                                    $addToSet: {
+                                        $cond: [
+                                            { $ne: ['$customer_id', null] },
+                                            '$customer_id',
+                                            '$$REMOVE',
+                                        ],
+                                    },
+                                },
+                            },
+                        },
+                    ],
+                    by_visits: [
+                        ...profileStages,
+                        {
+                            $sort: {
+                                total_visits: -1,
+                                total_spent: -1,
+                                customer_id: 1,
+                            },
+                        },
+                        { $limit: 10 },
+                    ],
+                    by_spending: [
+                        ...profileStages,
+                        {
+                            $sort: {
+                                total_spent: -1,
+                                total_visits: -1,
+                                customer_id: 1,
+                            },
+                        },
+                        { $limit: 10 },
+                    ],
+                    by_service_variety: [
+                        ...profileStages,
+                        {
+                            $sort: {
+                                distinct_service_count: -1,
+                                total_visits: -1,
+                                total_spent: -1,
+                                customer_id: 1,
+                            },
+                        },
+                        { $limit: 10 },
+                    ],
+                    single_service_repeat: [
+                        ...profileStages,
+                        {
+                            $match: {
+                                distinct_service_count: 1,
+                                total_visits: { $gte: 2 },
+                            },
+                        },
+                        {
+                            $sort: {
+                                total_visits: -1,
+                                total_spent: -1,
+                                customer_id: 1,
+                            },
+                        },
+                        { $limit: 10 },
+                    ],
+                    activity_distribution: [
+                        ...profileStages,
+                        {
+                            $group: {
+                                _id: {
+                                    $switch: {
+                                        branches: [
+                                            {
+                                                case: {
+                                                    $eq: ['$total_visits', 1],
+                                                },
+                                                then: 'ONE_TIME',
+                                            },
+                                            {
+                                                case: {
+                                                    $lt: ['$total_visits', 5],
+                                                },
+                                                then: 'REPEAT',
+                                            },
+                                        ],
+                                        default: 'LOYAL',
+                                    },
+                                },
+                                count: { $sum: 1 },
+                            },
+                        },
+                        { $sort: { _id: 1 } },
+                    ],
+                },
+            },
+        ]),
+    ]);
+
+    const accountResult = accountRows[0] || {};
+    const bookingResult = bookingRows[0] || {};
+    const customerResult = customerRows[0] || {};
+    const accountMetrics = accountResult.account_metrics?.[0] || {};
+    const registrationMetrics = accountResult.registrations?.[0] || {};
+    const funnel = accountResult.funnel?.[0] || {};
+    const bookingMetrics = bookingResult || {};
+    const valueMetrics = customerResult.metrics?.[0] || {};
+    const totalBookings = bookingMetrics.total_bookings || 0;
+    const walkInBookings = bookingMetrics.walk_in_bookings || 0;
+    const registeredBookings = bookingMetrics.registered_customer_bookings || 0;
+    const registeredCustomers = funnel.registered_customers || 0;
+    const activatedCustomers = funnel.activated_customers || 0;
+    const payingCustomerCount = valueMetrics.paying_customers?.length || 0;
+    const totalPaidVisits = valueMetrics.total_paid_visits || 0;
+
+    return {
+        period: getPeriod(filters),
+        account_metrics: {
+            total_customers: accountMetrics.total_customers || 0,
+            new_customers: registrationMetrics.new_customers || 0,
+            active_accounts: accountMetrics.active_accounts || 0,
+            locked_accounts: accountMetrics.locked_accounts || 0,
+            verified_accounts: accountMetrics.verified_accounts || 0,
+            verification_rate: percentage(
+                accountMetrics.verified_accounts,
+                accountMetrics.total_customers
+            ),
+        },
+        funnel: {
+            registered_customers: registeredCustomers,
+            activated_customers: activatedCustomers,
+            registered_without_paid_visit:
+                registeredCustomers - activatedCustomers,
+            repeat_customers: funnel.repeat_customers || 0,
+            activation_rate: percentage(
+                activatedCustomers,
+                registeredCustomers
+            ),
+            repeat_rate: percentage(
+                funnel.repeat_customers,
+                activatedCustomers
+            ),
+            average_days_to_first_paid_visit: round(
+                funnel.average_days_to_first_paid_visit
+            ),
+        },
+        registration_trend: (accountResult.registration_trend || []).map((row) => ({
+            period: row._id,
+            count: row.count || 0,
+            group_by: filters.group_by || ANALYTICS_GROUP_BY.DAY,
+        })),
+        booking_mix: {
+            total_bookings: totalBookings,
+            walk_in: {
+                bookings: walkInBookings,
+                share: percentage(walkInBookings, totalBookings),
+                completed_bookings:
+                    bookingMetrics.walk_in_completed_bookings || 0,
+                completion_rate: percentage(
+                    bookingMetrics.walk_in_completed_bookings,
+                    walkInBookings
+                ),
+            },
+            registered_customer: {
+                bookings: registeredBookings,
+                share: percentage(registeredBookings, totalBookings),
+                completed_bookings:
+                    bookingMetrics.registered_completed_bookings || 0,
+                completion_rate: percentage(
+                    bookingMetrics.registered_completed_bookings,
+                    registeredBookings
+                ),
+            },
+        },
+        customer_value_metrics: {
+            unique_paying_customers: payingCustomerCount,
+            total_paid_visits: totalPaidVisits,
+            total_revenue: round(valueMetrics.total_revenue),
+            average_order_value: totalPaidVisits
+                ? round(valueMetrics.total_revenue / totalPaidVisits)
+                : 0,
+            average_paid_visits_per_customer: payingCustomerCount
+                ? round(valueMetrics.registered_paid_visits / payingCustomerCount)
+                : 0,
+            registered_paid_visits: valueMetrics.registered_paid_visits || 0,
+            walk_in_paid_visits: valueMetrics.walk_in_paid_visits || 0,
+            registered_revenue: round(valueMetrics.registered_revenue),
+            walk_in_revenue: round(valueMetrics.walk_in_revenue),
+        },
+        activity_distribution: mapKeyCount(
+            customerResult.activity_distribution
+        ),
+        top_customers: {
+            by_visits: mapCustomerRows(customerResult.by_visits),
+            by_spending: mapCustomerRows(customerResult.by_spending),
+            by_service_variety: mapCustomerRows(
+                customerResult.by_service_variety
+            ),
+            single_service_repeat: mapCustomerRows(
+                customerResult.single_service_repeat
+            ),
+        },
         generated_at: new Date(),
     };
 };
@@ -1407,6 +1973,7 @@ module.exports = {
     getOverview,
     getStaffOverview,
     getBookingAnalytics,
+    getCustomerAnalytics,
     getRevenueAnalytics,
     getGarageAnalytics,
     getServiceAnalytics,

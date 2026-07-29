@@ -2,6 +2,10 @@ jest.mock('../bookings/booking.model', () => ({
     aggregate: jest.fn(),
 }));
 
+jest.mock('../users/user.model', () => ({
+    aggregate: jest.fn(),
+}));
+
 jest.mock('../wash-histories/washHistory.model', () => ({
     aggregate: jest.fn(),
     countDocuments: jest.fn(),
@@ -24,6 +28,7 @@ jest.mock('../payments/paymentTransaction.model', () => ({
 }));
 
 const Booking = require('../bookings/booking.model');
+const User = require('../users/user.model');
 const WashHistory = require('../wash-histories/washHistory.model');
 const Survey = require('../surveys/survey.model');
 const SurveyResponse = require('../surveys/surveyResponse.model');
@@ -179,6 +184,147 @@ describe('analytics service', () => {
             { period: '2026-06-10', count: 2, revenue: 0 },
             { period: '2026-06-11', count: 2, revenue: 0 },
         ]);
+    });
+
+    it('returns customer account, funnel, booking mix, and top ten analytics', async () => {
+        User.aggregate.mockResolvedValue([
+            {
+                account_metrics: [
+                    {
+                        total_customers: 125,
+                        active_accounts: 120,
+                        locked_accounts: 5,
+                        verified_accounts: 100,
+                    },
+                ],
+                registrations: [{ new_customers: 20 }],
+                registration_trend: [{ _id: '2026-07', count: 20 }],
+                funnel: [
+                    {
+                        registered_customers: 20,
+                        activated_customers: 12,
+                        repeat_customers: 5,
+                        average_days_to_first_paid_visit: 3.5,
+                    },
+                ],
+            },
+        ]);
+        Booking.aggregate.mockResolvedValue([
+            {
+                total_bookings: 50,
+                walk_in_bookings: 10,
+                registered_customer_bookings: 40,
+                walk_in_completed_bookings: 8,
+                registered_completed_bookings: 36,
+            },
+        ]);
+        const customerRow = {
+            customer_id: '507f1f77bcf86cd799439011',
+            full_name: 'Customer A',
+            is_active: true,
+            total_visits: 6,
+            total_spent: 1200000,
+            average_order_value: 200000,
+            distinct_service_count: 2,
+            favorite_service_id: '507f1f77bcf86cd799439012',
+            favorite_service_name: 'Service A',
+            favorite_service_usage_count: 4,
+            last_visit_at: new Date('2026-07-20T00:00:00.000Z'),
+        };
+        WashHistory.aggregate.mockResolvedValue([
+            {
+                metrics: [
+                    {
+                        total_paid_visits: 44,
+                        total_revenue: 8800000,
+                        registered_paid_visits: 40,
+                        walk_in_paid_visits: 4,
+                        registered_revenue: 8000000,
+                        walk_in_revenue: 800000,
+                        paying_customers: ['customer-1', 'customer-2'],
+                    },
+                ],
+                by_visits: [customerRow],
+                by_spending: [customerRow],
+                by_service_variety: [customerRow],
+                single_service_repeat: [],
+                activity_distribution: [
+                    { _id: 'LOYAL', count: 1 },
+                    { _id: 'REPEAT', count: 1 },
+                ],
+            },
+        ]);
+
+        const result = await analyticsService.getCustomerAnalytics({
+            from: new Date('2026-07-01T00:00:00.000Z'),
+            to: new Date('2026-07-31T23:59:59.999Z'),
+            group_by: 'MONTH',
+        });
+
+        expect(result.account_metrics).toEqual({
+            total_customers: 125,
+            new_customers: 20,
+            active_accounts: 120,
+            locked_accounts: 5,
+            verified_accounts: 100,
+            verification_rate: 80,
+        });
+        expect(result.funnel).toEqual({
+            registered_customers: 20,
+            activated_customers: 12,
+            registered_without_paid_visit: 8,
+            repeat_customers: 5,
+            activation_rate: 60,
+            repeat_rate: 41.67,
+            average_days_to_first_paid_visit: 3.5,
+        });
+        expect(result.booking_mix).toEqual({
+            total_bookings: 50,
+            walk_in: {
+                bookings: 10,
+                share: 20,
+                completed_bookings: 8,
+                completion_rate: 80,
+            },
+            registered_customer: {
+                bookings: 40,
+                share: 80,
+                completed_bookings: 36,
+                completion_rate: 90,
+            },
+        });
+        expect(result.customer_value_metrics).toMatchObject({
+            unique_paying_customers: 2,
+            total_paid_visits: 44,
+            total_revenue: 8800000,
+            average_order_value: 200000,
+            average_paid_visits_per_customer: 20,
+        });
+        expect(result.top_customers.by_visits[0]).toMatchObject({
+            customer_id: '507f1f77bcf86cd799439011',
+            total_visits: 6,
+            favorite_service: {
+                id: '507f1f77bcf86cd799439012',
+                name: 'Service A',
+                usage_count: 4,
+            },
+        });
+        expect(result.registration_trend).toEqual([
+            {
+                period: '2026-07',
+                count: 20,
+                group_by: 'MONTH',
+            },
+        ]);
+
+        const userPipeline = User.aggregate.mock.calls[0][0];
+        const historyPipeline = WashHistory.aggregate.mock.calls[0][0];
+
+        expect(userPipeline[0].$match).toEqual({ role: 'CUSTOMER' });
+        expect(historyPipeline[1].$facet.by_visits.at(-1)).toEqual({ $limit: 10 });
+        expect(historyPipeline[1].$facet.by_spending.at(-1)).toEqual({ $limit: 10 });
+        expect(historyPipeline[1].$facet.by_service_variety.at(-1)).toEqual({ $limit: 10 });
+        expect(historyPipeline[1].$facet.single_service_repeat.at(-1)).toEqual({ $limit: 10 });
     });
 
     it('calculates survey NPS by promoter and detractor percentages', async () => {

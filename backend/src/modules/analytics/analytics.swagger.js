@@ -70,6 +70,7 @@ const paths = {
     },
     '/admin/analytics/overview': createAnalyticsPath('Get analytics overview'),
     '/admin/analytics/bookings': createAnalyticsPath('Get booking analytics'),
+    '/admin/analytics/customers': createAnalyticsPath('Get customer analytics'),
     '/admin/analytics/revenue': createAnalyticsPath('Get revenue analytics'),
     '/admin/analytics/garages': createAnalyticsPath('Get garage performance analytics'),
     '/admin/analytics/services': createAnalyticsPath('Get service performance analytics'),

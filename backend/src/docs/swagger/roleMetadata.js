@@ -932,6 +932,7 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'GET /admin/analytics/overview',
             'GET /admin/analytics/bookings',
+            'GET /admin/analytics/customers',
             'GET /admin/analytics/revenue',
             'GET /admin/analytics/garages',
             'GET /admin/analytics/services',
