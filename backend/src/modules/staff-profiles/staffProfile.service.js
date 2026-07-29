@@ -185,13 +185,24 @@ const normalizeUpdatePayload = (payload = {}) => {
     return updatePayload;
 };
 
-const buildSearchFilter = ({ search, staff_type, garage_id, user_id, is_active } = {}) => {
+const buildSearchFilter = async ({ search, staff_type, garage_id, user_id, is_active } = {}) => {
     const filter = {};
 
     if (search) {
         const keyword = search.trim();
+        const matchingUserIds = await User.distinct('_id', {
+            role: USER_ROLES.STAFF,
+            $or: [
+                { full_name: { $regex: keyword, $options: 'i' } },
+                { email: { $regex: keyword, $options: 'i' } },
+                { phone: { $regex: keyword, $options: 'i' } },
+            ],
+        });
 
-        filter.staff_code = { $regex: keyword, $options: 'i' };
+        filter.$or = [
+            { staff_code: { $regex: keyword, $options: 'i' } },
+            { user_id: { $in: matchingUserIds } },
+        ];
     }
 
     if (staff_type) {
@@ -541,7 +552,7 @@ const getStaffProfileById = async (staffProfileId) => {
 };
 
 const getAllStaffProfiles = async ({ page = 1, limit = 20, search, staff_type, garage_id, user_id, is_active } = {}) => {
-    const filter = buildSearchFilter({ search, staff_type, garage_id, user_id, is_active });
+    const filter = await buildSearchFilter({ search, staff_type, garage_id, user_id, is_active });
     const skip = (page - 1) * limit;
 
     const [staffProfiles, total] = await Promise.all([

@@ -694,6 +694,7 @@ const paths = {
                     schema: {
                         type: 'string',
                     },
+                    description: 'Search by staff code, full name, email, or phone',
                 },
                 {
                     in: 'query',
