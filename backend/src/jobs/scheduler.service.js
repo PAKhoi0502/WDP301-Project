@@ -6,6 +6,8 @@ const paymentService = require('../modules/payments/payment.service');
 const staffTypeChangeService = require('../modules/staff-profiles/staffTypeChange.service');
 const customerCaseStage2Service = require('../modules/customer-cases/customerCaseStage2.service');
 const bookingArrivalService = require('../modules/booking-arrivals/bookingArrival.service');
+const feedbackRewardService = require('../modules/feedback-rewards/feedbackReward.service');
+const bookingViolationService = require('../modules/booking-violations/bookingViolation.service');
 
 const JOB_NAMES = Object.freeze({
     WAITLIST_EXPIRE: 'waitlist-expire',
@@ -18,6 +20,8 @@ const JOB_NAMES = Object.freeze({
     CUSTOMER_CASE_SLA: 'customer-case-sla',
     PLATE_SCAN_RETENTION: 'plate-scan-retention',
     PLATE_SCAN_EXPIRE: 'plate-scan-expire',
+    FEEDBACK_REMINDER: 'feedback-reminder',
+    BOOKING_VIOLATION_RECOVERY: 'booking-violation-recovery',
 });
 
 const DEFAULT_INTERVALS = Object.freeze({
@@ -31,6 +35,8 @@ const DEFAULT_INTERVALS = Object.freeze({
     CUSTOMER_CASE_SLA_JOB_INTERVAL_MS: 60 * 1000,
     PLATE_SCAN_RETENTION_JOB_INTERVAL_MS: 60 * 60 * 1000,
     PLATE_SCAN_EXPIRE_JOB_INTERVAL_MS: 60 * 1000,
+    FEEDBACK_REMINDER_JOB_INTERVAL_MS: 60 * 60 * 1000,
+    BOOKING_VIOLATION_RECOVERY_JOB_INTERVAL_MS: 24 * 60 * 60 * 1000,
 });
 
 let activeJobs = [];
@@ -170,6 +176,28 @@ const buildJobDefinitions = () => [
         ),
         handler: () => bookingArrivalService.expirePendingScans({
             limit: getPositiveIntegerEnv('PLATE_SCAN_EXPIRE_BATCH_SIZE', 50, 200),
+        }),
+    },
+    {
+        name: JOB_NAMES.FEEDBACK_REMINDER,
+        intervalMs: getPositiveIntegerEnv(
+            'FEEDBACK_REMINDER_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.FEEDBACK_REMINDER_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => feedbackRewardService.sendDueReminders({
+            limit: getPositiveIntegerEnv('FEEDBACK_REMINDER_BATCH_SIZE', 100, 500),
+        }),
+    },
+    {
+        name: JOB_NAMES.BOOKING_VIOLATION_RECOVERY,
+        intervalMs: getPositiveIntegerEnv(
+            'BOOKING_VIOLATION_RECOVERY_JOB_INTERVAL_MS',
+            DEFAULT_INTERVALS.BOOKING_VIOLATION_RECOVERY_JOB_INTERVAL_MS,
+            2147483647
+        ),
+        handler: () => bookingViolationService.processInactivityRecovery({
+            limit: getPositiveIntegerEnv('BOOKING_VIOLATION_RECOVERY_BATCH_SIZE', 100, 500),
         }),
     },
 ];

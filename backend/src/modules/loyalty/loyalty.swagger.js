@@ -30,6 +30,8 @@ const customerLoyaltySchema = {
         customer: customerSummarySchema,
         current_tier: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
         total_points: { type: 'number' },
+        qualifying_points: { type: 'number' },
+        bonus_points: { type: 'number' },
         available_points: { type: 'number' },
         redeemed_points: { type: 'number' },
         expired_points: { type: 'number' },
@@ -116,7 +118,7 @@ const pointTransactionSchema = {
         customer_id: { type: 'string' },
         customer: customerSummarySchema,
         booking_id: { type: 'string', nullable: true },
-        type: { type: 'string', enum: ['EARN', 'REDEEM', 'REFUND', 'EXPIRE', 'ADJUST'] },
+        type: { type: 'string', enum: ['EARN', 'SURVEY_REWARD', 'REVIEW_REWARD', 'REDEEM', 'REFUND', 'EXPIRE', 'ADJUST'] },
         points: { type: 'number' },
         remaining_points: { type: 'number' },
         balance_before: { type: 'number' },
@@ -301,7 +303,7 @@ const commonErrorResponses = {
 const pointTransactionQueryParameters = [
     { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
     { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
-    { name: 'type', in: 'query', schema: { type: 'string', enum: ['EARN', 'REDEEM', 'REFUND', 'EXPIRE', 'ADJUST'] } },
+    { name: 'type', in: 'query', schema: { type: 'string', enum: ['EARN', 'SURVEY_REWARD', 'REVIEW_REWARD', 'REDEEM', 'REFUND', 'EXPIRE', 'ADJUST'] } },
     { name: 'booking_id', in: 'query', schema: { type: 'string' } },
 ];
 
@@ -522,7 +524,7 @@ const paths = {
                 { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
                 { name: 'customer_id', in: 'query', schema: { type: 'string' } },
                 { name: 'booking_id', in: 'query', schema: { type: 'string' } },
-                { name: 'type', in: 'query', schema: { type: 'string', enum: ['EARN', 'REDEEM', 'REFUND', 'EXPIRE', 'ADJUST'] } },
+                { name: 'type', in: 'query', schema: { type: 'string', enum: ['EARN', 'SURVEY_REWARD', 'REVIEW_REWARD', 'REDEEM', 'REFUND', 'EXPIRE', 'ADJUST'] } },
             ],
             responses: {
                 200: {

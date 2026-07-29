@@ -32,12 +32,19 @@ jest.mock('../audit-logs/auditLog.service', () => ({
     recordAuditEvent: jest.fn(),
 }));
 
+jest.mock('../feedback-rewards/feedbackReward.service', () => ({
+    getEffectiveRule: jest.fn(),
+    awardFeedbackReward: jest.fn(),
+}));
+
+const mongoose = require('mongoose');
 const Survey = require('./survey.model');
 const SurveyResponse = require('./surveyResponse.model');
 const Booking = require('../bookings/booking.model');
 const WashHistory = require('../wash-histories/washHistory.model');
 const Upload = require('../uploads/upload.model');
 const auditLogService = require('../audit-logs/auditLog.service');
+const feedbackRewardService = require('../feedback-rewards/feedbackReward.service');
 const surveyService = require('./survey.service');
 
 describe('survey service', () => {
@@ -55,6 +62,10 @@ describe('survey service', () => {
     const responseId = '507f1f77bcf86cd799439006';
     const questionId = '507f1f77bcf86cd799439007';
     const uploadId = '507f1f77bcf86cd799439008';
+    const session = {
+        withTransaction: jest.fn(async (callback) => callback()),
+        endSession: jest.fn(),
+    };
 
     const createSurveyDocument = (overrides = {}) => ({
         _id: surveyId,
@@ -121,6 +132,18 @@ describe('survey service', () => {
         Upload.updateMany.mockReset();
         auditLogService.recordAuditEvent.mockReset();
         auditLogService.recordAuditEvent.mockResolvedValue(null);
+        feedbackRewardService.getEffectiveRule.mockResolvedValue({
+            survey_points: 50,
+        });
+        feedbackRewardService.awardFeedbackReward.mockResolvedValue({
+            awarded: false,
+            points: 0,
+            point_transaction: null,
+            rule: null,
+        });
+        session.withTransaction.mockImplementation(async (callback) => callback());
+        session.endSession.mockResolvedValue(undefined);
+        mongoose.startSession = jest.fn().mockResolvedValue(session);
     });
 
     it('creates a draft survey and records audit event', async () => {
@@ -278,7 +301,7 @@ describe('survey service', () => {
         WashHistory.findOne.mockResolvedValue(washHistory);
         SurveyResponse.exists.mockResolvedValue(null);
         Upload.find.mockResolvedValue([]);
-        SurveyResponse.create.mockResolvedValue({ _id: responseId });
+        SurveyResponse.create.mockResolvedValue([{ _id: responseId }]);
         SurveyResponse.findById.mockReturnValue(createMultiPopulateQuery(response));
 
         const result = await surveyService.submitSurveyResponse(customerUser, surveyId, {
@@ -292,18 +315,23 @@ describe('survey service', () => {
             upload_ids: [],
         });
 
-        expect(SurveyResponse.create).toHaveBeenCalledWith(expect.objectContaining({
-            survey_id: surveyId,
-            booking_id: bookingId,
-            wash_history_id: washHistoryId,
-            customer_id: customerUser._id,
-            answers: [
+        expect(SurveyResponse.create).toHaveBeenCalledWith(
+            [
                 expect.objectContaining({
-                    question_type_snapshot: 'RATING',
-                    numeric_value: 5,
+                    survey_id: surveyId,
+                    booking_id: bookingId,
+                    wash_history_id: washHistoryId,
+                    customer_id: customerUser._id,
+                    answers: [
+                        expect.objectContaining({
+                            question_type_snapshot: 'RATING',
+                            numeric_value: 5,
+                        }),
+                    ],
                 }),
             ],
-        }));
+            { session }
+        );
         expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
             action: 'SURVEY_RESPONSE_CREATED',
             resourceType: 'SURVEY_RESPONSE',
@@ -432,7 +460,7 @@ describe('survey service', () => {
             related_id: null,
         }]);
         Upload.updateMany.mockResolvedValue({ modifiedCount: 1 });
-        SurveyResponse.create.mockResolvedValue({ _id: responseId });
+        SurveyResponse.create.mockResolvedValue([{ _id: responseId }]);
         SurveyResponse.findById.mockReturnValue(createMultiPopulateQuery(response));
 
         const result = await surveyService.submitSurveyResponse(customerUser, surveyId, {
@@ -456,7 +484,8 @@ describe('survey service', () => {
                     related_type: 'SURVEY_RESPONSE',
                     related_id: responseId,
                 },
-            }
+            },
+            { session }
         );
         expect(result.upload_ids).toEqual([uploadId]);
     });

@@ -39,11 +39,11 @@ jest.mock('./customerCaseNotification.service', () => ({
 }));
 jest.mock('../customer-vouchers/customerVoucher.service', () => ({ issueCompensationVoucher: jest.fn() }));
 jest.mock('../bookings/booking.service', () => ({ createReworkBooking: jest.fn() }));
+jest.mock('../bookings/bookingReward.service', () => ({
+    emitFeedbackRequests: jest.fn(),
+}));
 jest.mock('../wash-histories/washHistory.service', () => ({
     createWashHistoryFromBooking: jest.fn(),
-}));
-jest.mock('../notifications/notification.service', () => ({
-    emitReviewRequest: jest.fn(),
 }));
 jest.mock('../auth/services/phoneVerification.service', () => ({
     requestVerification: jest.fn(), verifyOtp: jest.fn(), getVerifiedChallenge: jest.fn(), consumeVerifiedChallenge: jest.fn(),
@@ -59,8 +59,8 @@ const CustomerCaseTechnicalAssessment = require('./customerCaseTechnicalAssessme
 const CustomerCaseResolution = require('./customerCaseResolution.model');
 const CustomerCaseRefund = require('./customerCaseRefund.model');
 const customerCaseService = require('./customerCase.service');
+const bookingRewardService = require('../bookings/bookingReward.service');
 const washHistoryService = require('../wash-histories/washHistory.service');
-const notificationService = require('../notifications/notification.service');
 const stage2Service = require('./customerCaseStage2.service');
 
 describe('customer case stage 2 service', () => {
@@ -86,7 +86,7 @@ describe('customer case stage 2 service', () => {
         customerCaseService.getCaseDocument.mockResolvedValue(customerCase);
         customerCaseService.getCaseDetail.mockResolvedValue({ case: { id: caseId } });
         washHistoryService.createWashHistoryFromBooking.mockResolvedValue(null);
-        notificationService.emitReviewRequest.mockResolvedValue(null);
+        bookingRewardService.emitFeedbackRequests.mockResolvedValue([]);
     });
 
     it('requires a submitted technical assessment before proposing a technical resolution', async () => {
@@ -206,12 +206,12 @@ describe('customer case stage 2 service', () => {
                     booking,
                     earnedPoints: 0,
                 });
-                expect(notificationService.emitReviewRequest).toHaveBeenCalledWith({
+                expect(bookingRewardService.emitFeedbackRequests).toHaveBeenCalledWith({
                     booking,
                 });
             } else {
                 expect(washHistoryService.createWashHistoryFromBooking).not.toHaveBeenCalled();
-                expect(notificationService.emitReviewRequest).not.toHaveBeenCalled();
+                expect(bookingRewardService.emitFeedbackRequests).not.toHaveBeenCalled();
             }
         }
     );

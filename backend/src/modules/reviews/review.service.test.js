@@ -46,6 +46,11 @@ jest.mock('./reviewSummary.service', () => ({
     getServicePackageSummary: jest.fn(),
 }));
 
+jest.mock('../feedback-rewards/feedbackReward.service', () => ({
+    assertReviewWindowOpen: jest.fn(),
+    awardFeedbackReward: jest.fn(),
+}));
+
 const Review = require('./review.model');
 const Booking = require('../bookings/booking.model');
 const WashHistory = require('../wash-histories/washHistory.model');
@@ -53,6 +58,7 @@ const Garage = require('../garages/garage.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const Upload = require('../uploads/upload.model');
 const auditLogService = require('../audit-logs/auditLog.service');
+const feedbackRewardService = require('../feedback-rewards/feedbackReward.service');
 const reviewService = require('./review.service');
 
 const createQuery = (value) => {
@@ -88,6 +94,16 @@ describe('review service', () => {
         auditLogService.recordAuditEvent.mockResolvedValue(null);
         Upload.find.mockReturnValue(createQuery([]));
         Upload.updateMany.mockResolvedValue({ modifiedCount: 0 });
+        feedbackRewardService.assertReviewWindowOpen.mockResolvedValue({
+            deadline: new Date('2999-01-01T00:00:00.000Z'),
+            reward_points: 50,
+        });
+        feedbackRewardService.awardFeedbackReward.mockResolvedValue({
+            awarded: false,
+            points: 0,
+            point_transaction: null,
+            rule: null,
+        });
     });
 
     it('allows a completed waived booking with wash history to be reviewed', async () => {

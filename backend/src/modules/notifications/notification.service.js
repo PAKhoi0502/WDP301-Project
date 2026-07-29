@@ -401,7 +401,7 @@ const emitRewardEarned = async ({ booking, earnedPoints, session = null }) => {
     });
 };
 
-const emitReviewRequest = async ({ booking, session = null }) => {
+const emitReviewRequest = async ({ booking, rewardPoints = 0, session = null }) => {
     const customerId = booking.customer_id || booking.claimed_customer_id;
 
     if (!customerId) {
@@ -412,13 +412,94 @@ const emitReviewRequest = async ({ booking, session = null }) => {
         userId: customerId,
         type: NOTIFICATION_TYPES.REVIEW_REQUEST,
         title: 'Share your experience',
-        message: 'Your booking is completed and settled. You can now review the garage and service.',
+        message: rewardPoints > 0
+            ? `Review the garage and service to earn ${rewardPoints} reward points.`
+            : 'Your booking is completed and settled. You can now review the garage and service.',
         relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
         relatedId: booking._id,
         metadata: {
             booking_id: booking._id.toString(),
             garage_id: booking.garage_id?.toString?.() || null,
             service_package_id: booking.service_package_id?.toString?.() || null,
+            reward_points: rewardPoints,
+        },
+        session,
+    });
+};
+
+const emitSurveyRequest = async ({
+    booking,
+    survey,
+    rewardPoints = 0,
+    session = null,
+}) => {
+    const customerId = booking.customer_id || booking.claimed_customer_id;
+
+    if (!customerId || !survey) {
+        return null;
+    }
+
+    return createInAppNotification({
+        userId: customerId,
+        type: NOTIFICATION_TYPES.SURVEY_REQUEST,
+        title: 'Tell us about your service experience',
+        message: rewardPoints > 0
+            ? `Complete the post-service survey to earn ${rewardPoints} reward points.`
+            : 'Complete the post-service survey and help us improve.',
+        relatedType: NOTIFICATION_RELATED_TYPES.SURVEY,
+        relatedId: survey._id,
+        metadata: {
+            booking_id: booking._id.toString(),
+            survey_id: survey._id.toString(),
+            reward_points: rewardPoints,
+        },
+        session,
+    });
+};
+
+const emitFeedbackRewardEarned = async ({
+    customerId,
+    bookingId,
+    source,
+    points,
+    transactionId,
+    session = null,
+}) => {
+    return createInAppNotification({
+        userId: customerId,
+        type: NOTIFICATION_TYPES.FEEDBACK_REWARD_EARNED,
+        title: 'Feedback reward earned',
+        message: `You earned ${points} reward points for completing your ${source.toLowerCase()}.`,
+        relatedType: NOTIFICATION_RELATED_TYPES.LOYALTY,
+        relatedId: transactionId,
+        metadata: {
+            booking_id: bookingId.toString(),
+            source,
+            earned_points: points,
+            transaction_id: transactionId.toString(),
+        },
+        session,
+    });
+};
+
+const emitFeedbackReminder = async ({
+    customerId,
+    bookingId,
+    remainingRewardCount,
+    session = null,
+}) => {
+    return createInAppNotification({
+        userId: customerId,
+        type: NOTIFICATION_TYPES.FEEDBACK_REMINDER,
+        title: 'Your feedback rewards are waiting',
+        message: remainingRewardCount > 1
+            ? 'Complete the survey and review before they expire to earn reward points.'
+            : 'You still have one feedback reward available for this booking.',
+        relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+        relatedId: bookingId,
+        metadata: {
+            booking_id: bookingId.toString(),
+            remaining_reward_count: remainingRewardCount,
         },
         session,
     });
@@ -440,4 +521,7 @@ module.exports = {
     emitPaymentConfirmed,
     emitRewardEarned,
     emitReviewRequest,
+    emitSurveyRequest,
+    emitFeedbackRewardEarned,
+    emitFeedbackReminder,
 };

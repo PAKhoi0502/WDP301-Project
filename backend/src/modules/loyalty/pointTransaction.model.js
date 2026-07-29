@@ -19,6 +19,11 @@ const pointTransactionSchema = new mongoose.Schema(
             default: null,
         },
 
+        source_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            default: null,
+        },
+
         type: {
             type: String,
             enum: POINT_TRANSACTION_TYPE_VALUES,
@@ -82,6 +87,16 @@ const pointTransactionSchema = new mongoose.Schema(
             ref: 'User',
             default: null,
         },
+
+        counts_toward_tier: {
+            type: Boolean,
+            default: true,
+        },
+
+        rule_snapshot: {
+            type: mongoose.Schema.Types.Mixed,
+            default: null,
+        },
     },
     {
         timestamps: {
@@ -108,7 +123,12 @@ pointTransactionSchema.index({ expires_at: 1, remaining_points: 1 });
 pointTransactionSchema.index({ created_by: 1 });
 
 pointTransactionSchema.pre('validate', function (next) {
-    if ([POINT_TRANSACTION_TYPES.EARN, POINT_TRANSACTION_TYPES.REFUND].includes(this.type)) {
+    if ([
+        POINT_TRANSACTION_TYPES.EARN,
+        POINT_TRANSACTION_TYPES.SURVEY_REWARD,
+        POINT_TRANSACTION_TYPES.REVIEW_REWARD,
+        POINT_TRANSACTION_TYPES.REFUND,
+    ].includes(this.type)) {
         if (this.points < 0) {
             this.invalidate('points', 'Earn and refund points must be positive');
         }

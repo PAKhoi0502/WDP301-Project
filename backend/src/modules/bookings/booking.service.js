@@ -3629,7 +3629,7 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
         booking,
         actorId: customerId,
     });
-    await bookingViolationService.recordLateCancelIfNeeded({
+    await bookingViolationService.recordCustomerCancellation({
         booking,
         reason: booking.cancel_reason,
         actorId: customerId,

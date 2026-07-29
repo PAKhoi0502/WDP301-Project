@@ -19,6 +19,15 @@ jest.mock('../notifications/notification.service', () => ({
     emitPaymentConfirmed: jest.fn(),
     emitRewardEarned: jest.fn(),
     emitReviewRequest: jest.fn(),
+    emitSurveyRequest: jest.fn(),
+}));
+
+jest.mock('../surveys/survey.model', () => ({
+    findOne: jest.fn(),
+}));
+
+jest.mock('../feedback-rewards/feedbackReward.service', () => ({
+    getEffectiveRule: jest.fn(),
 }));
 
 jest.mock('../booking-violations/bookingViolation.service', () => ({
@@ -30,6 +39,8 @@ const loyaltyService = require('../loyalty/loyalty.service');
 const washHistoryService = require('../wash-histories/washHistory.service');
 const promotionUsageService = require('../promotion-usages/promotionUsage.service');
 const notificationService = require('../notifications/notification.service');
+const Survey = require('../surveys/survey.model');
+const feedbackRewardService = require('../feedback-rewards/feedbackReward.service');
 const bookingViolationService = require('../booking-violations/bookingViolation.service');
 const bookingRewardService = require('./bookingReward.service');
 
@@ -51,6 +62,14 @@ describe('booking reward service', () => {
         notificationService.emitPaymentConfirmed.mockResolvedValue(null);
         notificationService.emitRewardEarned.mockResolvedValue(null);
         notificationService.emitReviewRequest.mockResolvedValue(null);
+        notificationService.emitSurveyRequest.mockResolvedValue(null);
+        feedbackRewardService.getEffectiveRule.mockResolvedValue({
+            survey_points: 50,
+            review_points: 50,
+        });
+        const surveyQuery = createQueryMock(null);
+        surveyQuery.sort = jest.fn(() => surveyQuery);
+        Survey.findOne.mockReturnValue(surveyQuery);
     });
 
     it('records completed booking violation recovery when processing paid booking reward', async () => {
@@ -79,6 +98,7 @@ describe('booking reward service', () => {
         notificationService.emitPaymentConfirmed.mockResolvedValue({ id: 'payment-notification-id' });
         notificationService.emitRewardEarned.mockResolvedValue({ id: 'reward-notification-id' });
         notificationService.emitReviewRequest.mockResolvedValue({ id: 'review-notification-id' });
+        notificationService.emitSurveyRequest.mockResolvedValue({ id: 'survey-notification-id' });
         bookingViolationService.recordCompletedPaidBooking.mockResolvedValue({ score_change: -1 });
 
         const result = await bookingRewardService.processCompletedPaidBooking({
@@ -95,6 +115,7 @@ describe('booking reward service', () => {
         expect(booking.reward_processed).toBe(true);
         expect(notificationService.emitReviewRequest).toHaveBeenCalledWith({
             booking,
+            rewardPoints: 50,
             session,
         });
         expect(result).toMatchObject({
@@ -104,6 +125,7 @@ describe('booking reward service', () => {
                 { id: 'payment-notification-id' },
                 { id: 'reward-notification-id' },
                 { id: 'review-notification-id' },
+                { id: 'survey-notification-id' },
             ],
         });
     });

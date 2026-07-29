@@ -11,8 +11,8 @@ const customerCaseService = require('./customerCase.service');
 const customerCaseNotificationService = require('./customerCaseNotification.service');
 const customerVoucherService = require('../customer-vouchers/customerVoucher.service');
 const bookingService = require('../bookings/booking.service');
+const bookingRewardService = require('../bookings/bookingReward.service');
 const washHistoryService = require('../wash-histories/washHistory.service');
-const notificationService = require('../notifications/notification.service');
 const auditLogService = require('../audit-logs/auditLog.service');
 const { AppError } = require('../../shared/utils/appError');
 const { normalizePhone } = require('../../shared/utils/phone');
@@ -575,9 +575,7 @@ const applyResolution = async (user, caseId, resolutionId, auditContext = {}) =>
                         booking,
                         earnedPoints: 0,
                     });
-                    await notificationService.emitReviewRequest({
-                        booking,
-                    });
+                    await bookingRewardService.emitFeedbackRequests({ booking });
                 }
             }
         }

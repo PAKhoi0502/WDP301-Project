@@ -28,6 +28,8 @@ const customerCaseSwagger = require('../../modules/customer-cases/customerCase.s
 const bookingArrivalSwagger = require('../../modules/booking-arrivals/bookingArrival.swagger');
 const staffBookingWorkflowSwagger = require('../../modules/staff-booking-workflows/staffBookingWorkflow.swagger');
 const reviewSwagger = require('../../modules/reviews/review.swagger');
+const feedbackRewardSwagger = require('../../modules/feedback-rewards/feedbackReward.swagger');
+const bookingViolationSwagger = require('../../modules/booking-violations/bookingViolation.swagger');
 const { enrichOpenApiRoles } = require('./roleMetadata');
 
 const openApiSpec = enrichOpenApiRoles({
@@ -72,6 +74,8 @@ const openApiSpec = enrichOpenApiRoles({
         ...bookingArrivalSwagger.tags,
         ...staffBookingWorkflowSwagger.tags,
         ...reviewSwagger.tags,
+        ...feedbackRewardSwagger.tags,
+        ...bookingViolationSwagger.tags,
     ],
     paths,
     components: {
@@ -106,6 +110,8 @@ const openApiSpec = enrichOpenApiRoles({
             ...bookingArrivalSwagger.schemas,
             ...staffBookingWorkflowSwagger.schemas,
             ...reviewSwagger.schemas,
+            ...feedbackRewardSwagger.schemas,
+            ...bookingViolationSwagger.schemas,
         },
     },
 });

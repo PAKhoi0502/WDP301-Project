@@ -312,8 +312,8 @@ const verifyBookingsViolations = async ({
     );
 
     if (
-        violationScoreCounts['2'] !== 6
-        || violationScoreCounts['4'] !== 1
+        violationScoreCounts['3'] !== 6
+        || violationScoreCounts['6'] !== 1
     ) {
         throw new Error(
             `Booking violation score mismatch: ${JSON.stringify(violationScoreCounts)}`

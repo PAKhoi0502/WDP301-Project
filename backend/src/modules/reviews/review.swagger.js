@@ -93,6 +93,15 @@ const schemas = {
             moderated_by: { type: 'object', nullable: true },
             moderated_at: { type: 'string', format: 'date-time', nullable: true },
             garage_reply: { $ref: '#/components/schemas/ReviewGarageReply' },
+            reward: {
+                type: 'object',
+                properties: {
+                    awarded: { type: 'boolean' },
+                    points: { type: 'integer' },
+                    transaction_id: { type: 'string', nullable: true },
+                    awarded_at: { type: 'string', format: 'date-time', nullable: true },
+                },
+            },
             deleted_at: { type: 'string', format: 'date-time', nullable: true },
             created_at: { type: 'string', format: 'date-time' },
             updated_at: { type: 'string', format: 'date-time' },

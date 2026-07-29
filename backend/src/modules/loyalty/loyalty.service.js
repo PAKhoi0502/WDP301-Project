@@ -50,6 +50,17 @@ const isSameObjectId = (left, right) => {
     return left.toString() === right.toString();
 };
 
+const getQualifyingPoints = (loyalty) => {
+    if (Number.isFinite(loyalty?.qualifying_points)) {
+        return loyalty.qualifying_points;
+    }
+
+    return Math.max(
+        0,
+        (Number(loyalty?.total_points) || 0) - (Number(loyalty?.bonus_points) || 0)
+    );
+};
+
 const getActiveRedeemRule = async (session = null) => {
     const query = LoyaltyRedeemRule.findOne({ is_active: true }).sort({ created_at: -1 });
 
@@ -252,7 +263,12 @@ const getRedeemSourceTransactions = async ({ customerId, usedPoints, session = n
     const query = PointTransaction.find({
         customer_id: customerId,
         type: {
-            $in: [POINT_TRANSACTION_TYPES.EARN, POINT_TRANSACTION_TYPES.REFUND],
+            $in: [
+                POINT_TRANSACTION_TYPES.EARN,
+                POINT_TRANSACTION_TYPES.SURVEY_REWARD,
+                POINT_TRANSACTION_TYPES.REVIEW_REWARD,
+                POINT_TRANSACTION_TYPES.REFUND,
+            ],
         },
         remaining_points: { $gt: 0 },
     }).sort({ expires_at: 1, created_at: 1 });
@@ -508,6 +524,8 @@ const getOrCreateCustomerLoyalty = async (customerId, session = null) => {
                 customer_id: customerId,
                 current_tier: LOYALTY_TIERS.BRONZE,
                 total_points: 0,
+                qualifying_points: 0,
+                bonus_points: 0,
                 available_points: 0,
                 redeemed_points: 0,
                 expired_points: 0,
@@ -583,11 +601,12 @@ const getTierRuleContext = async (loyalty, session = null) => {
 
 const getHighestEligibleTierRule = (loyalty, tierRules = []) => {
     const orderedTierRules = [...tierRules].sort((left, right) => right.priority_level - left.priority_level);
+    const qualifyingPoints = getQualifyingPoints(loyalty);
 
     return orderedTierRules.find((tierRule) => {
         return loyalty.total_spent >= tierRule.min_total_spent
             && loyalty.total_visits >= tierRule.min_total_visits
-            && loyalty.total_points >= tierRule.min_total_points;
+            && qualifyingPoints >= tierRule.min_total_points;
     }) || orderedTierRules.find((tierRule) => tierRule.tier_name === LOYALTY_TIERS.BRONZE) || null;
 };
 
@@ -742,7 +761,10 @@ const processBookingLoyalty = async ({
     let pointTransaction = null;
 
     if (earnedPoints > 0) {
+        const qualifyingPointsBefore = getQualifyingPoints(loyalty);
+
         loyalty.total_points += earnedPoints;
+        loyalty.qualifying_points = qualifyingPointsBefore + earnedPoints;
         loyalty.available_points = balanceAfter;
 
         const transactions = await PointTransaction.create(
@@ -1020,7 +1042,12 @@ const findCustomerIdsBySearch = async (search) => {
 const buildExpiringPointFilter = ({ customer_id, expires_before } = {}) => {
     const filter = {
         type: {
-            $in: [POINT_TRANSACTION_TYPES.EARN, POINT_TRANSACTION_TYPES.REFUND],
+            $in: [
+                POINT_TRANSACTION_TYPES.EARN,
+                POINT_TRANSACTION_TYPES.SURVEY_REWARD,
+                POINT_TRANSACTION_TYPES.REVIEW_REWARD,
+                POINT_TRANSACTION_TYPES.REFUND,
+            ],
         },
         remaining_points: { $gt: 0 },
         expires_at: {

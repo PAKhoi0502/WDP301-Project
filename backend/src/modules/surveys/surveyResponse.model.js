@@ -106,6 +106,29 @@ const surveyResponseSchema = new mongoose.Schema(
             type: Date,
             default: Date.now,
         },
+
+        reward_points: {
+            type: Number,
+            min: 0,
+            default: 0,
+        },
+
+        reward_transaction_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'PointTransaction',
+            default: null,
+        },
+
+        reward_rule_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'FeedbackRewardRule',
+            default: null,
+        },
+
+        rewarded_at: {
+            type: Date,
+            default: null,
+        },
     },
     {
         timestamps: {
@@ -121,6 +144,7 @@ surveyResponseSchema.index({ survey_id: 1, submitted_at: -1 });
 surveyResponseSchema.index({ customer_id: 1, submitted_at: -1 });
 surveyResponseSchema.index({ booking_id: 1 });
 surveyResponseSchema.index({ wash_history_id: 1 });
+surveyResponseSchema.index({ reward_transaction_id: 1 });
 
 surveyResponseSchema.methods.toJSON = function () {
     const response = this.toObject();

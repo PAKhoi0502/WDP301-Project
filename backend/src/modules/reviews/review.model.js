@@ -173,6 +173,25 @@ const reviewSchema = new mongoose.Schema(
             type: garageReplySchema,
             default: null,
         },
+        reward_points: {
+            type: Number,
+            min: 0,
+            default: 0,
+        },
+        reward_transaction_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'PointTransaction',
+            default: null,
+        },
+        reward_rule_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'FeedbackRewardRule',
+            default: null,
+        },
+        rewarded_at: {
+            type: Date,
+            default: null,
+        },
         deleted_at: {
             type: Date,
             default: null,
@@ -198,6 +217,7 @@ reviewSchema.index({ customer_id: 1, deleted_at: 1, created_at: -1 });
 reviewSchema.index({ moderation_status: 1, deleted_at: 1, created_at: -1 });
 reviewSchema.index({ garage_id: 1, garage_rating: 1, moderation_status: 1, deleted_at: 1 });
 reviewSchema.index({ service_package_id: 1, service_rating: 1, moderation_status: 1, deleted_at: 1 });
+reviewSchema.index({ reward_transaction_id: 1 });
 
 reviewSchema.pre('validate', function (next) {
     if (this.moderation_status === REVIEW_MODERATION_STATUSES.HIDDEN && !this.moderation_reason) {

@@ -32,6 +32,14 @@ jest.mock('../modules/booking-arrivals/bookingArrival.service', () => ({
     expirePendingScans: jest.fn(),
 }));
 
+jest.mock('../modules/feedback-rewards/feedbackReward.service', () => ({
+    sendDueReminders: jest.fn(),
+}));
+
+jest.mock('../modules/booking-violations/bookingViolation.service', () => ({
+    processInactivityRecovery: jest.fn(),
+}));
+
 const bookingWaitlistService = require('../modules/booking-waitlists/bookingWaitlist.service');
 const notificationService = require('../modules/notifications/notification.service');
 const loyaltyService = require('../modules/loyalty/loyalty.service');
@@ -40,6 +48,7 @@ const paymentService = require('../modules/payments/payment.service');
 const staffTypeChangeService = require('../modules/staff-profiles/staffTypeChange.service');
 const customerCaseStage2Service = require('../modules/customer-cases/customerCaseStage2.service');
 const bookingArrivalService = require('../modules/booking-arrivals/bookingArrival.service');
+const bookingViolationService = require('../modules/booking-violations/bookingViolation.service');
 const schedulerService = require('./scheduler.service');
 
 describe('scheduler service', () => {
@@ -57,6 +66,7 @@ describe('scheduler service', () => {
         delete process.env.CUSTOMER_CASE_SLA_BATCH_SIZE;
         delete process.env.PLATE_SCAN_RETENTION_BATCH_SIZE;
         delete process.env.PLATE_SCAN_EXPIRE_BATCH_SIZE;
+        delete process.env.BOOKING_VIOLATION_RECOVERY_BATCH_SIZE;
     });
 
     afterEach(() => {
@@ -92,6 +102,7 @@ describe('scheduler service', () => {
             expect.objectContaining({ name: schedulerService.JOB_NAMES.CUSTOMER_CASE_SLA }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.PLATE_SCAN_RETENTION }),
             expect.objectContaining({ name: schedulerService.JOB_NAMES.PLATE_SCAN_EXPIRE }),
+            expect.objectContaining({ name: schedulerService.JOB_NAMES.BOOKING_VIOLATION_RECOVERY }),
         ]));
     });
 

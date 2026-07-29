@@ -10,6 +10,7 @@ const ServicePackage = require('../service-packages/servicePackage.model');
 const Upload = require('../uploads/upload.model');
 const auditLogService = require('../audit-logs/auditLog.service');
 const notificationService = require('../notifications/notification.service');
+const feedbackRewardService = require('../feedback-rewards/feedbackReward.service');
 const { AppError } = require('../../shared/utils/appError');
 const {
     BOOKING_STATUS,
@@ -31,6 +32,9 @@ const {
     NOTIFICATION_TYPES,
     NOTIFICATION_RELATED_TYPES,
 } = require('../../shared/constants/notification.constant');
+const {
+    FEEDBACK_REWARD_SOURCES,
+} = require('../../shared/constants/feedbackReward.constant');
 
 const ACTIVE_PAYMENT_STATUSES = Object.freeze([
     BOOKING_PAYMENT_STATUS.PAID,
@@ -193,6 +197,11 @@ const getEligibleReviewContext = async (customerId, bookingId, session = null) =
     );
 
     assertBookingReviewEligible(booking, washHistory);
+    const rewardContext = await feedbackRewardService.assertReviewWindowOpen({
+        booking,
+        washHistory,
+        session,
+    });
 
     const garageQuery = Garage.findById(washHistory.garage_id);
     const servicePackageQuery = ServicePackage.findById(washHistory.service_package_id);
@@ -220,6 +229,7 @@ const getEligibleReviewContext = async (customerId, bookingId, session = null) =
         washHistory,
         garage,
         servicePackage,
+        rewardContext,
     };
 };
 
@@ -534,6 +544,25 @@ const getReviewEligibility = async (customerId, bookingId) => {
         };
     }
 
+    let rewardContext;
+
+    try {
+        rewardContext = await feedbackRewardService.assertReviewWindowOpen({
+            booking,
+            washHistory,
+        });
+    } catch (error) {
+        if (error?.errorCode === 'REVIEW_WINDOW_EXPIRED') {
+            return {
+                eligible: false,
+                reason_code: 'REVIEW_WINDOW_EXPIRED',
+                review: null,
+            };
+        }
+
+        throw error;
+    }
+
     return {
         eligible: true,
         reason_code: null,
@@ -543,6 +572,8 @@ const getReviewEligibility = async (customerId, bookingId) => {
             wash_history_id: washHistory._id.toString(),
             garage_id: washHistory.garage_id.toString(),
             service_package_id: washHistory.service_package_id.toString(),
+            response_expires_at: rewardContext.deadline,
+            reward_points: rewardContext.reward_points,
         },
     };
 };
@@ -643,6 +674,22 @@ const createReview = async (
                 }
             }
 
+            const rewardResult = await feedbackRewardService.awardFeedbackReward({
+                customerId: user._id,
+                bookingId: context.booking._id,
+                source: FEEDBACK_REWARD_SOURCES.REVIEW,
+                sourceId: review._id,
+                session,
+            });
+
+            if (rewardResult.awarded) {
+                review.reward_points = rewardResult.points;
+                review.reward_transaction_id = rewardResult.point_transaction.id;
+                review.reward_rule_id = rewardResult.rule?.id || null;
+                review.rewarded_at = rewardResult.point_transaction.earned_at;
+                await review.save({ session });
+            }
+
             const populatedReview = await getPopulatedReviewById(review._id, session);
             const result = ReviewMapper.toReviewDto(populatedReview, { access: 'customer' });
 
@@ -658,6 +705,8 @@ const createReview = async (
                     booking_id: context.booking._id.toString(),
                     garage_id: context.washHistory.garage_id.toString(),
                     service_package_id: context.washHistory.service_package_id.toString(),
+                    reward_points: rewardResult.points,
+                    reward_transaction_id: rewardResult.point_transaction?.id || null,
                 },
                 session,
             });

@@ -951,6 +951,43 @@ const ROUTE_GROUPS = Object.freeze([
         ],
     },
     {
+        roles: ['CUSTOMER'],
+        feature: 'Feedback rewards',
+        operations: [
+            'GET /feedback-rewards/status',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Feedback reward management',
+        operations: [
+            'GET /admin/feedback-rewards/rule',
+            'PATCH /admin/feedback-rewards/rule',
+            'GET /admin/feedback-rewards/analytics',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'Booking reliability',
+        operations: [
+            'GET /booking-violations/me',
+            'GET /booking-violations/me/history',
+            'GET /booking-violations/me/appeals',
+            'POST /booking-violations/me/appeals',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Booking violation management',
+        operations: [
+            'GET /admin/booking-violations',
+            'GET /admin/booking-violations/{customerId}',
+            'POST /admin/booking-violations/{customerId}/adjustments',
+            'GET /admin/booking-violations/appeals',
+            'PATCH /admin/booking-violations/appeals/{appealId}',
+        ],
+    },
+    {
         roles: ['ADMIN'],
         feature: 'Analytics',
         operations: [

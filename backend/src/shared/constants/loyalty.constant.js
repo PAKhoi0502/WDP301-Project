@@ -9,6 +9,8 @@ const LOYALTY_TIER_VALUES = Object.freeze(Object.values(LOYALTY_TIERS));
 
 const POINT_TRANSACTION_TYPES = Object.freeze({
     EARN: 'EARN',
+    SURVEY_REWARD: 'SURVEY_REWARD',
+    REVIEW_REWARD: 'REVIEW_REWARD',
     REDEEM: 'REDEEM',
     REFUND: 'REFUND',
     EXPIRE: 'EXPIRE',

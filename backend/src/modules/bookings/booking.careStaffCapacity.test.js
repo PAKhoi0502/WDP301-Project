@@ -77,6 +77,7 @@ jest.mock('../loyalty/loyalty.service', () => ({
 }));
 jest.mock('../booking-violations/bookingViolation.service', () => ({
     assertCustomerCanCreateBooking: jest.fn(),
+    recordCustomerCancellation: jest.fn(),
     recordLateCancelIfNeeded: jest.fn(),
     recordNoShow: jest.fn(),
 }));
@@ -306,6 +307,7 @@ describe('booking care staff capacity', () => {
         loyaltyService.redeemPointsForBooking.mockResolvedValue(null);
         loyaltyService.refundRedeemedPointsForBooking.mockResolvedValue(null);
         bookingViolationService.assertCustomerCanCreateBooking.mockResolvedValue({ allowed: true });
+        bookingViolationService.recordCustomerCancellation.mockResolvedValue(null);
         bookingViolationService.recordLateCancelIfNeeded.mockResolvedValue(null);
         bookingViolationService.recordNoShow.mockResolvedValue(null);
         CustomerLoyalty.findOne.mockReturnValue({
@@ -993,7 +995,7 @@ describe('booking care staff capacity', () => {
         });
         expect(WashBay.findOneAndUpdate).not.toHaveBeenCalled();
         expect(bookingServiceStepService.markResourceReleasedForBookingItem).not.toHaveBeenCalled();
-        expect(bookingViolationService.recordLateCancelIfNeeded).not.toHaveBeenCalled();
+        expect(bookingViolationService.recordCustomerCancellation).not.toHaveBeenCalled();
         expect(bookingViolationService.recordNoShow).not.toHaveBeenCalled();
         expect(result.status).toBe('CANCELED');
     });

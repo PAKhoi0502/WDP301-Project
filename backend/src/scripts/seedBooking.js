@@ -13,6 +13,9 @@ const WashBay = require('../modules/wash-bays/washBay.model');
 const {
     BOOKING_VIOLATION_EVENTS,
     BOOKING_VIOLATION_SCORE,
+    BOOKING_VIOLATION_DEPOSIT_THRESHOLD,
+    BOOKING_VIOLATION_WARNING_THRESHOLD,
+    BOOKING_VIOLATION_RISK_STATUSES,
 } = require('../modules/booking-violations/bookingViolation.constant');
 const {
     BOOKING_STATUS,
@@ -1725,14 +1728,22 @@ const rebuildNoShowViolations = async ({
             (event) => toId(event.customer_id) === toId(customerId)
         );
         const lastEvent = customerEvents[customerEvents.length - 1];
+        const violationScore = scoreByCustomer.get(toId(customerId)) || 0;
+        const riskStatus = violationScore >= BOOKING_VIOLATION_DEPOSIT_THRESHOLD
+            ? BOOKING_VIOLATION_RISK_STATUSES.DEPOSIT_REQUIRED
+            : violationScore >= BOOKING_VIOLATION_WARNING_THRESHOLD
+                ? BOOKING_VIOLATION_RISK_STATUSES.WARNING
+                : BOOKING_VIOLATION_RISK_STATUSES.NORMAL;
         const payload = {
             customer_id: customerId,
-            violation_score: scoreByCustomer.get(toId(customerId)) || 0,
+            violation_score: violationScore,
+            risk_status: riskStatus,
             booking_blocked_until: null,
             booking_block_count: 0,
             last_violation_at:
                 lastViolationByCustomer.get(toId(customerId)) || null,
             last_event_at: lastEvent?.created_at || null,
+            last_recovery_at: null,
             updated_at: lastEvent?.created_at || new Date(),
         };
         const validationError = new CustomerBookingViolation(

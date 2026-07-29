@@ -113,6 +113,13 @@ const toSurveyResponseDto = (response) => {
             .filter((upload) => upload && typeof upload === 'object' && upload._id)
             .map((upload) => UploadMapper.toUploadDto(upload)),
         submitted_at: plainResponse.submitted_at,
+        reward: {
+            awarded: Boolean(plainResponse.reward_transaction_id),
+            points: plainResponse.reward_points || 0,
+            transaction_id: toId(plainResponse.reward_transaction_id),
+            rule_id: toId(plainResponse.reward_rule_id),
+            awarded_at: plainResponse.rewarded_at,
+        },
         created_at: plainResponse.created_at,
         updated_at: plainResponse.updated_at,
     };

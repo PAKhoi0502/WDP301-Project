@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const {
+    BOOKING_VIOLATION_RISK_STATUSES,
+    BOOKING_VIOLATION_RISK_STATUS_VALUES,
+} = require('./bookingViolation.constant');
 
 const customerBookingViolationSchema = new mongoose.Schema(
     {
@@ -26,12 +30,24 @@ const customerBookingViolationSchema = new mongoose.Schema(
             default: 0,
         },
 
+        risk_status: {
+            type: String,
+            enum: BOOKING_VIOLATION_RISK_STATUS_VALUES,
+            default: BOOKING_VIOLATION_RISK_STATUSES.NORMAL,
+            required: true,
+        },
+
         last_violation_at: {
             type: Date,
             default: null,
         },
 
         last_event_at: {
+            type: Date,
+            default: null,
+        },
+
+        last_recovery_at: {
             type: Date,
             default: null,
         },
@@ -46,8 +62,10 @@ const customerBookingViolationSchema = new mongoose.Schema(
 );
 
 customerBookingViolationSchema.index({ violation_score: -1 });
+customerBookingViolationSchema.index({ risk_status: 1, violation_score: -1 });
 customerBookingViolationSchema.index({ booking_blocked_until: 1 });
 customerBookingViolationSchema.index({ last_violation_at: -1 });
+customerBookingViolationSchema.index({ last_recovery_at: 1 });
 
 customerBookingViolationSchema.methods.toJSON = function () {
     const violation = this.toObject();

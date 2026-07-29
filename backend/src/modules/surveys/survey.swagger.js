@@ -55,6 +55,7 @@ const surveySchema = {
             items: surveyQuestionSchema,
         },
         response_window_days: { type: 'number' },
+        reward_points: { type: 'integer', example: 50 },
         created_by_id: { type: 'string' },
         created_by: { type: 'object', nullable: true },
         published_at: { type: 'string', format: 'date-time', nullable: true },
@@ -105,6 +106,15 @@ const surveyResponseSchema = {
             items: { $ref: '#/components/schemas/Upload' },
         },
         submitted_at: { type: 'string', format: 'date-time' },
+        reward: {
+            type: 'object',
+            properties: {
+                awarded: { type: 'boolean' },
+                points: { type: 'integer' },
+                transaction_id: { type: 'string', nullable: true },
+                awarded_at: { type: 'string', format: 'date-time', nullable: true },
+            },
+        },
         created_at: { type: 'string', format: 'date-time' },
         updated_at: { type: 'string', format: 'date-time' },
     },

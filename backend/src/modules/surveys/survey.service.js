@@ -1,3 +1,5 @@
+const mongoose = require('mongoose');
+
 const Survey = require('./survey.model');
 const SurveyResponse = require('./surveyResponse.model');
 const SurveyMapper = require('./survey.mapper');
@@ -5,6 +7,7 @@ const Booking = require('../bookings/booking.model');
 const WashHistory = require('../wash-histories/washHistory.model');
 const Upload = require('../uploads/upload.model');
 const auditLogService = require('../audit-logs/auditLog.service');
+const feedbackRewardService = require('../feedback-rewards/feedbackReward.service');
 const { AppError } = require('../../shared/utils/appError');
 const {
     SURVEY_STATUSES,
@@ -22,6 +25,29 @@ const {
     AUDIT_ACTIONS,
     AUDIT_RESOURCE_TYPES,
 } = require('../../shared/constants/audit.constant');
+const {
+    FEEDBACK_REWARD_SOURCES,
+} = require('../../shared/constants/feedbackReward.constant');
+
+const ACTIVE_PAYMENT_STATUSES = Object.freeze([
+    BOOKING_PAYMENT_STATUS.PAID,
+    BOOKING_PAYMENT_STATUS.WAIVED,
+]);
+
+const runInTransaction = async (callback) => {
+    const session = await mongoose.startSession();
+    let result;
+
+    try {
+        await session.withTransaction(async () => {
+            result = await callback(session);
+        });
+    } finally {
+        await session.endSession();
+    }
+
+    return result;
+};
 
 const normalizeText = (value) => {
     if (value === null || value === undefined) {
@@ -286,28 +312,46 @@ const closeSurvey = async (user, surveyId, auditContext = {}) => {
     return result;
 };
 
-const getEligibleBookingContext = async (customerId, bookingId) => {
-    const booking = await Booking.findOne({
+const getEligibleBookingContext = async (customerId, bookingId, session = null) => {
+    const bookingQuery = Booking.findOne({
         _id: bookingId,
-        customer_id: customerId,
+        $or: [
+            { customer_id: customerId },
+            { claimed_customer_id: customerId },
+        ],
     });
+
+    if (session && typeof bookingQuery.session === 'function') {
+        bookingQuery.session(session);
+    }
+
+    const booking = await bookingQuery;
 
     if (!booking) {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
     }
 
-    if (booking.status !== BOOKING_STATUS.COMPLETED || booking.payment_status !== BOOKING_PAYMENT_STATUS.PAID) {
+    if (
+        booking.status !== BOOKING_STATUS.COMPLETED
+        || !ACTIVE_PAYMENT_STATUSES.includes(booking.payment_status)
+    ) {
         throw new AppError(
-            'Survey is only available after booking is completed and paid',
+            'Survey is only available after booking is completed and settled',
             409,
             'SURVEY_BOOKING_NOT_ELIGIBLE'
         );
     }
 
-    const washHistory = await WashHistory.findOne({
+    const washHistoryQuery = WashHistory.findOne({
         booking_id: booking._id,
         customer_id: customerId,
     });
+
+    if (session && typeof washHistoryQuery.session === 'function') {
+        washHistoryQuery.session(session);
+    }
+
+    const washHistory = await washHistoryQuery;
 
     if (!washHistory) {
         throw new AppError('Wash history is required before survey submission', 409, 'SURVEY_WASH_HISTORY_REQUIRED');
@@ -340,19 +384,21 @@ const assertSurveyResponseWindowOpen = (survey, booking, washHistory) => {
 
 const getAvailableSurveys = async (customerId, bookingId) => {
     const { booking, washHistory } = await getEligibleBookingContext(customerId, bookingId);
-    const [surveys, responses] = await Promise.all([
+    const [surveys, responses, rewardRule] = await Promise.all([
         Survey.find({
             status: SURVEY_STATUSES.PUBLISHED,
         }).sort({ published_at: -1 }),
         SurveyResponse.find({
             booking_id: booking._id,
         }).select('survey_id'),
+        feedbackRewardService.getEffectiveRule(),
     ]);
     const respondedSurveyIds = new Set(
         responses.map((response) => response.survey_id.toString())
     );
 
     return surveys
+        .slice(0, 1)
         .filter((survey) => {
             if (respondedSurveyIds.has(survey._id.toString())) {
                 return false;
@@ -364,6 +410,7 @@ const getAvailableSurveys = async (customerId, bookingId) => {
             booking_id: booking._id.toString(),
             wash_history_id: washHistory._id.toString(),
             response_expires_at: getResponseExpiresAt(survey, booking, washHistory),
+            reward_points: rewardRule?.survey_points || 0,
         }));
 };
 
@@ -493,20 +540,26 @@ const normalizeAnswers = (survey, answers = []) => {
         .map((question) => answersByQuestionId.get(question._id.toString()));
 };
 
-const getSurveyUploads = async (customerId, uploadIds = []) => {
+const getSurveyUploads = async (customerId, uploadIds = [], session = null) => {
     const uniqueUploadIds = [...new Set(uploadIds)];
 
     if (uniqueUploadIds.length === 0) {
         return [];
     }
 
-    const uploads = await Upload.find({
+    const query = Upload.find({
         _id: { $in: uniqueUploadIds },
         owner_id: customerId,
         purpose: UPLOAD_PURPOSES.SURVEY_RESPONSE,
         related_type: null,
         related_id: null,
     });
+
+    if (session && typeof query.session === 'function') {
+        query.session(session);
+    }
+
+    const uploads = await query;
 
     if (uploads.length !== uniqueUploadIds.length) {
         throw new AppError(
@@ -524,94 +577,142 @@ const getSurveyUploads = async (customerId, uploadIds = []) => {
 };
 
 const submitSurveyResponse = async (user, surveyId, payload = {}, auditContext = {}) => {
-    const survey = await Survey.findById(surveyId);
+    return runInTransaction(async (session) => {
+        const surveyQuery = Survey.findById(surveyId);
 
-    if (!survey || survey.status !== SURVEY_STATUSES.PUBLISHED) {
-        throw new AppError('Published survey not found', 404, 'SURVEY_NOT_FOUND');
-    }
+        if (typeof surveyQuery?.session === 'function') {
+            surveyQuery.session(session);
+        }
 
-    const { booking, washHistory } = await getEligibleBookingContext(user._id, payload.booking_id);
+        const survey = await surveyQuery;
 
-    assertSurveyResponseWindowOpen(survey, booking, washHistory);
+        if (!survey || survey.status !== SURVEY_STATUSES.PUBLISHED) {
+            throw new AppError('Published survey not found', 404, 'SURVEY_NOT_FOUND');
+        }
 
-    const existedResponse = await SurveyResponse.exists({
-        survey_id: survey._id,
-        booking_id: booking._id,
-    });
-
-    if (existedResponse) {
-        throw new AppError('Survey response already exists for this booking', 409, 'SURVEY_RESPONSE_ALREADY_EXISTS');
-    }
-
-    const answers = normalizeAnswers(survey, payload.answers || []);
-    const uploads = await getSurveyUploads(user._id, payload.upload_ids || []);
-    const response = await SurveyResponse.create({
-        survey_id: survey._id,
-        booking_id: booking._id,
-        wash_history_id: washHistory._id,
-        customer_id: user._id,
-        answers,
-        upload_ids: uploads.map((upload) => upload._id),
-        submitted_at: new Date(),
-    });
-
-    if (uploads.length > 0) {
-        const uploadIds = uploads.map((upload) => upload._id);
-        const updateResult = await Upload.updateMany(
-            {
-                _id: { $in: uploadIds },
-                owner_id: user._id,
-                related_type: null,
-                related_id: null,
-            },
-            {
-                $set: {
-                    related_type: UPLOAD_RELATED_TYPES.SURVEY_RESPONSE,
-                    related_id: response._id,
-                },
-            }
+        const { booking, washHistory } = await getEligibleBookingContext(
+            user._id,
+            payload.booking_id,
+            session
         );
 
-        if ((updateResult.modifiedCount || 0) !== uploads.length) {
-            await Upload.updateMany(
+        assertSurveyResponseWindowOpen(survey, booking, washHistory);
+
+        const existedResponseQuery = SurveyResponse.exists({
+            survey_id: survey._id,
+            booking_id: booking._id,
+        });
+
+        if (typeof existedResponseQuery?.session === 'function') {
+            existedResponseQuery.session(session);
+        }
+
+        const existedResponse = await existedResponseQuery;
+
+        if (existedResponse) {
+            throw new AppError(
+                'Survey response already exists for this booking',
+                409,
+                'SURVEY_RESPONSE_ALREADY_EXISTS'
+            );
+        }
+
+        const answers = normalizeAnswers(survey, payload.answers || []);
+        const uploads = await getSurveyUploads(
+            user._id,
+            payload.upload_ids || [],
+            session
+        );
+        const documents = await SurveyResponse.create(
+            [
                 {
-                    related_type: UPLOAD_RELATED_TYPES.SURVEY_RESPONSE,
-                    related_id: response._id,
+                    survey_id: survey._id,
+                    booking_id: booking._id,
+                    wash_history_id: washHistory._id,
+                    customer_id: user._id,
+                    answers,
+                    upload_ids: uploads.map((upload) => upload._id),
+                    submitted_at: new Date(),
+                },
+            ],
+            { session }
+        );
+        const [response] = documents;
+
+        if (uploads.length > 0) {
+            const uploadIds = uploads.map((upload) => upload._id);
+            const updateResult = await Upload.updateMany(
+                {
+                    _id: { $in: uploadIds },
+                    owner_id: user._id,
+                    related_type: null,
+                    related_id: null,
                 },
                 {
                     $set: {
-                        related_type: null,
-                        related_id: null,
+                        related_type: UPLOAD_RELATED_TYPES.SURVEY_RESPONSE,
+                        related_id: response._id,
                     },
-                }
+                },
+                { session }
             );
-            await SurveyResponse.deleteOne({ _id: response._id });
 
-            throw new AppError('Failed to attach uploads to survey response', 409, 'SURVEY_UPLOAD_ATTACH_CONFLICT');
+            if ((updateResult.modifiedCount || 0) !== uploads.length) {
+                throw new AppError(
+                    'Failed to attach uploads to survey response',
+                    409,
+                    'SURVEY_UPLOAD_ATTACH_CONFLICT'
+                );
+            }
         }
-    }
 
-    const populatedResponse = await populateSurveyResponseQuery(
-        SurveyResponse.findById(response._id)
-    );
-    const result = SurveyMapper.toSurveyResponseDto(populatedResponse);
+        const rewardResult = await feedbackRewardService.awardFeedbackReward({
+            customerId: user._id,
+            bookingId: booking._id,
+            source: FEEDBACK_REWARD_SOURCES.SURVEY,
+            sourceId: response._id,
+            session,
+        });
 
-    await auditLogService.recordAuditEvent({
-        actorId: user._id,
-        action: AUDIT_ACTIONS.SURVEY_RESPONSE_CREATED,
-        resourceType: AUDIT_RESOURCE_TYPES.SURVEY_RESPONSE,
-        resourceId: response._id,
-        after: result,
-        ip: auditContext.ip,
-        userAgent: auditContext.userAgent,
-        metadata: {
-            survey_id: survey._id.toString(),
-            booking_id: booking._id.toString(),
-            wash_history_id: washHistory._id.toString(),
-        },
+        if (rewardResult.awarded) {
+            response.reward_points = rewardResult.points;
+            response.reward_transaction_id = rewardResult.point_transaction.id;
+            response.reward_rule_id = rewardResult.rule?.id || null;
+            response.rewarded_at = rewardResult.point_transaction.earned_at;
+            await response.save({ session });
+        }
+
+        const populatedResponseQuery = SurveyResponse.findById(response._id);
+
+        if (typeof populatedResponseQuery?.session === 'function') {
+            populatedResponseQuery.session(session);
+        }
+
+        const populatedResponse = await populateSurveyResponseQuery(
+            populatedResponseQuery
+        );
+        const result = SurveyMapper.toSurveyResponseDto(populatedResponse);
+
+        await auditLogService.recordAuditEvent({
+            actorId: user._id,
+            action: AUDIT_ACTIONS.SURVEY_RESPONSE_CREATED,
+            resourceType: AUDIT_RESOURCE_TYPES.SURVEY_RESPONSE,
+            resourceId: response._id,
+            after: result,
+            ip: auditContext.ip,
+            userAgent: auditContext.userAgent,
+            metadata: {
+                survey_id: survey._id.toString(),
+                booking_id: booking._id.toString(),
+                wash_history_id: washHistory._id.toString(),
+                reward_points: rewardResult.points,
+                reward_transaction_id: rewardResult.point_transaction?.id || null,
+            },
+            session,
+        });
+
+        return result;
     });
-
-    return result;
 };
 
 const getSurveyResponses = async (surveyId, { page = 1, limit = 20, customer_id, booking_id, from, to } = {}) => {

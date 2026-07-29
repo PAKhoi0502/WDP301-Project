@@ -3,6 +3,9 @@ const loyaltyService = require('../loyalty/loyalty.service');
 const washHistoryService = require('../wash-histories/washHistory.service');
 const promotionUsageService = require('../promotion-usages/promotionUsage.service');
 const notificationService = require('../notifications/notification.service');
+const Survey = require('../surveys/survey.model');
+const feedbackRewardService = require('../feedback-rewards/feedbackReward.service');
+const { SURVEY_STATUSES } = require('../../shared/constants/survey.constant');
 const bookingViolationService = require('../booking-violations/bookingViolation.service');
 const { AppError } = require('../../shared/utils/appError');
 
@@ -46,6 +49,32 @@ const getAddOnServices = async (addOnServiceIds = [], session = null) => {
     }
 
     return addOnServices;
+};
+
+const emitFeedbackRequests = async ({ booking, session = null }) => {
+    const [feedbackRule, survey] = await Promise.all([
+        feedbackRewardService.getEffectiveRule(session),
+        Survey.findOne({
+            status: SURVEY_STATUSES.PUBLISHED,
+        })
+            .sort({ published_at: -1 })
+            .session(session || null),
+    ]);
+    const [reviewNotification, surveyNotification] = await Promise.all([
+        notificationService.emitReviewRequest({
+            booking,
+            rewardPoints: feedbackRule?.review_points || 0,
+            session,
+        }),
+        notificationService.emitSurveyRequest({
+            booking,
+            survey,
+            rewardPoints: feedbackRule?.survey_points || 0,
+            session,
+        }),
+    ]);
+
+    return [reviewNotification, surveyNotification].filter(Boolean);
 };
 
 const processCompletedPaidBooking = async ({ booking, actorId, session = null }) => {
@@ -99,10 +128,7 @@ const processCompletedPaidBooking = async ({ booking, actorId, session = null })
         earnedPoints: loyaltyResult.earned_points,
         session,
     });
-    const reviewNotification = await notificationService.emitReviewRequest({
-        booking,
-        session,
-    });
+    const feedbackNotifications = await emitFeedbackRequests({ booking, session });
 
     booking.reward_processed = true;
     booking.reward_processed_at = new Date();
@@ -117,7 +143,7 @@ const processCompletedPaidBooking = async ({ booking, actorId, session = null })
         notifications: [
             paymentNotification,
             rewardNotification,
-            reviewNotification,
+            ...feedbackNotifications,
         ].filter(Boolean),
         earned_points: loyaltyResult.earned_points,
         already_processed: false,
@@ -125,5 +151,6 @@ const processCompletedPaidBooking = async ({ booking, actorId, session = null })
 };
 
 module.exports = {
+    emitFeedbackRequests,
     processCompletedPaidBooking,
 };

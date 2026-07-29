@@ -45,6 +45,8 @@ const notificationSchema = {
                 'PROMOTION_AVAILABLE',
                 'SURVEY_REQUEST',
                 'REVIEW_REQUEST',
+                'FEEDBACK_REWARD_EARNED',
+                'FEEDBACK_REMINDER',
                 'REVIEW_REPLIED',
                 'REVIEW_HIDDEN',
                 'REVIEW_PUBLISHED',

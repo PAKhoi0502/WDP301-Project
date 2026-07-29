@@ -159,6 +159,13 @@ const toReviewDto = (
         moderated_by: isPublic ? undefined : toUserSummaryDto(plainReview.moderated_by),
         moderated_at: isPublic ? undefined : plainReview.moderated_at,
         garage_reply: toGarageReplyDto(plainReview.garage_reply, access),
+        reward: isPublic ? undefined : {
+            awarded: Boolean(plainReview.reward_transaction_id),
+            points: plainReview.reward_points || 0,
+            transaction_id: toId(plainReview.reward_transaction_id),
+            rule_id: toId(plainReview.reward_rule_id),
+            awarded_at: plainReview.rewarded_at,
+        },
         deleted_at: isPublic ? undefined : plainReview.deleted_at,
         created_at: plainReview.created_at,
         updated_at: plainReview.updated_at,

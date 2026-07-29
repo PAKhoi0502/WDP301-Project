@@ -26,6 +26,18 @@ const customerLoyaltySchema = new mongoose.Schema(
             default: 0,
         },
 
+        qualifying_points: {
+            type: Number,
+            min: [0, 'Qualifying points must be greater than or equal to 0'],
+            default: null,
+        },
+
+        bonus_points: {
+            type: Number,
+            min: [0, 'Bonus points must be greater than or equal to 0'],
+            default: 0,
+        },
+
         available_points: {
             type: Number,
             min: [0, 'Available points must be greater than or equal to 0'],
@@ -92,6 +104,7 @@ const customerLoyaltySchema = new mongoose.Schema(
 
 customerLoyaltySchema.index({ current_tier: 1 });
 customerLoyaltySchema.index({ available_points: -1 });
+customerLoyaltySchema.index({ qualifying_points: -1 });
 customerLoyaltySchema.index({ total_spent: -1 });
 customerLoyaltySchema.index({ total_visits: -1 });
 customerLoyaltySchema.index({ last_tier_downgrade_at: 1 });

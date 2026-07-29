@@ -53,6 +53,29 @@ const bookingViolationEventSchema = new mongoose.Schema(
             ref: 'User',
             default: null,
         },
+
+        is_reversed: {
+            type: Boolean,
+            default: false,
+        },
+
+        reversed_at: {
+            type: Date,
+            default: null,
+        },
+
+        reversed_by: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            default: null,
+        },
+
+        reversal_reason: {
+            type: String,
+            trim: true,
+            maxlength: [1000, 'Reversal reason must not exceed 1000 characters'],
+            default: null,
+        },
     },
     {
         timestamps: {
