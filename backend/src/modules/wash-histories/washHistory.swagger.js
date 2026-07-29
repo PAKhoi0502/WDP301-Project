@@ -164,6 +164,15 @@ const claimResponse = {
                 claimed_bookings: { type: 'number' },
                 claimed_wash_histories: { type: 'number' },
                 linked_promotion_usages: { type: 'number' },
+                loyalty_bookings_processed: { type: 'number' },
+                awarded_points: { type: 'number' },
+                total_spent_added: { type: 'number' },
+                total_visits_added: { type: 'number' },
+                current_tier: {
+                    type: 'string',
+                    enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'],
+                    nullable: true,
+                },
             },
         },
     },
@@ -235,7 +244,7 @@ const paths = {
     '/wash-histories/claim': {
         post: {
             tags: ['Wash Histories'],
-            summary: 'Claim completed paid walk-in histories by verified phone',
+            summary: 'Claim eligible walk-in history and loyalty by verified phone',
             security: [{ bearerAuth: [] }],
             responses: {
                 200: {

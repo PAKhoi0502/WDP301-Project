@@ -607,6 +607,11 @@ const bookingSchema = new mongoose.Schema(
             default: null,
         },
 
+        loyalty_claimed_at: {
+            type: Date,
+            default: null,
+        },
+
         wash_bay_work_end_time: {
             type: Date,
             default: null,

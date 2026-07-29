@@ -321,10 +321,12 @@ describe('analytics service', () => {
         const historyPipeline = WashHistory.aggregate.mock.calls[0][0];
 
         expect(userPipeline[0].$match).toEqual({ role: 'CUSTOMER' });
-        expect(historyPipeline[1].$facet.by_visits.at(-1)).toEqual({ $limit: 10 });
-        expect(historyPipeline[1].$facet.by_spending.at(-1)).toEqual({ $limit: 10 });
-        expect(historyPipeline[1].$facet.by_service_variety.at(-1)).toEqual({ $limit: 10 });
-        expect(historyPipeline[1].$facet.single_service_repeat.at(-1)).toEqual({ $limit: 10 });
+        expect(historyPipeline[1].$lookup.from).toBe('bookings');
+        expect(historyPipeline[2].$set.origin_is_walk_in).toBeDefined();
+        expect(historyPipeline[4].$facet.by_visits.at(-1)).toEqual({ $limit: 10 });
+        expect(historyPipeline[4].$facet.by_spending.at(-1)).toEqual({ $limit: 10 });
+        expect(historyPipeline[4].$facet.by_service_variety.at(-1)).toEqual({ $limit: 10 });
+        expect(historyPipeline[4].$facet.single_service_repeat.at(-1)).toEqual({ $limit: 10 });
     });
 
     it('calculates survey NPS by promoter and detractor percentages', async () => {

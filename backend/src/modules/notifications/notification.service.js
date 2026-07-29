@@ -380,8 +380,14 @@ const emitRewardEarned = async ({ booking, earnedPoints, session = null }) => {
         return null;
     }
 
+    const customerId = booking.customer_id || booking.claimed_customer_id;
+
+    if (!customerId) {
+        return null;
+    }
+
     return createInAppNotification({
-        userId: booking.customer_id,
+        userId: customerId,
         type: NOTIFICATION_TYPES.REWARD_EARNED,
         title: 'Reward points earned',
         message: `You earned ${earnedPoints} reward points from your completed booking.`,

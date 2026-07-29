@@ -531,9 +531,12 @@ const calculateEarnedPoints = async ({
     servicePackage,
     addOnServices = [],
     loyalty,
+    customerId = null,
     session = null,
 }) => {
-    if (!booking.customer_id || booking.final_price <= 0 || booking.original_price <= 0) {
+    const effectiveCustomerId = customerId || booking.customer_id;
+
+    if (!effectiveCustomerId || booking.final_price <= 0 || booking.original_price <= 0) {
         return 0;
     }
 
@@ -660,14 +663,20 @@ const processBookingLoyalty = async ({
     servicePackage,
     addOnServices = [],
     actorId,
+    customerId = null,
+    visitAt = null,
     session = null,
 }) => {
-    if (!booking.customer_id) {
+    const effectiveCustomerId = customerId || booking.customer_id;
+
+    if (!effectiveCustomerId) {
         return {
             loyalty: null,
             point_transaction: null,
             earned_points: 0,
             tier_review: null,
+            total_spent_added: 0,
+            total_visits_added: 0,
             already_processed: false,
         };
     }
@@ -680,8 +689,16 @@ const processBookingLoyalty = async ({
         });
 
     if (existingEarnTransaction) {
+        if (!isSameObjectId(existingEarnTransaction.customer_id, effectiveCustomerId)) {
+            throw new AppError(
+                'Booking loyalty belongs to another customer',
+                409,
+                'LOYALTY_BOOKING_CUSTOMER_CONFLICT'
+            );
+        }
+
         const existingLoyalty = await getOrCreateCustomerLoyalty(
-            booking.customer_id,
+            effectiveCustomerId,
             session
         );
 
@@ -694,17 +711,22 @@ const processBookingLoyalty = async ({
                 ),
             earned_points: existingEarnTransaction.points,
             tier_review: null,
+            total_spent_added: 0,
+            total_visits_added: 0,
             already_processed: true,
         };
     }
 
     const now = new Date();
-    const loyalty = await getOrCreateCustomerLoyalty(booking.customer_id, session);
+    const parsedVisitAt = visitAt ? new Date(visitAt) : now;
+    const effectiveVisitAt = Number.isNaN(parsedVisitAt.getTime()) ? now : parsedVisitAt;
+    const loyalty = await getOrCreateCustomerLoyalty(effectiveCustomerId, session);
     const earnedPoints = await calculateEarnedPoints({
         booking,
         servicePackage,
         addOnServices,
         loyalty,
+        customerId: effectiveCustomerId,
         session,
     });
     const balanceBefore = loyalty.available_points;
@@ -712,7 +734,9 @@ const processBookingLoyalty = async ({
 
     loyalty.total_spent += booking.final_price;
     loyalty.total_visits += 1;
-    loyalty.last_visit_at = now;
+    if (!loyalty.last_visit_at || loyalty.last_visit_at < effectiveVisitAt) {
+        loyalty.last_visit_at = effectiveVisitAt;
+    }
     loyalty.last_tier_downgrade_at = null;
 
     let pointTransaction = null;
@@ -724,7 +748,7 @@ const processBookingLoyalty = async ({
         const transactions = await PointTransaction.create(
             [
                 {
-                    customer_id: booking.customer_id,
+                    customer_id: effectiveCustomerId,
                     booking_id: booking._id,
                     type: POINT_TRANSACTION_TYPES.EARN,
                     points: earnedPoints,
@@ -754,6 +778,8 @@ const processBookingLoyalty = async ({
         point_transaction: LoyaltyMapper.toPointTransactionDto(pointTransaction),
         earned_points: earnedPoints,
         tier_review: tierReview,
+        total_spent_added: booking.final_price,
+        total_visits_added: 1,
         already_processed: false,
     };
 };

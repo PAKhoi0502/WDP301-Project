@@ -306,6 +306,11 @@ const register = async (payload) => {
             claimed_bookings: 0,
             claimed_wash_histories: 0,
             linked_promotion_usages: 0,
+            loyalty_bookings_processed: 0,
+            awarded_points: 0,
+            total_spent_added: 0,
+            total_visits_added: 0,
+            current_tier: null,
             retry_required: true,
             error_code: error.errorCode || 'WALK_IN_HISTORY_CLAIM_FAILED',
         };

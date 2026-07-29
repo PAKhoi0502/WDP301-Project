@@ -38,6 +38,7 @@ const bookingSchema = {
         guest_email: { type: 'string', nullable: true },
         claimed_customer_id: { type: 'string', nullable: true },
         claimed_at: { type: 'string', format: 'date-time', nullable: true },
+        loyalty_claimed_at: { type: 'string', format: 'date-time', nullable: true },
         license_plate: { type: 'string', nullable: true },
         normalized_license_plate: { type: 'string', nullable: true },
         vehicle_type: { type: 'string', enum: ['MOTORBIKE', 'CAR'] },

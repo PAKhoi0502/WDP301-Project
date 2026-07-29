@@ -221,6 +221,25 @@ const schemas = {
                     user: {
                         $ref: '#/components/schemas/UserPublic',
                     },
+                    walk_in_history_claim: {
+                        type: 'object',
+                        properties: {
+                            claimed_bookings: { type: 'number' },
+                            claimed_wash_histories: { type: 'number' },
+                            linked_promotion_usages: { type: 'number' },
+                            loyalty_bookings_processed: { type: 'number' },
+                            awarded_points: { type: 'number' },
+                            total_spent_added: { type: 'number' },
+                            total_visits_added: { type: 'number' },
+                            current_tier: {
+                                type: 'string',
+                                enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'],
+                                nullable: true,
+                            },
+                            retry_required: { type: 'boolean' },
+                            error_code: { type: 'string' },
+                        },
+                    },
                 },
             },
         },

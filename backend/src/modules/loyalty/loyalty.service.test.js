@@ -206,6 +206,82 @@ describe('loyalty service business rules', () => {
         });
     });
 
+    it('awards loyalty to the verified claimant of a walk-in booking', async () => {
+        const loyalty = createLoyaltyDocument({
+            customer_id: customerId,
+            current_tier: 'BRONZE',
+            total_points: 0,
+            available_points: 0,
+            total_spent: 0,
+            total_visits: 0,
+            last_visit_at: null,
+        });
+        const visitAt = new Date('2026-06-10T08:00:00.000Z');
+
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(loyalty));
+        TierRule.findOne.mockReturnValue(createQueryMock({
+            tier_name: 'BRONZE',
+            point_multiplier: 1,
+        }));
+        TierRule.find.mockReturnValue(createQueryMock([
+            {
+                tier_name: 'BRONZE',
+                priority_level: 1,
+                min_total_spent: 0,
+                min_total_visits: 0,
+                min_total_points: 0,
+            },
+        ]));
+        PointTransaction.create.mockResolvedValue([{
+            _id: new mongoose.Types.ObjectId(),
+            customer_id: customerId,
+            booking_id: bookingId,
+            type: 'EARN',
+            points: 20,
+            remaining_points: 20,
+            balance_before: 0,
+            balance_after: 20,
+        }]);
+
+        const result = await loyaltyService.processBookingLoyalty({
+            booking: {
+                _id: bookingId,
+                customer_id: null,
+                claimed_customer_id: customerId,
+                original_price: 100000,
+                final_price: 100000,
+            },
+            servicePackage: {
+                points_earned: 20,
+            },
+            customerId,
+            visitAt,
+        });
+
+        expect(PointTransaction.create).toHaveBeenCalledWith(
+            [
+                expect.objectContaining({
+                    customer_id: customerId,
+                    booking_id: bookingId,
+                    type: 'EARN',
+                    points: 20,
+                }),
+            ],
+            undefined
+        );
+        expect(loyalty.total_points).toBe(20);
+        expect(loyalty.available_points).toBe(20);
+        expect(loyalty.total_spent).toBe(100000);
+        expect(loyalty.total_visits).toBe(1);
+        expect(loyalty.last_visit_at).toEqual(visitAt);
+        expect(result).toMatchObject({
+            earned_points: 20,
+            total_spent_added: 100000,
+            total_visits_added: 1,
+            already_processed: false,
+        });
+    });
+
     it('reuses an existing earn transaction without updating loyalty twice', async () => {
         const loyalty = createLoyaltyDocument({
             customer_id: customerId,

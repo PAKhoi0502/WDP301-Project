@@ -713,6 +713,25 @@ const getCustomerAnalytics = async (filters = {}) => {
         WashHistory.aggregate([
             { $match: washHistoryMatch },
             {
+                $lookup: {
+                    from: 'bookings',
+                    localField: 'booking_id',
+                    foreignField: '_id',
+                    as: 'booking_origin',
+                },
+            },
+            {
+                $set: {
+                    origin_is_walk_in: {
+                        $ifNull: [
+                            { $first: '$booking_origin.is_walk_in' },
+                            { $eq: ['$customer_id', null] },
+                        ],
+                    },
+                },
+            },
+            { $unset: 'booking_origin' },
+            {
                 $facet: {
                     metrics: [
                         {
@@ -723,7 +742,12 @@ const getCustomerAnalytics = async (filters = {}) => {
                                 registered_paid_visits: {
                                     $sum: {
                                         $cond: [
-                                            { $ne: ['$customer_id', null] },
+                                            {
+                                                $and: [
+                                                    { $eq: ['$origin_is_walk_in', false] },
+                                                    { $ne: ['$customer_id', null] },
+                                                ],
+                                            },
                                             1,
                                             0,
                                         ],
@@ -732,7 +756,7 @@ const getCustomerAnalytics = async (filters = {}) => {
                                 walk_in_paid_visits: {
                                     $sum: {
                                         $cond: [
-                                            { $eq: ['$customer_id', null] },
+                                            '$origin_is_walk_in',
                                             1,
                                             0,
                                         ],
@@ -741,7 +765,12 @@ const getCustomerAnalytics = async (filters = {}) => {
                                 registered_revenue: {
                                     $sum: {
                                         $cond: [
-                                            { $ne: ['$customer_id', null] },
+                                            {
+                                                $and: [
+                                                    { $eq: ['$origin_is_walk_in', false] },
+                                                    { $ne: ['$customer_id', null] },
+                                                ],
+                                            },
                                             '$amount_paid',
                                             0,
                                         ],
@@ -750,7 +779,7 @@ const getCustomerAnalytics = async (filters = {}) => {
                                 walk_in_revenue: {
                                     $sum: {
                                         $cond: [
-                                            { $eq: ['$customer_id', null] },
+                                            '$origin_is_walk_in',
                                             '$amount_paid',
                                             0,
                                         ],

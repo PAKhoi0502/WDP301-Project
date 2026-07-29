@@ -1204,16 +1204,27 @@ const buildAdminSearchFilter = ({ search, status, payment_status, garage_id, cus
 };
 
 const buildCustomerSearchFilter = (customerId, { status, garage_id, vehicle_id, service_package_id, from, to } = {}) => {
-    return buildAdminSearchFilter({
+    const filter = buildAdminSearchFilter({
         status,
         garage_id,
-        customer_id: customerId,
         vehicle_id,
         service_package_id,
         from,
         to,
-        is_walk_in: false,
     });
+
+    filter.$or = [
+        {
+            customer_id: customerId,
+            is_walk_in: false,
+        },
+        {
+            claimed_customer_id: customerId,
+            is_walk_in: true,
+        },
+    ];
+
+    return filter;
 };
 
 const countConfiguredWashBays = async (garageId, vehicleType) => {
@@ -3003,8 +3014,12 @@ const getMyBookings = async (customerId, query = {}) => {
 
 const getMyBookingById = async (customerId, bookingId) => {
     const booking = await getBookingDocumentById(bookingId);
+    const ownsRegisteredBooking = booking.customer_id
+        && booking.customer_id._id.toString() === customerId.toString();
+    const ownsClaimedBooking = booking.claimed_customer_id
+        && booking.claimed_customer_id.toString() === customerId.toString();
 
-    if (!booking.customer_id || booking.customer_id._id.toString() !== customerId.toString()) {
+    if (!ownsRegisteredBooking && !ownsClaimedBooking) {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
     }
 

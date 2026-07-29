@@ -226,6 +226,7 @@ const toBookingDto = (booking, options = {}) => {
         guest_email: plainBooking.guest_email,
         claimed_customer_id: toId(plainBooking.claimed_customer_id),
         claimed_at: plainBooking.claimed_at || null,
+        loyalty_claimed_at: plainBooking.loyalty_claimed_at || null,
         license_plate: plainBooking.license_plate,
         normalized_license_plate: plainBooking.normalized_license_plate,
         vehicle_type: plainBooking.vehicle_type,
