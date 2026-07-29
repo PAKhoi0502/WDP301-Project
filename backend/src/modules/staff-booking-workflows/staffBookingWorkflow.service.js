@@ -46,6 +46,39 @@ const resolveLeanQuery = async (query) => (
     query && typeof query.lean === 'function' ? query.lean() : query
 );
 
+const populateBookingWorkflowAssignments = (query) => {
+    if (!query || typeof query.populate !== 'function') {
+        return query;
+    }
+
+    return query.populate([
+        {
+            path: 'booking_items.assigned_care_staff.staff_profile_id',
+            select: 'user_id staff_code staff_type garage_id is_active',
+            populate: {
+                path: 'user_id',
+                select: 'full_name phone avatar_url role is_active',
+            },
+        },
+        {
+            path: 'booking_items.assigned_care_staff.user_id',
+            select: 'full_name phone avatar_url role is_active',
+        },
+        {
+            path: 'booking_items.assigned_execution_staff.staff_profile_id',
+            select: 'user_id staff_code staff_type garage_id is_active',
+            populate: {
+                path: 'user_id',
+                select: 'full_name phone avatar_url role is_active',
+            },
+        },
+        {
+            path: 'booking_items.assigned_execution_staff.user_id',
+            select: 'full_name phone avatar_url role is_active',
+        },
+    ]);
+};
+
 const hasCapability = (staffContext, capability) => (
     staffContext.is_admin
     || staffContext.capabilities.includes('*')
@@ -395,6 +428,29 @@ const toInspectionMilestone = (inspection, pendingStatus) => ({
     image_count: inspection?.images?.length || 0,
 });
 
+const toAssignedStaffDto = (assignment, responsibility) => {
+    if (!assignment || assignment.released_at) {
+        return null;
+    }
+
+    const staffProfile = toPlainObject(assignment.staff_profile_id);
+    const assignmentUser = toPlainObject(assignment.user_id);
+    const profileUser = toPlainObject(staffProfile?.user_id);
+    const user = assignmentUser?._id ? assignmentUser : profileUser;
+
+    return {
+        staff_profile_id: toId(assignment.staff_profile_id),
+        user_id: toId(assignment.user_id) || toId(staffProfile?.user_id),
+        full_name: user?.full_name || null,
+        phone: user?.phone || null,
+        avatar_url: user?.avatar_url || null,
+        staff_code: staffProfile?.staff_code || null,
+        staff_type: staffProfile?.staff_type || null,
+        responsibility,
+        assigned_at: assignment.assigned_at || null,
+    };
+};
+
 const toServiceItemDto = (item, staffContext) => ({
     item_key: item.item_key,
     name: item.name_snapshot,
@@ -409,6 +465,14 @@ const toServiceItemDto = (item, staffContext) => ({
     requires_wash_bay: Boolean(item.requires_wash_bay),
     requires_care_staff: Boolean(item.requires_care_staff),
     assigned_to_current_user: isServiceItemAssignedToCurrentStaff(item, staffContext),
+    assigned_staff: [
+        ...(item.assigned_execution_staff || []).map(
+            (assignment) => toAssignedStaffDto(assignment, 'WASH_OPERATION')
+        ),
+        ...(item.assigned_care_staff || []).map(
+            (assignment) => toAssignedStaffDto(assignment, 'VEHICLE_CARE')
+        ),
+    ].filter(Boolean),
 });
 
 const toServiceStepDto = (step) => ({
@@ -677,7 +741,9 @@ const listBookingWorkflows = async (staffContext, query = {}) => {
 };
 
 const getBookingWorkflow = async (staffContext, bookingId) => {
-    const bookingDocument = await resolveLeanQuery(Booking.findById(bookingId));
+    const bookingDocument = await resolveLeanQuery(
+        populateBookingWorkflowAssignments(Booking.findById(bookingId))
+    );
 
     if (!bookingDocument) {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');

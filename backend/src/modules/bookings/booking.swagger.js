@@ -83,6 +83,10 @@ const bookingSchema = {
                         type: 'array',
                         items: careStaffAssignmentSchema,
                     },
+                    assigned_execution_staff: {
+                        type: 'array',
+                        items: careStaffAssignmentSchema,
+                    },
                     status: {
                         type: 'string',
                         enum: ['PENDING', 'IN_PROGRESS', 'PAUSED', 'AWAITING_CONFIRMATION', 'WAITING_RESOURCE', 'DONE', 'SKIPPED'],

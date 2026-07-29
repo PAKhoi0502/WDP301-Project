@@ -479,6 +479,68 @@ describe('staff booking workflow service', () => {
         );
     });
 
+    it('returns active staff identities for each service item and omits released assignments', async () => {
+        const assignedAt = new Date('2026-07-22T03:00:00.000Z');
+        const releasedAt = new Date('2026-07-22T03:10:00.000Z');
+        const activeUser = {
+            _id: userId,
+            full_name: 'Phạm Hoàng Nam',
+            phone: '0900000005',
+            avatar_url: null,
+        };
+        const activeProfile = {
+            _id: staffProfileId,
+            user_id: activeUser,
+            staff_code: 'WASH-GAR001-01',
+            staff_type: STAFF_TYPES.WASH_OPERATOR,
+        };
+        const booking = createBooking({
+            status: 'IN_PROGRESS',
+            booking_items: [{
+                item_key: 'WASH_1',
+                name_snapshot: 'Rửa ô tô tiêu chuẩn',
+                sequence: 1,
+                duration_minutes: 20,
+                transition_mode: 'AUTO',
+                status: 'IN_PROGRESS',
+                requires_wash_bay: true,
+                requires_care_staff: false,
+                assigned_execution_staff: [
+                    {
+                        staff_profile_id: activeProfile,
+                        user_id: activeUser,
+                        assigned_at: assignedAt,
+                        released_at: null,
+                    },
+                    {
+                        staff_profile_id: '507f1f77bcf86cd799439050',
+                        user_id: '507f1f77bcf86cd799439051',
+                        assigned_at: assignedAt,
+                        released_at: releasedAt,
+                    },
+                ],
+            }],
+        });
+        mockDetailQueries({ booking, inspections: [beforeInspection] });
+
+        const result = await staffBookingWorkflowService.getBookingWorkflow(
+            createStaffContext(STAFF_TYPES.WASH_OPERATOR),
+            bookingId
+        );
+
+        expect(result.service_items[0].assigned_staff).toEqual([{
+            staff_profile_id: staffProfileId,
+            user_id: userId,
+            full_name: 'Phạm Hoàng Nam',
+            phone: '0900000005',
+            avatar_url: null,
+            staff_code: 'WASH-GAR001-01',
+            staff_type: STAFF_TYPES.WASH_OPERATOR,
+            responsibility: 'WASH_OPERATION',
+            assigned_at: assignedAt,
+        }]);
+    });
+
     it('waits for after-wash inspection after all service items are done', async () => {
         const booking = createBooking({
             status: 'IN_PROGRESS',

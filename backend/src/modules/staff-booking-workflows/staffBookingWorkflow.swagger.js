@@ -60,6 +60,23 @@ const schemas = {
             image_count: { type: 'integer', minimum: 0 },
         },
     },
+    StaffBookingWorkflowAssignedStaff: {
+        type: 'object',
+        properties: {
+            staff_profile_id: { type: 'string', nullable: true },
+            user_id: { type: 'string', nullable: true },
+            full_name: { type: 'string', nullable: true },
+            phone: { type: 'string', nullable: true },
+            avatar_url: { type: 'string', nullable: true },
+            staff_code: { type: 'string', nullable: true },
+            staff_type: { type: 'string', nullable: true },
+            responsibility: {
+                type: 'string',
+                enum: ['WASH_OPERATION', 'VEHICLE_CARE'],
+            },
+            assigned_at: { type: 'string', format: 'date-time', nullable: true },
+        },
+    },
     StaffBookingWorkflowServiceItem: {
         type: 'object',
         properties: {
@@ -79,6 +96,12 @@ const schemas = {
             requires_wash_bay: { type: 'boolean' },
             requires_care_staff: { type: 'boolean' },
             assigned_to_current_user: { type: 'boolean' },
+            assigned_staff: {
+                type: 'array',
+                items: {
+                    $ref: '#/components/schemas/StaffBookingWorkflowAssignedStaff',
+                },
+            },
         },
     },
     StaffBookingWorkflowDetail: {

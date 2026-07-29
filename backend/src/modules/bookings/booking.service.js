@@ -316,7 +316,7 @@ const populateBookingQuery = (query) => {
     return query
         .populate('customer_id', 'full_name email phone role is_active')
         .populate('vehicle_id', 'raw_license_plate normalized_license_plate vehicle_type engine_type motorbike_cc_group car_body_type seat_count brand model color is_active')
-        .populate('garage_id', 'name garage_code address city opening_time closing_time slot_interval_minutes late_grace_minutes is_active')
+        .populate('garage_id', 'name garage_code phone address city opening_time closing_time slot_interval_minutes late_grace_minutes is_active')
         .populate('wash_bay_id', 'name bay_code vehicle_type status is_active')
         .populate('service_package_id', 'name vehicle_type service_type base_price duration_minutes countdown_duration_seconds transition_mode wash_bay_duration_minutes points_earned requires_wash_bay requires_care_staff care_staff_type care_staff_required_count care_staff_duration_minutes is_active')
         .populate('promotion_id', 'code name discount_type discount_value max_discount_amount min_order_amount start_at end_at is_active')
@@ -340,7 +340,7 @@ const populateBookingQuery = (query) => {
             select: 'user_id staff_code staff_type garage_id is_active created_at updated_at',
             populate: {
                 path: 'user_id',
-                select: 'full_name email phone role is_active',
+                select: 'full_name email phone avatar_url role is_active',
             },
         })
         .populate({
@@ -348,19 +348,19 @@ const populateBookingQuery = (query) => {
             select: 'user_id staff_code staff_type garage_id is_active created_at updated_at',
             populate: {
                 path: 'user_id',
-                select: 'full_name email phone role is_active',
+                select: 'full_name email phone avatar_url role is_active',
             },
         })
-        .populate('booking_items.assigned_care_staff.user_id', 'full_name email phone role is_active')
+        .populate('booking_items.assigned_care_staff.user_id', 'full_name email phone avatar_url role is_active')
         .populate({
             path: 'booking_items.assigned_execution_staff.staff_profile_id',
             select: 'user_id staff_code staff_type garage_id is_active created_at updated_at',
             populate: {
                 path: 'user_id',
-                select: 'full_name email phone role is_active',
+                select: 'full_name email phone avatar_url role is_active',
             },
         })
-        .populate('booking_items.assigned_execution_staff.user_id', 'full_name email phone role is_active');
+        .populate('booking_items.assigned_execution_staff.user_id', 'full_name email phone avatar_url role is_active');
 };
 
 const getBookingHandoverSummaryMap = async (bookings = []) => {
@@ -3002,7 +3002,9 @@ const getMyBookings = async (customerId, query = {}) => {
     ]);
 
     return {
-        data: BookingMapper.toBookingDtoList(bookings),
+        data: bookings.map((booking) => BookingMapper.toBookingDto(booking, {
+            includeStaffContact: false,
+        })),
         meta: {
             page,
             limit,
@@ -3023,7 +3025,9 @@ const getMyBookingById = async (customerId, bookingId) => {
         throw new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
     }
 
-    return BookingMapper.toBookingDto(booking);
+    return BookingMapper.toBookingDto(booking, {
+        includeStaffContact: false,
+    });
 };
 
 const getAllBookings = async (user, query = {}) => {
@@ -3315,7 +3319,9 @@ const createCustomerBooking = async (customerId, payload = {}) => {
 
     const populatedBooking = await getBookingDocumentById(booking._id);
 
-    return BookingMapper.toBookingDto(populatedBooking);
+    return BookingMapper.toBookingDto(populatedBooking, {
+        includeStaffContact: false,
+    });
 };
 
 const createWalkInBooking = async (user, payload = {}) => {
@@ -3639,7 +3645,9 @@ const cancelMyBooking = async (customerId, bookingId, { reason } = {}) => {
 
     const populatedBooking = await getBookingDocumentById(booking._id);
 
-    return BookingMapper.toBookingDto(populatedBooking);
+    return BookingMapper.toBookingDto(populatedBooking, {
+        includeStaffContact: false,
+    });
 };
 
 const cancelBooking = async (user, bookingId, { reason } = {}) => {
@@ -4682,7 +4690,10 @@ const resolveBookingIncidentDecision = async (
 
     return {
         data: {
-            booking: BookingMapper.toBookingDto(populatedBooking),
+            booking: BookingMapper.toBookingDto(populatedBooking, {
+                includeStaffContact:
+                    decisionSource !== BOOKING_INCIDENT_DECISION_SOURCES.CUSTOMER,
+            }),
             incident: BookingIncidentMapper.toBookingIncidentDto(populatedIncident),
         },
         released_booking_snapshot: shouldOfferWaitlist

@@ -18,7 +18,7 @@ const toId = (value) => {
     return value;
 };
 
-const toUserSummaryDto = (user) => {
+const toUserSummaryDto = (user, { includeContact = true } = {}) => {
     if (!user || !user._id) {
         return null;
     }
@@ -26,8 +26,11 @@ const toUserSummaryDto = (user) => {
     return {
         id: user._id.toString(),
         full_name: user.full_name,
-        email: user.email,
-        phone: user.phone,
+        ...(includeContact ? {
+            email: user.email,
+            phone: user.phone,
+        } : {}),
+        avatar_url: user.avatar_url || null,
         role: user.role,
         is_active: user.is_active,
     };
@@ -63,6 +66,7 @@ const toGarageSummaryDto = (garage) => {
         id: garage._id.toString(),
         name: garage.name,
         garage_code: garage.garage_code,
+        phone: garage.phone || null,
         address: garage.address,
         city: garage.city,
         opening_time: garage.opening_time,
@@ -98,26 +102,41 @@ const toServicePackageSummaryDto = (servicePackage) => {
     };
 };
 
-const toStaffProfileSummaryDto = (staffProfile) => {
+const toStaffProfileSummaryDto = (staffProfile, { includeContact = true } = {}) => {
     if (!staffProfile || typeof staffProfile !== 'object' || !staffProfile._id) {
         return null;
     }
 
-    return StaffProfileMapper.toStaffProfileDto(staffProfile);
+    const staffProfileDto = StaffProfileMapper.toStaffProfileDto(staffProfile);
+
+    if (includeContact) {
+        return staffProfileDto;
+    }
+
+    return {
+        id: staffProfileDto.id,
+        user_id: staffProfileDto.user_id,
+        user: toUserSummaryDto(staffProfile.user_id, { includeContact: false }),
+        staff_code: staffProfileDto.staff_code,
+        staff_type: staffProfileDto.staff_type,
+        staff_group: staffProfileDto.staff_group,
+        garage_id: staffProfileDto.garage_id,
+        is_active: staffProfileDto.is_active,
+    };
 };
 
-const toCareStaffAssignmentDto = (assignment = {}) => {
+const toCareStaffAssignmentDto = (assignment = {}, { includeContact = true } = {}) => {
     return {
         staff_profile_id: toId(assignment.staff_profile_id),
-        staff_profile: toStaffProfileSummaryDto(assignment.staff_profile_id),
+        staff_profile: toStaffProfileSummaryDto(assignment.staff_profile_id, { includeContact }),
         user_id: toId(assignment.user_id),
-        user: toUserSummaryDto(assignment.user_id),
+        user: toUserSummaryDto(assignment.user_id, { includeContact }),
         assigned_at: assignment.assigned_at,
         released_at: assignment.released_at,
     };
 };
 
-const toBookingItemDto = (item = {}) => {
+const toBookingItemDto = (item = {}, { includeStaffContact = true } = {}) => {
     return {
         item_key: item.item_key,
         service_package_id: toId(item.service_package_id),
@@ -146,9 +165,15 @@ const toBookingItemDto = (item = {}) => {
         care_staff_end_time: item.care_staff_end_time,
         care_staff_work_end_time: item.care_staff_work_end_time || item.care_staff_end_time,
         care_staff_reserved_until: item.care_staff_reserved_until || item.care_staff_end_time,
-        assigned_care_staff: (item.assigned_care_staff || []).map((assignment) => toCareStaffAssignmentDto(assignment)),
+        assigned_care_staff: (item.assigned_care_staff || []).map(
+            (assignment) => toCareStaffAssignmentDto(assignment, {
+                includeContact: includeStaffContact,
+            })
+        ),
         assigned_execution_staff: (item.assigned_execution_staff || []).map(
-            (assignment) => toCareStaffAssignmentDto(assignment)
+            (assignment) => toCareStaffAssignmentDto(assignment, {
+                includeContact: includeStaffContact,
+            })
         ),
         status: item.status,
         actual_started_at: item.actual_started_at,
@@ -207,6 +232,7 @@ const toBookingDto = (booking, options = {}) => {
 
     const plainBooking = booking.toObject ? booking.toObject() : booking;
     const includeHandover = Object.prototype.hasOwnProperty.call(options, 'handover');
+    const includeStaffContact = options.includeStaffContact !== false;
     const handover = options.handover || null;
 
     return {
@@ -235,9 +261,13 @@ const toBookingDto = (booking, options = {}) => {
         pricing_review_status: plainBooking.pricing_review_status || 'NOT_REQUIRED',
         price_adjustments: plainBooking.price_adjustments || [],
         created_by_staff_id: toId(plainBooking.created_by_staff_id),
-        created_by_staff: toUserSummaryDto(plainBooking.created_by_staff_id),
+        created_by_staff: toUserSummaryDto(plainBooking.created_by_staff_id, {
+            includeContact: includeStaffContact,
+        }),
         assigned_inspection_staff_id: toId(plainBooking.assigned_inspection_staff_id),
-        assigned_inspection_staff: toUserSummaryDto(plainBooking.assigned_inspection_staff_id),
+        assigned_inspection_staff: toUserSummaryDto(plainBooking.assigned_inspection_staff_id, {
+            includeContact: includeStaffContact,
+        }),
         garage_id: toId(plainBooking.garage_id),
         garage: toGarageSummaryDto(plainBooking.garage_id),
         wash_bay_id: toId(plainBooking.wash_bay_id),
@@ -248,7 +278,9 @@ const toBookingDto = (booking, options = {}) => {
         price_rule_version: plainBooking.price_rule_version || null,
         pricing_source: plainBooking.pricing_source || 'LEGACY_BASE_PRICE',
         add_on_service_ids: (plainBooking.add_on_service_ids || []).map((item) => toId(item)),
-        booking_items: (plainBooking.booking_items || []).map((item) => toBookingItemDto(item)),
+        booking_items: (plainBooking.booking_items || []).map(
+            (item) => toBookingItemDto(item, { includeStaffContact })
+        ),
         booking_date: plainBooking.booking_date,
         start_time: plainBooking.start_time,
         end_time: plainBooking.end_time,
@@ -265,7 +297,9 @@ const toBookingDto = (booking, options = {}) => {
         care_staff_reserved_until: plainBooking.care_staff_reserved_until || plainBooking.care_staff_end_time,
         assigned_care_staff_ids: (plainBooking.assigned_care_staff_ids || []).map((item) => toId(item)),
         assigned_care_staff: (plainBooking.assigned_care_staff_ids || [])
-            .map((item) => toStaffProfileSummaryDto(item))
+            .map((item) => toStaffProfileSummaryDto(item, {
+                includeContact: includeStaffContact,
+            }))
             .filter(Boolean),
         original_price: plainBooking.original_price,
         promotion_discount_amount: plainBooking.promotion_discount_amount,
@@ -338,7 +372,9 @@ const toBookingDto = (booking, options = {}) => {
         cancellation_incident_id: toId(plainBooking.cancellation_incident_id),
         no_show_at: plainBooking.no_show_at,
         no_show_by_id: toId(plainBooking.no_show_by_id),
-        no_show_by: toUserSummaryDto(plainBooking.no_show_by_id),
+        no_show_by: toUserSummaryDto(plainBooking.no_show_by_id, {
+            includeContact: includeStaffContact,
+        }),
         no_show_reason: plainBooking.no_show_reason,
         reward_processed: plainBooking.reward_processed,
         reward_processed_at: plainBooking.reward_processed_at,
