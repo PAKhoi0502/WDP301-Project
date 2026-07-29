@@ -1,4 +1,4 @@
-const toGarageDto = (garage) => {
+const toGarageDto = (garage, ratingSummary = null) => {
     if (!garage) {
         return null;
     }
@@ -23,13 +23,22 @@ const toGarageDto = (garage) => {
         late_grace_minutes: plainGarage.late_grace_minutes,
         description: plainGarage.description,
         is_active: plainGarage.is_active,
+        ...(ratingSummary ? {
+            rating_average: ratingSummary.rating_average,
+            rating_count: ratingSummary.rating_count,
+        } : {}),
         created_at: plainGarage.created_at,
         updated_at: plainGarage.updated_at,
     };
 };
 
-const toGarageDtoList = (garages = []) => {
-    return garages.map((garage) => toGarageDto(garage));
+const toGarageDtoList = (garages = [], ratingSummaryMap = null) => {
+    return garages.map((garage) => {
+        const garageId = garage?._id?.toString?.() || garage?.id?.toString?.();
+        const ratingSummary = ratingSummaryMap?.get(garageId) || null;
+
+        return toGarageDto(garage, ratingSummary);
+    });
 };
 
 const toCreatePayload = (data = {}) => {

@@ -250,6 +250,14 @@ const schemas = {
                 type: 'boolean',
                 example: true,
             },
+            rating_average: {
+                type: 'number',
+                example: 4.6,
+            },
+            rating_count: {
+                type: 'integer',
+                example: 125,
+            },
             created_at: {
                 type: 'string',
                 format: 'date-time',

@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const ServicePackage = require('./servicePackage.model');
 const ServicePackageMapper = require('./servicePackage.mapper');
+const ReviewSummaryService = require('../reviews/reviewSummary.service');
 const washBayService = require('../wash-bays/washBay.service');
 const { AppError } = require('../../shared/utils/appError');
 const {
@@ -675,9 +676,15 @@ const getPublicServicePackages = async ({
             .limit(limit),
         ServicePackage.countDocuments(filter),
     ]);
+    const ratingSummaryMap = await ReviewSummaryService.getServicePackageSummaryMap(
+        servicePackages.map((servicePackage) => servicePackage._id)
+    );
 
     return {
-        data: ServicePackageMapper.toServicePackageDtoList(servicePackages),
+        data: ServicePackageMapper.toServicePackageDtoList(
+            servicePackages,
+            ratingSummaryMap
+        ),
         meta: {
             page,
             limit,
@@ -697,7 +704,11 @@ const getPublicServicePackageById = async (servicePackageId) => {
         throw new AppError('Service package not found', 404, 'SERVICE_PACKAGE_NOT_FOUND');
     }
 
-    return ServicePackageMapper.toServicePackageDto(servicePackage);
+    const ratingSummary = await ReviewSummaryService.getServicePackageSummary(
+        servicePackage._id
+    );
+
+    return ServicePackageMapper.toServicePackageDto(servicePackage, ratingSummary);
 };
 
 const getAllServicePackages = async ({ page = 1, limit = 20, search, vehicle_type, service_type, requires_wash_bay, requires_care_staff, is_active } = {}) => {

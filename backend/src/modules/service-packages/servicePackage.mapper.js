@@ -55,7 +55,7 @@ const toIncludedServiceDto = (service) => {
     };
 };
 
-const toServicePackageDto = (servicePackage) => {
+const toServicePackageDto = (servicePackage, ratingSummary = null) => {
     if (!servicePackage) {
         return null;
     }
@@ -86,13 +86,23 @@ const toServicePackageDto = (servicePackage) => {
         included_service_ids: (plainServicePackage.included_service_ids || []).map((item) => toIncludedServiceDto(item)),
         steps_template: (plainServicePackage.steps_template || []).map((step) => toStepTemplateDto(step)),
         is_active: plainServicePackage.is_active,
+        ...(ratingSummary ? {
+            rating_average: ratingSummary.rating_average,
+            rating_count: ratingSummary.rating_count,
+        } : {}),
         created_at: plainServicePackage.created_at,
         updated_at: plainServicePackage.updated_at,
     };
 };
 
-const toServicePackageDtoList = (servicePackages = []) => {
-    return servicePackages.map((servicePackage) => toServicePackageDto(servicePackage));
+const toServicePackageDtoList = (servicePackages = [], ratingSummaryMap = null) => {
+    return servicePackages.map((servicePackage) => {
+        const servicePackageId = servicePackage?._id?.toString?.()
+            || servicePackage?.id?.toString?.();
+        const ratingSummary = ratingSummaryMap?.get(servicePackageId) || null;
+
+        return toServicePackageDto(servicePackage, ratingSummary);
+    });
 };
 
 const copyDefinedFields = (data = {}, fields = []) => {

@@ -151,6 +151,56 @@ describe('notification service customer operations', () => {
         expect(result.type).toBe(NOTIFICATION_TYPES.PAYMENT_READY);
     });
 
+    it('creates a review request for a settled customer booking', async () => {
+        const garageId = new mongoose.Types.ObjectId();
+        const servicePackageId = new mongoose.Types.ObjectId();
+
+        Notification.create.mockResolvedValue([
+            {
+                _id: notificationId,
+                user_id: userId,
+                type: NOTIFICATION_TYPES.REVIEW_REQUEST,
+                title: 'Share your experience',
+                message: 'Your booking is completed and settled. You can now review the garage and service.',
+                channels: [NOTIFICATION_CHANNELS.IN_APP],
+                related_type: NOTIFICATION_RELATED_TYPES.BOOKING,
+                related_id: bookingId,
+                in_app_status: IN_APP_STATUSES.UNREAD,
+                email_status: EMAIL_STATUSES.NOT_REQUIRED,
+                metadata: {
+                    booking_id: bookingId.toString(),
+                    garage_id: garageId.toString(),
+                    service_package_id: servicePackageId.toString(),
+                },
+            },
+        ]);
+
+        const result = await notificationService.emitReviewRequest({
+            booking: {
+                _id: bookingId,
+                customer_id: userId,
+                garage_id: garageId,
+                service_package_id: servicePackageId,
+            },
+        });
+
+        expect(Notification.create).toHaveBeenCalledWith(
+            [
+                expect.objectContaining({
+                    user_id: userId,
+                    type: NOTIFICATION_TYPES.REVIEW_REQUEST,
+                    related_type: NOTIFICATION_RELATED_TYPES.BOOKING,
+                    related_id: bookingId,
+                }),
+            ],
+            undefined
+        );
+        expect(result).toMatchObject({
+            type: NOTIFICATION_TYPES.REVIEW_REQUEST,
+            related_id: bookingId.toString(),
+        });
+    });
+
     it('marks all unread notifications as read for current customer', async () => {
         Notification.updateMany.mockResolvedValue({ modifiedCount: 3 });
 

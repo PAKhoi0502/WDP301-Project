@@ -9,6 +9,8 @@
 | `npm run seed` | Upserts demo seed data without clearing runtime data. |
 | `npm run seed:reset` | Resets all reset collections, then runs the full seed flow. |
 | `npm run seed:reset -- --dry-run` | Prints the reset table and skips seed execution. |
+| `npm run seed:reviews` | Upserts deterministic verified review data without overwriting a customer-created review for the same booking. |
+| `npm run seed:reviews:dry-run` | Validates review seed dependencies and prints the planned count without writing. |
 
 ## Reset Table
 

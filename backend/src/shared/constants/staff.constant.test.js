@@ -114,4 +114,23 @@ describe('staff authorization constants', () => {
             STAFF_CAPABILITIES.CUSTOMER_CASE_READ_GARAGE
         )).toBe(false);
     });
+
+    it('allows only customer service staff to read and reply to garage reviews', () => {
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.CUSTOMER_SERVICE_STAFF,
+            STAFF_CAPABILITIES.REVIEW_READ_GARAGE
+        )).toBe(true);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.CUSTOMER_SERVICE_STAFF,
+            STAFF_CAPABILITIES.REVIEW_REPLY_GARAGE
+        )).toBe(true);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.VEHICLE_INSPECTION_STAFF,
+            STAFF_CAPABILITIES.REVIEW_READ_GARAGE
+        )).toBe(false);
+        expect(staffTypeHasCapability(
+            STAFF_TYPES.WASH_OPERATOR,
+            STAFF_CAPABILITIES.REVIEW_REPLY_GARAGE
+        )).toBe(false);
+    });
 });

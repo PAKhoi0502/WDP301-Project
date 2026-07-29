@@ -1,5 +1,6 @@
 const Garage = require('./garage.model');
 const GarageMapper = require('./garage.mapper');
+const ReviewSummaryService = require('../reviews/reviewSummary.service');
 const { AppError } = require('../../shared/utils/appError');
 
 const normalizeText = (value) => {
@@ -288,9 +289,12 @@ const getPublicGarages = async ({ page = 1, limit = 20, search, city, district }
             .limit(limit),
         Garage.countDocuments(filter),
     ]);
+    const ratingSummaryMap = await ReviewSummaryService.getGarageSummaryMap(
+        garages.map((garage) => garage._id)
+    );
 
     return {
-        data: GarageMapper.toGarageDtoList(garages),
+        data: GarageMapper.toGarageDtoList(garages, ratingSummaryMap),
         meta: {
             page,
             limit,
@@ -307,7 +311,9 @@ const getPublicGarageById = async (garageId) => {
         throw new AppError('Garage not found', 404, 'GARAGE_NOT_FOUND');
     }
 
-    return GarageMapper.toGarageDto(garage);
+    const ratingSummary = await ReviewSummaryService.getGarageSummary(garage._id);
+
+    return GarageMapper.toGarageDto(garage, ratingSummary);
 };
 
 const getAllGarages = async ({ page = 1, limit = 20, search, city, district, is_active } = {}) => {

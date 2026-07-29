@@ -20,10 +20,15 @@ jest.mock('../promotion-usages/promotionUsage.model', () => ({
     updateMany: jest.fn(),
 }));
 
+jest.mock('../notifications/notification.service', () => ({
+    createInAppNotification: jest.fn(),
+}));
+
 const mongoose = require('mongoose');
 const Booking = require('../bookings/booking.model');
 const WashHistory = require('./washHistory.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
+const notificationService = require('../notifications/notification.service');
 const walkInClaimService = require('./walkInClaim.service');
 
 const createBookingQuery = (result) => {
@@ -48,10 +53,15 @@ describe('walk-in history claim', () => {
         jest.clearAllMocks();
         mongoose.startSession.mockResolvedValue(session);
         session.withTransaction.mockImplementation(async (callback) => callback());
-        Booking.find.mockReturnValue(createBookingQuery([{ _id: bookingId }]));
+        Booking.find.mockReturnValue(createBookingQuery([{
+            _id: bookingId,
+            garage_id: '507f1f77bcf86cd799439013',
+            service_package_id: '507f1f77bcf86cd799439014',
+        }]));
         Booking.updateMany.mockResolvedValue({ modifiedCount: 1 });
         WashHistory.updateMany.mockResolvedValue({ modifiedCount: 1 });
         PromotionUsage.updateMany.mockResolvedValue({ modifiedCount: 1 });
+        notificationService.createInAppNotification.mockResolvedValue(null);
     });
 
     it('claims paid completed histories without touching loyalty', async () => {
@@ -65,7 +75,9 @@ describe('walk-in history claim', () => {
             is_walk_in: true,
             normalized_guest_phone: '+84901234567',
             status: 'COMPLETED',
-            payment_status: 'PAID',
+            payment_status: {
+                $in: ['PAID', 'WAIVED'],
+            },
             claimed_customer_id: null,
         }));
         expect(Booking.updateMany).toHaveBeenCalledWith(
@@ -86,6 +98,15 @@ describe('walk-in history claim', () => {
             claimed_wash_histories: 1,
             linked_promotion_usages: 1,
         });
+        expect(notificationService.createInAppNotification).toHaveBeenCalledWith(
+            expect.objectContaining({
+                userId: customerId,
+                type: 'REVIEW_REQUEST',
+                relatedType: 'BOOKING',
+                relatedId: bookingId,
+                session,
+            })
+        );
     });
 
     it('requires a verified phone', async () => {

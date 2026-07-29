@@ -28,6 +28,7 @@ const {
 const {
     seedNotificationsSurveysPlateScansData,
 } = require('./seedNotificationsSurveysPlateScans');
+const { seedReviewsData } = require('./seedReviews');
 const { resetDatabase } = require('./resetDatabase');
 
 const shouldResetDatabase = process.argv.includes('--reset');
@@ -65,6 +66,7 @@ const run = async () => {
         await seedLoyaltyHistoriesHandoversData();
         await seedIncidentsVouchersCustomerCasesData();
         await seedNotificationsSurveysPlateScansData();
+        await seedReviewsData();
 
         console.log('All seed completed');
     } catch (error) {

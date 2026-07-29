@@ -33,6 +33,8 @@
     "seed:incidents-vouchers-customer-cases:dry-run": "node src/scripts/seedIncidentsVouchersCustomerCases.js --dry-run",
     "seed:notifications-surveys-plate-scans": "node src/scripts/seedNotificationsSurveysPlateScans.js",
     "seed:notifications-surveys-plate-scans:dry-run": "node src/scripts/seedNotificationsSurveysPlateScans.js --dry-run",
+    "seed:reviews": "node src/scripts/seedReviews.js",
+    "seed:reviews:dry-run": "node src/scripts/seedReviews.js --dry-run",
     "seed:analytics-demo": "node src/scripts/seedAnalyticsDemo.js",
     "seed:analytics-demo:dry-run": "node src/scripts/seedAnalyticsDemo.js --dry-run",
     "migrate:phone-e164": "node src/scripts/migrateUserPhonesToE164.js",

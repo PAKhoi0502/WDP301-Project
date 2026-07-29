@@ -395,6 +395,29 @@ const emitRewardEarned = async ({ booking, earnedPoints, session = null }) => {
     });
 };
 
+const emitReviewRequest = async ({ booking, session = null }) => {
+    const customerId = booking.customer_id || booking.claimed_customer_id;
+
+    if (!customerId) {
+        return null;
+    }
+
+    return createInAppNotification({
+        userId: customerId,
+        type: NOTIFICATION_TYPES.REVIEW_REQUEST,
+        title: 'Share your experience',
+        message: 'Your booking is completed and settled. You can now review the garage and service.',
+        relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+        relatedId: booking._id,
+        metadata: {
+            booking_id: booking._id.toString(),
+            garage_id: booking.garage_id?.toString?.() || null,
+            service_package_id: booking.service_package_id?.toString?.() || null,
+        },
+        session,
+    });
+};
+
 module.exports = {
     createInAppNotification,
     createEmailNotification,
@@ -410,4 +433,5 @@ module.exports = {
     emitPaymentReady,
     emitPaymentConfirmed,
     emitRewardEarned,
+    emitReviewRequest,
 };

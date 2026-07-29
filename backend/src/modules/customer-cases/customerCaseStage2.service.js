@@ -11,6 +11,8 @@ const customerCaseService = require('./customerCase.service');
 const customerCaseNotificationService = require('./customerCaseNotification.service');
 const customerVoucherService = require('../customer-vouchers/customerVoucher.service');
 const bookingService = require('../bookings/booking.service');
+const washHistoryService = require('../wash-histories/washHistory.service');
+const notificationService = require('../notifications/notification.service');
 const auditLogService = require('../audit-logs/auditLog.service');
 const { AppError } = require('../../shared/utils/appError');
 const { normalizePhone } = require('../../shared/utils/phone');
@@ -567,6 +569,16 @@ const applyResolution = async (user, caseId, resolutionId, auditContext = {}) =>
                 }
 
                 await booking.save();
+
+                if (booking.payment_status === BOOKING_PAYMENT_STATUS.WAIVED) {
+                    await washHistoryService.createWashHistoryFromBooking({
+                        booking,
+                        earnedPoints: 0,
+                    });
+                    await notificationService.emitReviewRequest({
+                        booking,
+                    });
+                }
             }
         }
         resolution.status = CUSTOMER_CASE_RESOLUTION_STATUSES.APPLIED;

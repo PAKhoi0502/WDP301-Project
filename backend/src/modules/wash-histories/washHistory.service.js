@@ -240,7 +240,7 @@ const createWashHistoryFromBooking = async ({ booking, earnedPoints = 0, session
                 points_earned: earnedPoints,
                 points_used: booking.used_points || 0,
                 payment_method: booking.payment_method,
-                paid_at: booking.paid_at || new Date(),
+                paid_at: booking.paid_at || booking.payment_waived_at || new Date(),
                 service_started_at: booking.started_at || null,
                 service_completed_at: booking.completed_at,
             },

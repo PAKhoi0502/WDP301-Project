@@ -25,6 +25,7 @@ const customerVoucherRoutes = require('../modules/customer-vouchers/customerVouc
 const customerCaseRoutes = require('../modules/customer-cases/customerCase.routes');
 const bookingArrivalRoutes = require('../modules/booking-arrivals/bookingArrival.routes');
 const staffBookingWorkflowRoutes = require('../modules/staff-booking-workflows/staffBookingWorkflow.routes');
+const reviewRoutes = require('../modules/reviews/review.routes');
 
 const router = express.Router();
 
@@ -38,8 +39,10 @@ router.get('/', (req, res) => {
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
 router.use('/staff-profiles', staffProfileRoutes);
+router.use('/garages', reviewRoutes.publicGarageRouter);
 router.use('/garages', garageRoutes.publicRouter);
 router.use('/vehicles', vehicleRoutes.customerRouter);
+router.use('/service-packages', reviewRoutes.publicServicePackageRouter);
 router.use('/service-packages', servicePackageRoutes.publicRouter);
 router.use('/pricing', servicePriceRuleRoutes.customerRouter);
 router.use('/bookings', bookingRoutes.customerRouter);
@@ -61,6 +64,7 @@ router.use('/payments', paymentRoutes.publicRouter);
 router.use('/payments', paymentRoutes.customerRouter);
 router.use('/uploads', uploadRoutes.publicRouter);
 router.use('/surveys', surveyRoutes.customerRouter);
+router.use('/reviews', reviewRoutes.customerRouter);
 router.use('/admin/customers', customerRoutes.adminRouter);
 router.use('/admin/vehicles', vehicleRoutes.adminRouter);
 router.use('/admin/service-packages', servicePackageRoutes.adminRouter);
@@ -71,6 +75,8 @@ router.use('/admin/payments', paymentRoutes.adminRouter);
 router.use('/admin/uploads', uploadRoutes.adminRouter);
 router.use('/admin/audit-logs', auditLogRoutes.adminRouter);
 router.use('/admin/surveys', surveyRoutes.adminRouter);
+router.use('/staff/reviews', reviewRoutes.staffRouter);
+router.use('/admin/reviews', reviewRoutes.adminRouter);
 router.use('/admin/analytics', analyticsRoutes.adminRouter);
 router.use('/admin/research', researchRoutes.adminRouter);
 router.use('/admin/customer-vouchers', customerVoucherRoutes.adminRouter);

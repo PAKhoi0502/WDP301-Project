@@ -3,12 +3,17 @@ const mongoose = require('mongoose');
 const Booking = require('../bookings/booking.model');
 const WashHistory = require('./washHistory.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
+const notificationService = require('../notifications/notification.service');
 const { AppError } = require('../../shared/utils/appError');
 const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 const {
     BOOKING_STATUS,
     BOOKING_PAYMENT_STATUS,
 } = require('../../shared/constants/booking.constant');
+const {
+    NOTIFICATION_TYPES,
+    NOTIFICATION_RELATED_TYPES,
+} = require('../../shared/constants/notification.constant');
 
 const DEFAULT_CLAIM_LOOKBACK_MONTHS = 12;
 
@@ -52,11 +57,16 @@ const claimWalkInHistoryForCustomer = async ({
                 is_walk_in: true,
                 normalized_guest_phone: normalizedPhone,
                 status: BOOKING_STATUS.COMPLETED,
-                payment_status: BOOKING_PAYMENT_STATUS.PAID,
+                payment_status: {
+                    $in: [
+                        BOOKING_PAYMENT_STATUS.PAID,
+                        BOOKING_PAYMENT_STATUS.WAIVED,
+                    ],
+                },
                 paid_at: { $gte: getClaimCutoff() },
                 claimed_customer_id: null,
             })
-                .select('_id')
+                .select('_id garage_id service_package_id')
                 .session(session)
                 .lean();
             const bookingIds = bookings.map((booking) => booking._id);
@@ -103,6 +113,24 @@ const claimWalkInHistoryForCustomer = async ({
                 },
                 { session }
             );
+
+            for (const booking of bookings) {
+                await notificationService.createInAppNotification({
+                    userId: customerId,
+                    type: NOTIFICATION_TYPES.REVIEW_REQUEST,
+                    title: 'Share your experience',
+                    message: 'Your claimed walk-in booking can now be reviewed.',
+                    relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+                    relatedId: booking._id,
+                    metadata: {
+                        booking_id: booking._id.toString(),
+                        garage_id: booking.garage_id?.toString?.() || null,
+                        service_package_id:
+                            booking.service_package_id?.toString?.() || null,
+                    },
+                    session,
+                });
+            }
 
             result = {
                 claimed_bookings: bookingUpdate.modifiedCount || 0,

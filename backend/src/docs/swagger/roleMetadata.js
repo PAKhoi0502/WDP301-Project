@@ -216,6 +216,24 @@ addStaffOperationPolicies({
 
 addStaffOperationPolicies({
     operations: [
+        'GET /staff/reviews',
+        'GET /staff/reviews/{id}',
+    ],
+    capabilities: [STAFF_CAPABILITIES.REVIEW_READ_GARAGE],
+    resourceScope: 'garage',
+});
+
+addStaffOperationPolicies({
+    operations: [
+        'PUT /staff/reviews/{id}/reply',
+        'DELETE /staff/reviews/{id}/reply',
+    ],
+    capabilities: [STAFF_CAPABILITIES.REVIEW_REPLY_GARAGE],
+    resourceScope: 'garage',
+});
+
+addStaffOperationPolicies({
+    operations: [
         'GET /staff/booking-arrivals/plate-scans',
         'POST /staff/booking-arrivals/plate-scans',
         'GET /staff/booking-arrivals/plate-scans/{scanId}',
@@ -429,6 +447,8 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'GET /garages',
             'GET /garages/{id}',
+            'GET /garages/{garageId}/reviews',
+            'GET /garages/{garageId}/review-summary',
         ],
     },
     {
@@ -493,6 +513,8 @@ const ROUTE_GROUPS = Object.freeze([
         operations: [
             'GET /service-packages',
             'GET /service-packages/{id}',
+            'GET /service-packages/{servicePackageId}/reviews',
+            'GET /service-packages/{servicePackageId}/review-summary',
         ],
     },
     {
@@ -941,6 +963,40 @@ const ROUTE_GROUPS = Object.freeze([
             'GET /admin/analytics/wash-bays',
             'GET /admin/analytics/payments',
             'GET /admin/analytics/surveys/{surveyId}',
+        ],
+    },
+    {
+        roles: ['CUSTOMER'],
+        feature: 'Customer reviews',
+        operations: [
+            'GET /reviews/eligibility',
+            'POST /reviews',
+            'POST /garages/{garageId}/reviews',
+            'GET /reviews/mine',
+            'GET /reviews/by-booking/{bookingId}',
+            'PATCH /reviews/{id}',
+            'DELETE /reviews/{id}',
+        ],
+    },
+    {
+        roles: ['STAFF'],
+        feature: 'Garage review responses',
+        scope: STAFF_GARAGE_SCOPE,
+        operations: [
+            'GET /staff/reviews',
+            'GET /staff/reviews/{id}',
+            'PUT /staff/reviews/{id}/reply',
+            'DELETE /staff/reviews/{id}/reply',
+        ],
+    },
+    {
+        roles: ['ADMIN'],
+        feature: 'Review moderation and analytics',
+        operations: [
+            'GET /admin/reviews',
+            'GET /admin/reviews/analytics',
+            'GET /admin/reviews/{id}',
+            'PATCH /admin/reviews/{id}/moderation',
         ],
     },
     {

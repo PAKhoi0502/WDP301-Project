@@ -99,6 +99,10 @@ const processCompletedPaidBooking = async ({ booking, actorId, session = null })
         earnedPoints: loyaltyResult.earned_points,
         session,
     });
+    const reviewNotification = await notificationService.emitReviewRequest({
+        booking,
+        session,
+    });
 
     booking.reward_processed = true;
     booking.reward_processed_at = new Date();
@@ -110,7 +114,11 @@ const processCompletedPaidBooking = async ({ booking, actorId, session = null })
         loyalty: loyaltyResult.loyalty,
         point_transaction: loyaltyResult.point_transaction,
         promotion_usage: promotionUsage,
-        notifications: [paymentNotification, rewardNotification].filter(Boolean),
+        notifications: [
+            paymentNotification,
+            rewardNotification,
+            reviewNotification,
+        ].filter(Boolean),
         earned_points: loyaltyResult.earned_points,
         already_processed: false,
     };

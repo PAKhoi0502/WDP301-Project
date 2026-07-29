@@ -18,6 +18,7 @@ jest.mock('../promotion-usages/promotionUsage.service', () => ({
 jest.mock('../notifications/notification.service', () => ({
     emitPaymentConfirmed: jest.fn(),
     emitRewardEarned: jest.fn(),
+    emitReviewRequest: jest.fn(),
 }));
 
 jest.mock('../booking-violations/bookingViolation.service', () => ({
@@ -49,6 +50,7 @@ describe('booking reward service', () => {
         promotionUsageService.createPromotionUsageFromBooking.mockResolvedValue(null);
         notificationService.emitPaymentConfirmed.mockResolvedValue(null);
         notificationService.emitRewardEarned.mockResolvedValue(null);
+        notificationService.emitReviewRequest.mockResolvedValue(null);
     });
 
     it('records completed booking violation recovery when processing paid booking reward', async () => {
@@ -76,6 +78,7 @@ describe('booking reward service', () => {
         promotionUsageService.createPromotionUsageFromBooking.mockResolvedValue(null);
         notificationService.emitPaymentConfirmed.mockResolvedValue({ id: 'payment-notification-id' });
         notificationService.emitRewardEarned.mockResolvedValue({ id: 'reward-notification-id' });
+        notificationService.emitReviewRequest.mockResolvedValue({ id: 'review-notification-id' });
         bookingViolationService.recordCompletedPaidBooking.mockResolvedValue({ score_change: -1 });
 
         const result = await bookingRewardService.processCompletedPaidBooking({
@@ -90,9 +93,18 @@ describe('booking reward service', () => {
             session,
         });
         expect(booking.reward_processed).toBe(true);
+        expect(notificationService.emitReviewRequest).toHaveBeenCalledWith({
+            booking,
+            session,
+        });
         expect(result).toMatchObject({
             earned_points: 20,
             already_processed: false,
+            notifications: [
+                { id: 'payment-notification-id' },
+                { id: 'reward-notification-id' },
+                { id: 'review-notification-id' },
+            ],
         });
     });
 
