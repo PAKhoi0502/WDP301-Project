@@ -125,7 +125,7 @@ describe('analytics service', () => {
         expect(WashHistory.aggregate).not.toHaveBeenCalled();
     });
 
-    it('returns booking trends and duration metrics', async () => {
+    it('returns booking rates, trends, and duration metrics', async () => {
         Booking.aggregate.mockResolvedValue([
             {
                 status_distribution: [
@@ -142,6 +142,9 @@ describe('analytics service', () => {
                 metrics: [
                     {
                         total_bookings: 4,
+                        completed_bookings: 3,
+                        canceled_bookings: 1,
+                        no_show_bookings: 0,
                         scheduled_duration_average: 60,
                         actual_duration_average: 55.5,
                         late_booking_count: 1,
@@ -159,6 +162,12 @@ describe('analytics service', () => {
 
         expect(result.metrics).toEqual({
             total_bookings: 4,
+            completed_bookings: 3,
+            canceled_bookings: 1,
+            no_show_bookings: 0,
+            completion_rate: 75,
+            cancellation_rate: 25,
+            no_show_rate: 0,
             scheduled_duration_average_minutes: 60,
             actual_duration_average_minutes: 55.5,
             late_booking_count: 1,

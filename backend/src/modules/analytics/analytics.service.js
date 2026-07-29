@@ -293,6 +293,33 @@ const getBookingAnalytics = async (filters = {}) => {
                         $group: {
                             _id: null,
                             total_bookings: { $sum: 1 },
+                            completed_bookings: {
+                                $sum: {
+                                    $cond: [
+                                        { $eq: ['$status', BOOKING_STATUS.COMPLETED] },
+                                        1,
+                                        0,
+                                    ],
+                                },
+                            },
+                            canceled_bookings: {
+                                $sum: {
+                                    $cond: [
+                                        { $eq: ['$status', BOOKING_STATUS.CANCELED] },
+                                        1,
+                                        0,
+                                    ],
+                                },
+                            },
+                            no_show_bookings: {
+                                $sum: {
+                                    $cond: [
+                                        { $eq: ['$status', BOOKING_STATUS.NO_SHOW] },
+                                        1,
+                                        0,
+                                    ],
+                                },
+                            },
                             scheduled_duration_average: {
                                 $avg: {
                                     $dateDiff: {
@@ -338,11 +365,18 @@ const getBookingAnalytics = async (filters = {}) => {
     ]);
 
     const metrics = result.metrics?.[0] || {};
+    const totalBookings = metrics.total_bookings || 0;
 
     return {
         period: getPeriod(filters),
         metrics: {
-            total_bookings: metrics.total_bookings || 0,
+            total_bookings: totalBookings,
+            completed_bookings: metrics.completed_bookings || 0,
+            canceled_bookings: metrics.canceled_bookings || 0,
+            no_show_bookings: metrics.no_show_bookings || 0,
+            completion_rate: percentage(metrics.completed_bookings, totalBookings),
+            cancellation_rate: percentage(metrics.canceled_bookings, totalBookings),
+            no_show_rate: percentage(metrics.no_show_bookings, totalBookings),
             scheduled_duration_average_minutes: round(metrics.scheduled_duration_average),
             actual_duration_average_minutes: round(metrics.actual_duration_average),
             late_booking_count: metrics.late_booking_count || 0,
