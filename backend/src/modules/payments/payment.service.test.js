@@ -490,6 +490,71 @@ describe('payment service createPayosPayment', () => {
         expect(result.booking).toBeUndefined();
     });
 
+    it('confirms a paid PayOS transaction from provider polling when webhook delivery was missed', async () => {
+        const customerUser = {
+            _id: '507f1f77bcf86cd799439021',
+            role: 'CUSTOMER',
+        };
+        const booking = createBooking({
+            customer_id: customerUser._id,
+            is_walk_in: false,
+            payment_method: 'PAYOS',
+            payment_status: 'PENDING',
+        });
+        const payment = {
+            _id: '507f1f77bcf86cd799439014',
+            booking_id: bookingId,
+            provider: 'PAYOS',
+            method: 'QR',
+            order_code: 178082640000012,
+            payment_link_id: 'payos-link-id',
+            checkout_url: 'https://pay.payos.vn/web/checkout/123',
+            qr_code: '000201010212',
+            amount: 120000,
+            currency: 'VND',
+            description: 'AWP 178082640000012',
+            status: 'PENDING',
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+
+        Booking.findById
+            .mockResolvedValueOnce(booking)
+            .mockReturnValueOnce(createSessionQueryMock(booking))
+            .mockResolvedValueOnce(booking);
+        PaymentTransaction.findOne.mockReturnValue(createQueryMock(payment));
+        PaymentTransaction.findById.mockReturnValue(createSessionQueryMock(payment));
+        payosService.getPaymentLinkInformation.mockResolvedValue({
+            status: 'PAID',
+            orderCode: payment.order_code,
+            paymentLinkId: payment.payment_link_id,
+            amount: payment.amount,
+            amountPaid: payment.amount,
+            transactions: [{
+                amount: payment.amount,
+                transactionDateTime: '2026-06-07T10:05:00+07:00',
+            }],
+        });
+
+        const result = await paymentService.getPayosPaymentForBooking(customerUser, bookingId);
+
+        expect(payosService.getPaymentLinkInformation).toHaveBeenCalledWith('payos-link-id');
+        expect(payment.status).toBe('PAID');
+        expect(booking.payment_status).toBe('PAID');
+        expect(booking.payment_method).toBe('PAYOS');
+        expect(result.payment.status).toBe('PAID');
+        expect(result.poll_after_ms).toBeNull();
+        expect(bookingPaymentService.confirmBookingPaid).toHaveBeenCalledWith(expect.objectContaining({
+            booking,
+            paymentMethod: 'PAYOS',
+            paidAt: new Date('2026-06-07T03:05:00.000Z'),
+            session: mockSession,
+        }));
+        expect(auditLogService.recordAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+            action: 'PAYMENT_CONFIRMED',
+            metadata: expect.objectContaining({ source: 'PAYOS_PROVIDER_SYNC' }),
+        }));
+    });
+
     it('cancels pending PayOS payment and resets booking to cash unpaid', async () => {
         const booking = createBooking({
             payment_method: 'PAYOS',

@@ -186,6 +186,51 @@ const parsePayosTransactionTime = (value, fallback = new Date()) => {
     return parsedDate;
 };
 
+const getPayosProviderTransactionTime = (providerPayment) => {
+    const transactions = Array.isArray(providerPayment?.transactions)
+        ? providerPayment.transactions
+        : [];
+    const transaction = transactions.find((item) => item?.transactionDateTime);
+
+    return transaction?.transactionDateTime
+        || providerPayment?.transactionDateTime
+        || providerPayment?.paidAt
+        || null;
+};
+
+const assertPayosProviderPaymentMatches = (payment, booking, providerPayment) => {
+    const providerOrderCode = Number(providerPayment?.orderCode);
+
+    if (Number.isFinite(providerOrderCode) && providerOrderCode !== payment.order_code) {
+        throw new AppError('PayOS order code does not match transaction', 400, 'PAYOS_ORDER_CODE_MISMATCH');
+    }
+
+    if (
+        providerPayment?.paymentLinkId
+        && payment.payment_link_id
+        && providerPayment.paymentLinkId !== payment.payment_link_id
+    ) {
+        throw new AppError('PayOS payment link does not match transaction', 400, 'PAYOS_PAYMENT_LINK_MISMATCH');
+    }
+
+    const providerAmount = Number(providerPayment?.amount);
+
+    if (!Number.isFinite(providerAmount) || providerAmount !== payment.amount || providerAmount !== booking.final_price) {
+        throw new AppError('PayOS payment amount does not match booking amount', 400, 'PAYOS_PAYMENT_AMOUNT_MISMATCH');
+    }
+};
+
+const buildPayosProviderSyncRecord = (providerPayment) => ({
+    source: 'PAYOS_PROVIDER_SYNC',
+    status: providerPayment?.status || null,
+    order_code: providerPayment?.orderCode || null,
+    payment_link_id: providerPayment?.paymentLinkId || null,
+    amount: Number.isFinite(Number(providerPayment?.amount)) ? Number(providerPayment.amount) : null,
+    amount_paid: Number.isFinite(Number(providerPayment?.amountPaid)) ? Number(providerPayment.amountPaid) : null,
+    transaction_date_time: getPayosProviderTransactionTime(providerPayment),
+    synced_at: new Date().toISOString(),
+});
+
 const buildCreatePaymentResponse = (booking, payment, reused = false) => {
     return {
         booking: BookingMapper.toBookingDto(booking),
@@ -550,11 +595,15 @@ const getPayosPaymentForBooking = async (user, bookingId) => {
     }
 
     await assertActorCanAccessBooking(user, booking);
-    await expireDuePayosPayments({
-        bookingId: booking._id,
-        limit: 10,
-        source: 'PAYMENT_POLL',
-    });
+    const syncResult = await syncPayosPaymentForBooking(booking._id);
+
+    if (syncResult.provider_available) {
+        await expireDuePayosPayments({
+            bookingId: booking._id,
+            limit: 10,
+            source: 'PAYMENT_POLL',
+        });
+    }
 
     booking = await Booking.findById(bookingId);
 
@@ -919,6 +968,152 @@ const expireDuePayosPayments = async ({
     };
 };
 
+const confirmPayosPaymentFromProvider = async (paymentId, providerPayment) => {
+    const session = await mongoose.startSession();
+
+    try {
+        let response;
+
+        await session.withTransaction(async () => {
+            const payment = await PaymentTransaction.findById(paymentId).session(session);
+
+            if (!payment) {
+                response = {
+                    confirmed: false,
+                    reason: 'PAYMENT_TRANSACTION_NOT_FOUND',
+                };
+                return;
+            }
+
+            const booking = await Booking.findById(payment.booking_id).session(session);
+
+            if (!booking) {
+                response = {
+                    confirmed: false,
+                    reason: 'BOOKING_NOT_FOUND',
+                };
+                return;
+            }
+
+            if (payment.status === PAYMENT_TRANSACTION_STATUS.PAID) {
+                response = {
+                    confirmed: false,
+                    already_processed: true,
+                    payment,
+                    booking,
+                };
+                return;
+            }
+
+            const pendingBookingPayment = (
+                payment.status === PAYMENT_TRANSACTION_STATUS.PENDING
+                && booking.payment_method === BOOKING_PAYMENT_METHOD.PAYOS
+                && booking.payment_status === BOOKING_PAYMENT_STATUS.PENDING
+            );
+            const expiredBookingPayment = (
+                payment.status === PAYMENT_TRANSACTION_STATUS.EXPIRED
+                && booking.payment_method === BOOKING_PAYMENT_METHOD.CASH
+                && booking.payment_status === BOOKING_PAYMENT_STATUS.UNPAID
+            );
+
+            if (
+                booking.status !== BOOKING_STATUS.COMPLETED
+                || (!pendingBookingPayment && !expiredBookingPayment)
+            ) {
+                response = {
+                    confirmed: false,
+                    reason: 'BOOKING_NOT_PROCESSABLE',
+                    payment,
+                    booking,
+                };
+                return;
+            }
+
+            assertPayosProviderPaymentMatches(payment, booking, providerPayment);
+
+            const paidAt = parsePayosTransactionTime(
+                getPayosProviderTransactionTime(providerPayment)
+            );
+            const paymentBefore = PaymentMapper.toPaymentTransactionDto(payment);
+            payment.status = PAYMENT_TRANSACTION_STATUS.PAID;
+            payment.paid_at = paidAt;
+            payment.active_payment_key = null;
+            payment.raw_webhook = buildPayosProviderSyncRecord(providerPayment);
+            await payment.save({ session });
+
+            const paidResult = await bookingPaymentService.confirmBookingPaid({
+                booking,
+                paymentMethod: BOOKING_PAYMENT_METHOD.PAYOS,
+                actorId: payment.initiated_by_user_id || payment.created_by_staff_id,
+                paidAt,
+                session,
+            });
+
+            await recordPaymentAuditEvent({
+                action: AUDIT_ACTIONS.PAYMENT_CONFIRMED,
+                payment,
+                booking,
+                before: paymentBefore,
+                after: PaymentMapper.toPaymentTransactionDto(payment),
+                metadata: {
+                    source: 'PAYOS_PROVIDER_SYNC',
+                    initiated_by_user_id: payment.initiated_by_user_id?.toString?.()
+                        || payment.created_by_staff_id?.toString?.()
+                        || null,
+                },
+                session,
+            });
+
+            response = {
+                confirmed: true,
+                payment,
+                booking,
+                rewardResult: paidResult,
+            };
+        });
+
+        return response;
+    } finally {
+        await session.endSession();
+    }
+};
+
+const syncPayosPaymentForBooking = async (bookingId) => {
+    const payment = await findLatestPayosPayment(bookingId);
+
+    if (
+        !payment
+        || !payment.payment_link_id
+        || ![
+            PAYMENT_TRANSACTION_STATUS.PENDING,
+            PAYMENT_TRANSACTION_STATUS.EXPIRED,
+        ].includes(payment.status)
+    ) {
+        return { provider_available: true, confirmed: false };
+    }
+
+    let providerPayment;
+
+    try {
+        providerPayment = await payosService.getPaymentLinkInformation(
+            payment.payment_link_id || payment.order_code
+        );
+    } catch (error) {
+        return { provider_available: false, confirmed: false };
+    }
+
+    if (String(providerPayment?.status || '').toUpperCase() !== 'PAID') {
+        return { provider_available: true, confirmed: false };
+    }
+
+    const result = await confirmPayosPaymentFromProvider(payment._id, providerPayment);
+
+    return {
+        provider_available: true,
+        confirmed: result.confirmed,
+    };
+};
+
 const resolvePendingPayosPaymentForCash = async (
     user,
     bookingId,
@@ -1065,11 +1260,7 @@ const getPayosPaymentByWebhookData = async (webhookData, session = null) => {
 };
 
 const assertPayosWebhookAmountMatches = (payment, booking, webhookData) => {
-    const webhookAmount = Number(webhookData.amount);
-
-    if (webhookAmount !== payment.amount || webhookAmount !== booking.final_price) {
-        throw new AppError('PayOS payment amount does not match booking amount', 400, 'PAYOS_PAYMENT_AMOUNT_MISMATCH');
-    }
+    assertPayosProviderPaymentMatches(payment, booking, webhookData);
 };
 
 const markPayosPaymentFailed = async (payload, webhookData) => {
