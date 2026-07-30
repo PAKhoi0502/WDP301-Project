@@ -616,7 +616,7 @@ const paths = {
         },
         delete: {
             tags: ['Garages'],
-            summary: 'Deactivate garage',
+            summary: 'Permanently delete an unused inactive garage',
             security: [
                 {
                     bearerAuth: [],
@@ -625,7 +625,7 @@ const paths = {
             parameters: [garageIdParameter],
             responses: {
                 200: {
-                    description: 'Deactivate garage successfully',
+                    description: 'Delete garage successfully',
                     content: {
                         'application/json': {
                             schema: {
@@ -638,6 +638,7 @@ const paths = {
                 401: unauthorizedResponse,
                 403: forbiddenResponse,
                 404: notFoundResponse,
+                409: conflictResponse,
             },
         },
     },

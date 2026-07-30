@@ -63,7 +63,7 @@ adminRouter.patch(
 adminRouter.delete(
     '/:id',
     validate(idParamSchema),
-    garageController.deactivateGarage
+    garageController.deleteGarage
 );
 
 module.exports = {

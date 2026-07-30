@@ -83,13 +83,13 @@ const updateGarageStatus = asyncHandler(async (req, res) => {
     });
 });
 
-const deactivateGarage = asyncHandler(async (req, res) => {
+const deleteGarage = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
 
-    const result = await garageService.updateGarageStatus(id, false);
+    const result = await garageService.deleteGarage(id);
 
     return sendSuccess(res, {
-        message: 'Deactivate garage successfully',
+        message: 'Delete garage successfully',
         data: result,
     });
 });
@@ -102,5 +102,5 @@ module.exports = {
     createGarage,
     updateGarage,
     updateGarageStatus,
-    deactivateGarage,
+    deleteGarage,
 };

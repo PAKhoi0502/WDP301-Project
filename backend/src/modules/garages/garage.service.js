@@ -1,5 +1,6 @@
 const Garage = require('./garage.model');
 const GarageMapper = require('./garage.mapper');
+const { findGarageDependencies } = require('./garage.dependencies');
 const ReviewSummaryService = require('../reviews/reviewSummary.service');
 const { AppError } = require('../../shared/utils/appError');
 
@@ -400,6 +401,47 @@ const updateGarageStatus = async (garageId, isActive) => {
     return GarageMapper.toGarageDto(updatedGarage);
 };
 
+const deleteGarage = async (garageId) => {
+    const garage = await getGarageDocumentById(garageId);
+
+    if (garage.is_active) {
+        throw new AppError(
+            'Garage must be inactive before deletion',
+            409,
+            'GARAGE_MUST_BE_INACTIVE'
+        );
+    }
+
+    const dependencies = await findGarageDependencies(garageId);
+
+    if (dependencies.length > 0) {
+        throw new AppError(
+            'Garage has related operational data and cannot be deleted',
+            409,
+            'GARAGE_HAS_DEPENDENCIES',
+            dependencies.map((dependency) => ({
+                path: dependency.key,
+                message: dependency.label,
+            }))
+        );
+    }
+
+    const result = await Garage.deleteOne({
+        _id: garageId,
+        is_active: false,
+    });
+
+    if (result.deletedCount !== 1) {
+        throw new AppError(
+            'Garage changed while deletion was being processed',
+            409,
+            'GARAGE_DELETE_CONFLICT'
+        );
+    }
+
+    return GarageMapper.toGarageDto(garage);
+};
+
 module.exports = {
     getPublicGarages,
     getPublicGarageById,
@@ -408,4 +450,5 @@ module.exports = {
     createGarage,
     updateGarage,
     updateGarageStatus,
+    deleteGarage,
 };
