@@ -90,6 +90,36 @@ describe('customer voucher service', () => {
         });
     });
 
+    it('finds a phone-bound voucher for the same walk-in phone', async () => {
+        CustomerVoucher.findOne.mockResolvedValue({
+            _id: '507f1f77bcf86cd799439016',
+            customer_id: null,
+            normalized_guest_phone: '+84901234567',
+            status: 'ISSUED',
+            expires_at: new Date('2999-01-01T00:00:00.000Z'),
+            voucher_type: 'FIXED_AMOUNT',
+            value: 50000,
+            min_order_amount: 0,
+        });
+
+        const result = await customerVoucherService.previewVoucherForBooking({
+            guestPhoneNormalized: '0901 234 567',
+            code: 'care_guest',
+            servicePackage: {
+                _id: servicePackageId,
+                base_price: 200000,
+            },
+            orderAmount: 200000,
+        });
+
+        expect(result.discount_amount).toBe(50000);
+        expect(CustomerVoucher.findOne).toHaveBeenCalledWith({
+            code: 'CARE_GUEST',
+            customer_id: null,
+            normalized_guest_phone: '+84901234567',
+        });
+    });
+
     it('reserves an issued voucher atomically for a booking', async () => {
         CustomerVoucher.findOneAndUpdate.mockResolvedValue({ status: 'RESERVED' });
 
@@ -183,6 +213,32 @@ describe('customer voucher service', () => {
 
         expect(voucher.status).toBe('ISSUED');
         expect(voucher.approved_by_id).toBe('507f1f77bcf86cd799439017');
+    });
+
+    it('lets an admin issue compensation to a guest phone', async () => {
+        CustomerVoucher.create.mockImplementation(async ([payload]) => [{
+            _id: '507f1f77bcf86cd799439016',
+            ...payload,
+        }]);
+
+        const voucher = await customerVoucherService.issueCompensationVoucher({
+            user: {
+                _id: '507f1f77bcf86cd799439017',
+                role: 'ADMIN',
+            },
+            customerId: null,
+            guestPhoneNormalized: '0901 234 567',
+            garageId,
+            bookingId,
+            incidentId,
+            voucherType: 'FIXED_AMOUNT',
+            value: 50000,
+            expiresAt: new Date('2999-01-01T00:00:00.000Z'),
+        });
+
+        expect(voucher.customer_id).toBeNull();
+        expect(voucher.normalized_guest_phone).toBe('+84901234567');
+        expect(voucher.guest_phone).toBe('+84901234567');
     });
 
     it('rejects a free service voucher when the service package does not exist', async () => {

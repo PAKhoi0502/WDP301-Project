@@ -13,6 +13,7 @@ const {
     BOOKING_PAYMENT_STATUS_VALUES,
     BOOKING_LATE_RESOLUTION_VALUES,
     BOOKING_LATE_RESOLUTION,
+    BOOKING_LIST_SORT_VALUES,
 } = require('../../shared/constants/booking.constant');
 
 const emptyToUndefined = (value) => {
@@ -270,6 +271,7 @@ const getAdminBookingsSchema = z.object({
             is_walk_in: stringBooleanField.optional(),
             from: optionalDateTimeFilter,
             to: optionalDateTimeFilter,
+            sort_by: z.enum(BOOKING_LIST_SORT_VALUES).default('START_TIME_DESC'),
         })
         .strict(),
 });
@@ -310,6 +312,7 @@ const createWalkInBookingSchema = z.object({
             ...vehiclePricingClassificationShape,
             quote_id: objectIdField.optional(),
             promotion_code: optionalPromotionCodeField,
+            voucher_code: optionalVoucherCodeField,
             note: optionalTextField(1000),
         })
         .strict()

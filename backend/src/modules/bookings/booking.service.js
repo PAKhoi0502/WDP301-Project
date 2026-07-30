@@ -56,6 +56,7 @@ const {
     DEFAULT_BOOKING_RULE,
     BOOKING_ITEM_STATUS,
     BOOKING_ITEM_COMPLETION_SOURCE,
+    BOOKING_LIST_SORT,
 } = require('../../shared/constants/booking.constant');
 const {
     BOOKING_OPERATION_STATUS,
@@ -2239,7 +2240,13 @@ const restoreCareStaffAssignmentsReleasedAt = async (booking, releasedAt) => {
     return restoredBookingItemKeys;
 };
 
-const assignCareStaffToBookingIfNeeded = async (booking) => {
+const assignCareStaffToBookingIfNeeded = async (
+    booking,
+    { excludedStaffProfileIds = [] } = {}
+) => {
+    const excludedProfileIds = new Set(
+        excludedStaffProfileIds.map(toObjectIdString).filter(Boolean)
+    );
     const careStaffItems = [...(booking.booking_items || [])]
         .filter((item) => item.requires_care_staff)
         .sort((a, b) => a.sequence - b.sequence);
@@ -2308,7 +2315,8 @@ const assignCareStaffToBookingIfNeeded = async (booking) => {
                 return staffProfileId
                     && !busyAssignedCareStaffProfileIds.has(staffProfileId)
                     && !plannedBusyCareStaffProfileIds.has(staffProfileId)
-                    && !activeAssignmentIds.has(staffProfileId);
+                    && !activeAssignmentIds.has(staffProfileId)
+                    && !excludedProfileIds.has(staffProfileId);
             })
             .slice(0, requiredCount - activeAssignments.length);
 
@@ -3053,10 +3061,13 @@ const getAllBookings = async (user, query = {}) => {
     }
 
     const skip = (page - 1) * limit;
+    const sort = query.sort_by === BOOKING_LIST_SORT.START_TIME_ASC
+        ? { start_time: 1, _id: 1 }
+        : { start_time: -1, _id: -1 };
 
     const [bookings, total] = await Promise.all([
         populateBookingQuery(Booking.find(filter))
-            .sort({ start_time: -1 })
+            .sort(sort)
             .skip(skip)
             .limit(limit),
         Booking.countDocuments(filter),
@@ -3404,6 +3415,17 @@ const createWalkInBooking = async (user, payload = {}) => {
         orderAmount: bookingPlan.originalPrice,
         bookingStartTime: startTime,
     });
+    const priceAfterPromotion = getPriceAfterPromotion({
+        originalPrice: bookingPlan.originalPrice,
+        promotionResult,
+    });
+    const voucherResult = await customerVoucherService.previewVoucherForBooking({
+        customerId: null,
+        guestPhoneNormalized: normalizedGuestPhone,
+        code: createPayload.voucher_code,
+        servicePackage: pricedServicePackage,
+        orderAmount: priceAfterPromotion,
+    });
     const basePayload = buildBookingBasePayload({
         garage,
         servicePackage: pricedServicePackage,
@@ -3412,6 +3434,7 @@ const createWalkInBooking = async (user, payload = {}) => {
         vehicleType: createPayload.vehicle_type,
         note: createPayload.note,
         promotionResult,
+        voucherResult,
     });
 
     if (!serveNow) {
@@ -3505,7 +3528,7 @@ const createWalkInBooking = async (user, payload = {}) => {
 
     let booking;
 
-    if (promotionResult?.promotion || quote) {
+    if (promotionResult?.promotion || voucherResult || quote) {
         const session = await mongoose.startSession();
 
         try {
@@ -3520,6 +3543,19 @@ const createWalkInBooking = async (user, payload = {}) => {
                     bookingStartTime: startTime,
                     session,
                 });
+                const transactionalPriceAfterPromotion = getPriceAfterPromotion({
+                    originalPrice: bookingPlan.originalPrice,
+                    promotionResult: transactionalPromotionResult,
+                });
+                const transactionalVoucherResult =
+                    await customerVoucherService.previewVoucherForBooking({
+                        customerId: null,
+                        guestPhoneNormalized: normalizedGuestPhone,
+                        code: createPayload.voucher_code,
+                        servicePackage: pricedServicePackage,
+                        orderAmount: transactionalPriceAfterPromotion,
+                        session,
+                    });
                 const transactionalBasePayload = buildBookingBasePayload({
                     garage,
                     servicePackage: pricedServicePackage,
@@ -3528,6 +3564,7 @@ const createWalkInBooking = async (user, payload = {}) => {
                     vehicleType: createPayload.vehicle_type,
                     note: createPayload.note,
                     promotionResult: transactionalPromotionResult,
+                    voucherResult: transactionalVoucherResult,
                 });
                 const documents = await Booking.create(
                     [buildWalkInPayload(transactionalBasePayload)],
@@ -3542,6 +3579,16 @@ const createWalkInBooking = async (user, payload = {}) => {
                         promotion: transactionalPromotionResult.promotion,
                         guestPhoneNormalized: normalizedGuestPhone,
                         actorId: user._id,
+                        session,
+                    });
+                }
+
+                if (transactionalVoucherResult) {
+                    await customerVoucherService.reserveVoucherForBooking({
+                        voucherId: transactionalVoucherResult.voucher._id,
+                        customerId: null,
+                        guestPhoneNormalized: normalizedGuestPhone,
+                        bookingId: booking._id,
                         session,
                     });
                 }
@@ -3809,7 +3856,11 @@ const BOOKING_INCIDENT_ELIGIBLE_STATUSES = [
 const populateBookingIncidentQuery = (query) => query
     .populate('reported_by_id', 'full_name email phone role is_active')
     .populate('decision_recorded_by_id', 'full_name email phone role is_active')
-    .populate('resolved_by_id', 'full_name email phone role is_active');
+    .populate('resolved_by_id', 'full_name email phone role is_active')
+    .populate(
+        'compensation_voucher_ids',
+        'code status expires_at customer_id guest_phone normalized_guest_phone'
+    );
 
 const getBookingIncidentDocument = async (bookingId, incidentId, session = null) => {
     const query = BookingIncident.findOne({
@@ -3878,29 +3929,37 @@ const releaseAffectedStaffForIncident = ({
 }) => {
     const normalizedItemKey = normalizeBookingItemKey(affectedBookingItemKey);
     let matchedAssignment = false;
+    let matchedAffectedItemAssignment = false;
     const releasedBookingItemKeys = [];
 
     for (const bookingItem of booking.booking_items || []) {
-        if (normalizedItemKey && normalizeBookingItemKey(bookingItem.item_key) !== normalizedItemKey) {
-            continue;
-        }
-
         let released = false;
+        const isAffectedItem = !normalizedItemKey
+            || normalizeBookingItemKey(bookingItem.item_key) === normalizedItemKey;
 
-        for (const assignment of bookingItem.assigned_care_staff || []) {
-            if (assignment.released_at) {
-                continue;
+        for (const assignments of [
+            bookingItem.assigned_care_staff || [],
+            bookingItem.assigned_execution_staff || [],
+        ]) {
+            for (const assignment of assignments) {
+                if (assignment.released_at) {
+                    continue;
+                }
+
+                const staffProfileId = toObjectIdString(
+                    getCareStaffAssignmentStaffProfileId(assignment)
+                );
+
+                if (staffProfileId !== toObjectIdString(affectedStaffProfileId)) {
+                    continue;
+                }
+
+                assignment.released_at = releasedAt;
+                matchedAssignment = true;
+                matchedAffectedItemAssignment =
+                    matchedAffectedItemAssignment || isAffectedItem;
+                released = true;
             }
-
-            const staffProfileId = toObjectIdString(getCareStaffAssignmentStaffProfileId(assignment));
-
-            if (affectedStaffProfileId && staffProfileId !== toObjectIdString(affectedStaffProfileId)) {
-                continue;
-            }
-
-            assignment.released_at = releasedAt;
-            matchedAssignment = true;
-            released = true;
         }
 
         if (released) {
@@ -3908,7 +3967,7 @@ const releaseAffectedStaffForIncident = ({
         }
     }
 
-    if (affectedStaffProfileId && !matchedAssignment) {
+    if (!matchedAssignment || !matchedAffectedItemAssignment) {
         throw new AppError(
             'Affected staff is not actively assigned to this booking',
             400,
@@ -4093,6 +4152,7 @@ const reportBookingIncident = async (user, bookingId, payload = {}, auditContext
                         affected_booking_item_key: affectedBookingItemKey,
                         affected_wash_bay_id: affectedWashBayId,
                         affected_staff_profile_id: payload.affected_staff_profile_id || null,
+                        released_booking_item_keys: releasedBookingItemKeys,
                         reported_by_id: user._id,
                         reported_booking_status: booking.status,
                         reported_schedule_snapshot: getIncidentScheduleSnapshot(booking),
@@ -4220,6 +4280,7 @@ const getIncidentResolutionOptionsInternal = async ({ booking, incident, days = 
         garage,
         candidateDays,
     });
+    const suggestedSlots = availabilityDays.flatMap((day) => day.suggested_slots);
     let canReassignAndContinue = false;
 
     if ([BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.IN_PROGRESS].includes(booking.status)) {
@@ -4236,12 +4297,43 @@ const getIncidentResolutionOptionsInternal = async ({ booking, incident, days = 
                 booking,
                 incident.affected_booking_item_key
             ) || getCurrentBookingItem(booking);
-            const requiredCount = affectedItem?.care_staff_required_count || 0;
+            const requiredStaffType = affectedItem?.requires_care_staff
+                ? affectedItem.care_staff_type || STAFF_TYPES.VEHICLE_CARE_STAFF
+                : affectedItem?.requires_wash_bay
+                    ? STAFF_TYPES.WASH_OPERATOR
+                    : null;
+            const requiredCount = affectedItem?.requires_care_staff
+                ? affectedItem.care_staff_required_count || 1
+                : requiredStaffType
+                    ? 1
+                    : 0;
             const activeAssignments = affectedItem
-                ? getActiveCareStaffAssignments(affectedItem).length
-                : 0;
+                ? affectedItem.requires_care_staff
+                    ? getActiveCareStaffAssignments(affectedItem)
+                    : (affectedItem.assigned_execution_staff || []).filter(
+                        (assignment) => !assignment.released_at
+                    )
+                : [];
+            const activeStaffProfileIds = new Set(
+                activeAssignments
+                    .map((assignment) => toObjectIdString(
+                        getCareStaffAssignmentStaffProfileId(assignment)
+                    ))
+                    .filter(Boolean)
+            );
+            const activeStaffProfiles = requiredStaffType
+                ? await findActiveCareStaffProfiles(booking.garage_id, requiredStaffType)
+                : [];
+            const availableReplacementCount = activeStaffProfiles.filter((profile) => {
+                const profileId = toObjectIdString(profile._id);
 
-            canReassignAndContinue = requiredCount === 0 || activeAssignments < requiredCount;
+                return profileId
+                    && profileId !== toObjectIdString(incident.affected_staff_profile_id)
+                    && !activeStaffProfileIds.has(profileId);
+            }).length;
+
+            canReassignAndContinue = activeAssignments.length
+                + availableReplacementCount >= requiredCount;
         } else {
             canReassignAndContinue = true;
         }
@@ -4257,13 +4349,17 @@ const getIncidentResolutionOptionsInternal = async ({ booking, incident, days = 
             ...(canReassignAndContinue
                 ? [BOOKING_INCIDENT_DECISIONS.REASSIGN_AND_CONTINUE]
                 : []),
-            BOOKING_INCIDENT_DECISIONS.RESCHEDULE_NEAREST,
-            BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM,
+            ...(suggestedSlots.length > 0
+                ? [
+                    BOOKING_INCIDENT_DECISIONS.RESCHEDULE_NEAREST,
+                    BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM,
+                ]
+                : []),
             BOOKING_INCIDENT_DECISIONS.CANCEL_BY_GARAGE,
         ],
         search_start_time: searchStartTime,
         days: availabilityDays,
-        suggested_slots: availabilityDays.flatMap((day) => day.suggested_slots),
+        suggested_slots: suggestedSlots,
     };
 };
 
@@ -4321,6 +4417,34 @@ const getMyActiveBookingIncident = async (customerId, bookingId) => {
             days: 3,
         }),
     };
+};
+
+const getAdminBookingIncidents = async (user, bookingId) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    await assertStaffCanAccessBooking(user, booking);
+    const incidents = await populateBookingIncidentQuery(
+        BookingIncident.find({ booking_id: booking._id }).sort({
+            created_at: -1,
+            _id: -1,
+        })
+    );
+
+    return BookingIncidentMapper.toBookingIncidentDtoList(incidents);
+};
+
+const getMyBookingIncidents = async (customerId, bookingId) => {
+    const booking = await getRawBookingDocumentById(bookingId);
+
+    assertCustomerOwnsIncidentBooking(customerId, booking);
+    const incidents = await populateBookingIncidentQuery(
+        BookingIncident.find({ booking_id: booking._id }).sort({
+            created_at: -1,
+            _id: -1,
+        })
+    );
+
+    return BookingIncidentMapper.toBookingIncidentDtoList(incidents);
 };
 
 const getAdminBookingIncidentOptions = async (user, bookingId, incidentId, { days = 3 } = {}) => {
@@ -4414,7 +4538,11 @@ const applyIncidentRescheduledTimeline = ({
     booking.markModified('booking_items');
 };
 
-const resumeIncidentPausedItem = (booking, resumedAt) => {
+const continueIncidentPausedItem = (
+    booking,
+    resumedAt,
+    continuationPolicy = BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING
+) => {
     const bookingItem = (booking.booking_items || []).find((item) => (
         item.status === BOOKING_ITEM_STATUS.PAUSED
     ));
@@ -4423,7 +4551,10 @@ const resumeIncidentPausedItem = (booking, resumedAt) => {
         return null;
     }
 
-    const remainingSeconds = bookingItem.remaining_seconds_at_pause;
+    const remainingSeconds = continuationPolicy
+        === BOOKING_INCIDENT_CONTINUATION_POLICIES.RESTART_CURRENT_ITEM
+        ? getEffectiveCountdownDurationSeconds(bookingItem)
+        : bookingItem.remaining_seconds_at_pause;
 
     if (!remainingSeconds || remainingSeconds < 1) {
         throw new AppError(
@@ -4438,6 +4569,12 @@ const resumeIncidentPausedItem = (booking, resumedAt) => {
         : 0;
 
     bookingItem.status = BOOKING_ITEM_STATUS.IN_PROGRESS;
+    if (
+        continuationPolicy
+        === BOOKING_INCIDENT_CONTINUATION_POLICIES.RESTART_CURRENT_ITEM
+    ) {
+        bookingItem.actual_started_at = resumedAt;
+    }
     bookingItem.countdown_ends_at = addSeconds(resumedAt, remainingSeconds);
     bookingItem.remaining_seconds_at_pause = null;
     bookingItem.total_paused_seconds = (bookingItem.total_paused_seconds || 0) + pausedSeconds;
@@ -4449,6 +4586,38 @@ const resumeIncidentPausedItem = (booking, resumedAt) => {
     booking.markModified('booking_items');
 
     return bookingItem;
+};
+
+const assertIncidentExecutionStaffAssigned = (booking, affectedBookingItemKey) => {
+    const bookingItem = getBookingItemByKey(booking, affectedBookingItemKey)
+        || getCurrentBookingItem(booking);
+
+    if (
+        !bookingItem
+        || (!bookingItem.requires_care_staff && !bookingItem.requires_wash_bay)
+    ) {
+        return;
+    }
+
+    const activeExecutionStaffProfileIds = new Set(
+        (bookingItem.assigned_execution_staff || [])
+            .filter((assignment) => !assignment.released_at)
+            .map((assignment) => toObjectIdString(
+                getCareStaffAssignmentStaffProfileId(assignment)
+            ))
+            .filter(Boolean)
+    );
+    const requiredCount = bookingItem.requires_care_staff
+        ? bookingItem.care_staff_required_count || 1
+        : 1;
+
+    if (activeExecutionStaffProfileIds.size < requiredCount) {
+        throw new AppError(
+            'No replacement staff is available to continue this service item',
+            409,
+            'BOOKING_INCIDENT_REPLACEMENT_STAFF_UNAVAILABLE'
+        );
+    }
 };
 
 const resolveBookingIncidentDecision = async (
@@ -4463,6 +4632,7 @@ const resolveBookingIncidentDecision = async (
     let booking;
     let incident;
     let releasedBookingItemKeys = [];
+    let reassignedBookingItemKeys = [];
     let shouldOfferWaitlist = false;
 
     try {
@@ -4499,6 +4669,13 @@ const resolveBookingIncidentDecision = async (
             };
 
             if (decision === BOOKING_INCIDENT_DECISIONS.REASSIGN_AND_CONTINUE) {
+                const excludedStaffProfileIds = incident.affected_staff_profile_id
+                    ? [incident.affected_staff_profile_id]
+                    : [];
+                reassignedBookingItemKeys = incident.affected_staff_profile_id
+                    ? incident.released_booking_item_keys || []
+                    : [];
+
                 if (![BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.IN_PROGRESS].includes(booking.status)) {
                     throw new AppError(
                         'Booking cannot continue with reassignment in current status',
@@ -4507,11 +4684,25 @@ const resolveBookingIncidentDecision = async (
                     );
                 }
 
-                await assignCareStaffToBookingIfNeeded(booking);
+                await assignCareStaffToBookingIfNeeded(booking, {
+                    excludedStaffProfileIds,
+                });
                 await assignWashBayToBookingIfNeeded(booking, session);
+                await assignExecutionStaffToBookingItems(booking, {
+                    excludedStaffProfileIds,
+                });
+                assertIncidentExecutionStaffAssigned(
+                    booking,
+                    incident.affected_booking_item_key
+                );
 
                 if (booking.status === BOOKING_STATUS.IN_PROGRESS) {
-                    resumeIncidentPausedItem(booking, resolvedAt);
+                    continueIncidentPausedItem(
+                        booking,
+                        resolvedAt,
+                        payload.continuation_policy
+                            || BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING
+                    );
                 }
             } else if (
                 [
@@ -4624,7 +4815,14 @@ const resolveBookingIncidentDecision = async (
             ].includes(decision)
                 ? booking.start_time
                 : null;
-            incident.continuation_policy = payload.continuation_policy || null;
+            incident.continuation_policy = [
+                BOOKING_INCIDENT_DECISIONS.REASSIGN_AND_CONTINUE,
+                BOOKING_INCIDENT_DECISIONS.RESCHEDULE_NEAREST,
+                BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM,
+            ].includes(decision)
+                ? payload.continuation_policy
+                    || BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING
+                : null;
             incident.customer_confirmed_at = resolvedAt;
             incident.decision_recorded_by_id = user._id;
             incident.resolved_at = resolvedAt;
@@ -4656,6 +4854,7 @@ const resolveBookingIncidentDecision = async (
                     incident_status: incident.status,
                     decision,
                     decision_source: decisionSource,
+                    continuation_policy: incident.continuation_policy,
                 },
                 ip: auditContext.ip,
                 userAgent: auditContext.userAgent,
@@ -4671,6 +4870,13 @@ const resolveBookingIncidentDecision = async (
             booking._id,
             bookingItemKey,
             incident.resolved_at
+        );
+    }
+
+    for (const bookingItemKey of reassignedBookingItemKeys) {
+        await bookingServiceStepService.clearResourceReleasedForBookingItem(
+            booking._id,
+            bookingItemKey
         );
     }
 
@@ -4748,15 +4954,37 @@ const createIncidentCompensationVoucher = async (
 
             await assertStaffCanAccessBooking(user, booking);
 
-            if (!booking.customer_id || booking.is_walk_in) {
+            if (
+                !booking.customer_id
+                && !isValidPhone(normalizePhone(
+                    booking.normalized_guest_phone || booking.guest_phone
+                ))
+            ) {
                 throw new AppError(
-                    'Compensation voucher requires a registered customer booking',
+                    'Compensation voucher requires a registered customer or valid guest phone',
                     400,
                     'BOOKING_INCIDENT_VOUCHER_CUSTOMER_REQUIRED'
                 );
             }
 
             const incident = await getBookingIncidentDocument(booking._id, incidentId, session);
+
+            if (incident.status !== BOOKING_INCIDENT_STATUS.RESOLVED) {
+                throw new AppError(
+                    'Compensation voucher can only be issued for a resolved incident',
+                    409,
+                    'BOOKING_INCIDENT_NOT_RESOLVED'
+                );
+            }
+
+            if (incident.compensation_voucher_ids.length > 0) {
+                throw new AppError(
+                    'Compensation voucher has already been issued for this incident',
+                    409,
+                    'BOOKING_INCIDENT_COMPENSATION_ALREADY_ISSUED'
+                );
+            }
+
             const expiresAt = parseDateTime(payload.expires_at, 'expires_at');
 
             if (expiresAt <= new Date()) {
@@ -4770,6 +4998,8 @@ const createIncidentCompensationVoucher = async (
             voucher = await customerVoucherService.issueCompensationVoucher({
                 user,
                 customerId: booking.customer_id,
+                guestPhoneNormalized:
+                    booking.normalized_guest_phone || booking.guest_phone,
                 garageId: booking.garage_id,
                 bookingId: booking._id,
                 incidentId: incident._id,
@@ -4794,6 +5024,9 @@ const createIncidentCompensationVoucher = async (
                     booking_id: booking._id,
                     incident_id: incident._id,
                     customer_id: booking.customer_id,
+                    guest_phone: booking.customer_id
+                        ? null
+                        : booking.normalized_guest_phone || booking.guest_phone,
                     status: voucher.status,
                     voucher_type: voucher.voucher_type,
                     value: voucher.value,
@@ -4807,7 +5040,7 @@ const createIncidentCompensationVoucher = async (
         await session.endSession();
     }
 
-    if (voucher.status === 'ISSUED') {
+    if (voucher.status === 'ISSUED' && voucher.customer_id) {
         await notificationService.createInAppNotification({
             userId: voucher.customer_id,
             type: NOTIFICATION_TYPES.COMPENSATION_VOUCHER_ISSUED,
@@ -4824,7 +5057,10 @@ const createIncidentCompensationVoucher = async (
         });
     }
 
-    return CustomerVoucherMapper.toCustomerVoucherDto(voucher);
+    return {
+        voucher: CustomerVoucherMapper.toCustomerVoucherDto(voucher),
+        requires_approval: voucher.status === 'PENDING_APPROVAL',
+    };
 };
 
 
@@ -6156,7 +6392,13 @@ const assertCurrentBookingItem = (booking, bookingItemKey, allowedStatuses, erro
     return bookingItem;
 };
 
-const assignExecutionStaffToBookingItems = async (booking) => {
+const assignExecutionStaffToBookingItems = async (
+    booking,
+    { excludedStaffProfileIds = [] } = {}
+) => {
+    const excludedProfileIds = new Set(
+        excludedStaffProfileIds.map(toObjectIdString).filter(Boolean)
+    );
     let washOperatorProfiles = null;
     const assignedAt = new Date();
 
@@ -6170,19 +6412,35 @@ const assignExecutionStaffToBookingItems = async (booking) => {
             (assignment) => !assignment.released_at
         );
 
-        if (activeExecutionAssignments.length > 0) {
-            continue;
-        }
-
         if (bookingItem.requires_care_staff) {
             const careAssignments = getActiveCareStaffAssignments(bookingItem);
+            const activeExecutionProfileIds = new Set(
+                activeExecutionAssignments
+                    .map((assignment) => toObjectIdString(
+                        getCareStaffAssignmentStaffProfileId(assignment)
+                    ))
+                    .filter(Boolean)
+            );
+            const missingCareAssignments = careAssignments.filter((assignment) => {
+                const staffProfileId = toObjectIdString(
+                    getCareStaffAssignmentStaffProfileId(assignment)
+                );
 
-            bookingItem.assigned_execution_staff.push(...careAssignments.map((assignment) => ({
+                return staffProfileId
+                    && !activeExecutionProfileIds.has(staffProfileId)
+                    && !excludedProfileIds.has(staffProfileId);
+            });
+
+            bookingItem.assigned_execution_staff.push(...missingCareAssignments.map((assignment) => ({
                 staff_profile_id: getCareStaffAssignmentStaffProfileId(assignment),
                 user_id: assignment.user_id?._id || assignment.user_id,
                 assigned_at: assignedAt,
                 released_at: null,
             })));
+            continue;
+        }
+
+        if (activeExecutionAssignments.length > 0) {
             continue;
         }
 
@@ -6193,7 +6451,9 @@ const assignExecutionStaffToBookingItems = async (booking) => {
             );
         }
 
-        const selectedProfile = washOperatorProfiles[0];
+        const selectedProfile = washOperatorProfiles.find(
+            (profile) => !excludedProfileIds.has(toObjectIdString(profile._id))
+        );
 
         if (selectedProfile) {
             bookingItem.assigned_execution_staff.push({
@@ -6862,6 +7122,8 @@ module.exports = {
     reportBookingIncident,
     getAdminActiveBookingIncident,
     getMyActiveBookingIncident,
+    getAdminBookingIncidents,
+    getMyBookingIncidents,
     getAdminBookingIncidentOptions,
     recordBookingIncidentCustomerDecision,
     resolveMyBookingIncident,

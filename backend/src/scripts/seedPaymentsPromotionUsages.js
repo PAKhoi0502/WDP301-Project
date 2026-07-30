@@ -1397,7 +1397,7 @@ const writePromotionUsages = async ({
         }).session(session || null);
     }
 
-    const result = await PromotionUsage.bulkWrite(
+    const result = await PromotionUsage.collection.bulkWrite(
         definitions.map((definition) => {
             const {
                 usage_id_hex: usageIdHex,
@@ -1409,12 +1409,14 @@ const writePromotionUsages = async ({
                 updateOne: {
                     filter: { booking_id: definition.booking_id },
                     update: {
-                        $set: values,
+                        $set: {
+                            ...values,
+                            created_at: createdAt,
+                        },
                         $setOnInsert: {
                             _id: new mongoose.Types.ObjectId(
                                 usageIdHex
                             ),
-                            created_at: createdAt,
                         },
                     },
                     upsert: true,
@@ -1626,7 +1628,14 @@ const verifyPaymentsPromotionUsages = async ({
     referenceDate = getSeedReferenceDate(),
 } = {}) => {
     const plan = await buildSeedPlan({ referenceDate });
-    const [bookings, payments, usages, promotions, paymentStaff] =
+    const [
+        bookings,
+        payments,
+        usages,
+        promotions,
+        paymentStaff,
+        promotionUsageCountRows,
+    ] =
         await Promise.all([
             Booking.find({
                 _id: { $in: plan.bookingIds },
@@ -1651,6 +1660,26 @@ const verifyPaymentsPromotionUsages = async ({
                         .filter(Boolean),
                 },
             }).lean(),
+            PromotionUsage.aggregate([
+                {
+                    $match: {
+                        promotion_id: {
+                            $in: plan.promotions.map(
+                                (promotion) => promotion._id
+                            ),
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: {
+                            promotion_id: '$promotion_id',
+                            status: '$status',
+                        },
+                        count: { $sum: 1 },
+                    },
+                },
+            ]),
         ]);
     const bookingById = new Map(
         bookings.map((booking) => [
@@ -1915,19 +1944,19 @@ const verifyPaymentsPromotionUsages = async ({
 
     const usageCountsByPromotionId = new Map();
 
-    for (const usage of usages) {
-        const promotionId = toId(usage.promotion_id);
+    for (const row of promotionUsageCountRows) {
+        const promotionId = toId(row._id.promotion_id);
         const counts = usageCountsByPromotionId.get(promotionId) || {
             used: 0,
             reserved: 0,
         };
 
-        if (usage.status === PROMOTION_USAGE_STATUS.CONSUMED) {
-            counts.used += 1;
+        if (row._id.status === PROMOTION_USAGE_STATUS.CONSUMED) {
+            counts.used = row.count;
         }
 
-        if (usage.status === PROMOTION_USAGE_STATUS.RESERVED) {
-            counts.reserved += 1;
+        if (row._id.status === PROMOTION_USAGE_STATUS.RESERVED) {
+            counts.reserved = row.count;
         }
 
         usageCountsByPromotionId.set(promotionId, counts);

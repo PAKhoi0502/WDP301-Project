@@ -71,6 +71,15 @@ const bookingIncidentSchema = new mongoose.Schema(
             default: null,
         },
 
+        released_booking_item_keys: [
+            {
+                type: String,
+                trim: true,
+                uppercase: true,
+                maxlength: [100, 'Released booking item key must not exceed 100 characters'],
+            },
+        ],
+
         reported_by_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',

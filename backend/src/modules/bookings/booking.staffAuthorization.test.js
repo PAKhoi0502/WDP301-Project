@@ -180,6 +180,22 @@ describe('booking staff authorization filters', () => {
         });
     });
 
+    it('sorts dashboard bookings by the nearest appointment when requested', async () => {
+        await bookingService.getAllBookings({
+            _id: userId,
+            role: USER_ROLES.ADMIN,
+        }, {
+            sort_by: 'START_TIME_ASC',
+            limit: 5,
+        });
+
+        expect(query.sort).toHaveBeenCalledWith({
+            start_time: 1,
+            _id: 1,
+        });
+        expect(query.limit).toHaveBeenCalledWith(5);
+    });
+
     it('includes the exact handover release signal in admin booking lists', async () => {
         const bookingId = '507f1f77bcf86cd799439014';
         const releasedAt = new Date('2026-07-25T00:00:00.000Z');

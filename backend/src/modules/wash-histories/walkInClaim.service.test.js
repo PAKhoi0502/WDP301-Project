@@ -21,6 +21,10 @@ jest.mock('../promotion-usages/promotionUsage.model', () => ({
     updateMany: jest.fn(),
 }));
 
+jest.mock('../customer-vouchers/customerVoucher.model', () => ({
+    updateMany: jest.fn(),
+}));
+
 jest.mock('../service-packages/servicePackage.model', () => ({
     find: jest.fn(),
 }));
@@ -42,6 +46,7 @@ const mongoose = require('mongoose');
 const Booking = require('../bookings/booking.model');
 const WashHistory = require('./washHistory.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
+const CustomerVoucher = require('../customer-vouchers/customerVoucher.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const loyaltyService = require('../loyalty/loyalty.service');
 const washHistoryService = require('./washHistory.service');
@@ -110,6 +115,7 @@ describe('walk-in account claim', () => {
         });
         WashHistory.findOne.mockReturnValue(createWashHistoryQuery(null));
         PromotionUsage.updateMany.mockResolvedValue({ modifiedCount: 1 });
+        CustomerVoucher.updateMany.mockResolvedValue({ modifiedCount: 1 });
         loyaltyService.processBookingLoyalty.mockResolvedValue({
             loyalty: { current_tier: 'SILVER' },
             earned_points: 25,
@@ -202,12 +208,43 @@ describe('walk-in account claim', () => {
             claimed_bookings: 1,
             claimed_wash_histories: 1,
             linked_promotion_usages: 1,
+            claimed_customer_vouchers: 1,
             loyalty_bookings_processed: 1,
             awarded_points: 25,
             total_spent_added: 150000,
             total_visits_added: 1,
             current_tier: 'SILVER',
         });
+    });
+
+    it('claims phone-bound vouchers even when there is no eligible wash history', async () => {
+        Booking.find.mockReturnValue(createBookingQuery([]));
+        CustomerVoucher.updateMany.mockResolvedValue({ modifiedCount: 2 });
+
+        const result = await walkInClaimService.claimWalkInHistoryForCustomer({
+            customerId,
+            phone: '0901 234 567',
+            phoneVerifiedAt: new Date(),
+        });
+
+        expect(CustomerVoucher.updateMany).toHaveBeenCalledWith(
+            {
+                customer_id: null,
+                normalized_guest_phone: '+84901234567',
+            },
+            {
+                $set: {
+                    customer_id: customerId,
+                },
+                $unset: {
+                    guest_phone: '',
+                    normalized_guest_phone: '',
+                },
+            },
+            { session }
+        );
+        expect(result.claimed_bookings).toBe(0);
+        expect(result.claimed_customer_vouchers).toBe(2);
     });
 
     it('creates a missing wash history for an eligible legacy booking', async () => {

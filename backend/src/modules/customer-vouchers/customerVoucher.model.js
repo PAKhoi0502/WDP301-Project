@@ -8,6 +8,7 @@ const {
     CUSTOMER_VOUCHER_SOURCES,
     CUSTOMER_VOUCHER_SOURCE_VALUES,
 } = require('../../shared/constants/customerVoucher.constant');
+const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 
 const customerVoucherSchema = new mongoose.Schema(
     {
@@ -24,7 +25,21 @@ const customerVoucherSchema = new mongoose.Schema(
         customer_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'User',
-            required: [true, 'Voucher customer is required'],
+            default: null,
+        },
+
+        guest_phone: {
+            type: String,
+            trim: true,
+            maxlength: [20, 'Voucher guest phone must not exceed 20 characters'],
+            default: null,
+        },
+
+        normalized_guest_phone: {
+            type: String,
+            trim: true,
+            maxlength: [20, 'Voucher normalized guest phone must not exceed 20 characters'],
+            default: null,
         },
 
         garage_id: {
@@ -166,6 +181,7 @@ const customerVoucherSchema = new mongoose.Schema(
 
 customerVoucherSchema.index({ code: 1 }, { unique: true });
 customerVoucherSchema.index({ customer_id: 1, status: 1, expires_at: 1 });
+customerVoucherSchema.index({ normalized_guest_phone: 1, status: 1, expires_at: 1 });
 customerVoucherSchema.index({ garage_id: 1, status: 1, created_at: -1 });
 customerVoucherSchema.index({ source_type: 1, created_at: -1 });
 customerVoucherSchema.index({ source_incident_id: 1, created_at: -1 });
@@ -177,6 +193,26 @@ customerVoucherSchema.index(
 customerVoucherSchema.index({ reserved_booking_id: 1 });
 
 customerVoucherSchema.pre('validate', function (next) {
+    if (this.guest_phone || this.normalized_guest_phone) {
+        const normalizedGuestPhone = normalizePhone(
+            this.normalized_guest_phone || this.guest_phone
+        );
+
+        if (!isValidPhone(normalizedGuestPhone)) {
+            this.invalidate('guest_phone', 'Voucher guest phone is invalid');
+        } else {
+            this.guest_phone = normalizedGuestPhone;
+            this.normalized_guest_phone = normalizedGuestPhone;
+        }
+    }
+
+    if (Boolean(this.customer_id) === Boolean(this.normalized_guest_phone)) {
+        this.invalidate(
+            'customer_id',
+            'Voucher must belong to exactly one registered customer or guest phone'
+        );
+    }
+
     if (!this.source_type) {
         if (this.source_incident_id) {
             this.source_type = CUSTOMER_VOUCHER_SOURCES.INCIDENT;

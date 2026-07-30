@@ -36,6 +36,7 @@ const toBookingIncidentDto = (incident) => {
         affected_booking_item_key: plainIncident.affected_booking_item_key,
         affected_wash_bay_id: toId(plainIncident.affected_wash_bay_id),
         affected_staff_profile_id: toId(plainIncident.affected_staff_profile_id),
+        released_booking_item_keys: plainIncident.released_booking_item_keys || [],
         reported_by_id: toId(plainIncident.reported_by_id),
         reported_by: toUserSummary(plainIncident.reported_by_id),
         reported_booking_status: plainIncident.reported_booking_status,
@@ -54,6 +55,17 @@ const toBookingIncidentDto = (incident) => {
         resolved_by_id: toId(plainIncident.resolved_by_id),
         resolved_by: toUserSummary(plainIncident.resolved_by_id),
         compensation_voucher_ids: (plainIncident.compensation_voucher_ids || []).map(toId),
+        compensation_vouchers: (plainIncident.compensation_voucher_ids || [])
+            .filter((voucher) => voucher && voucher._id)
+            .map((voucher) => ({
+                id: toId(voucher),
+                code: voucher.code,
+                status: voucher.status,
+                expires_at: voucher.expires_at,
+                customer_id: toId(voucher.customer_id),
+                guest_phone: voucher.guest_phone || null,
+                normalized_guest_phone: voucher.normalized_guest_phone || null,
+            })),
         created_at: plainIncident.created_at,
         updated_at: plainIncident.updated_at,
     };

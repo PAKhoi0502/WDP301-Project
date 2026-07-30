@@ -63,11 +63,11 @@ const PROCESSED_KINDS = new Set([
     'IN_PROGRESS',
 ]);
 const TIER_ORDER = Object.freeze(['PLATINUM', 'GOLD', 'SILVER', 'BRONZE']);
-const TIER_WINDOWS = Object.freeze({
-    BRONZE: 7,
-    SILVER: 10,
-    GOLD: 14,
-    PLATINUM: 20,
+const SEED_TIER_SAFE_DAY_OFFSETS = Object.freeze({
+    BRONZE: 6,
+    SILVER: 6,
+    GOLD: 13,
+    PLATINUM: 19,
 });
 const TIER_MAX_UPCOMING = Object.freeze({
     BRONZE: 1,
@@ -346,13 +346,15 @@ const assignFutureCustomers = ({ garageCode, scenarios, tierProfiles }) => {
     for (const scenario of confirmed) {
         const preferred = preferredAssignments.get(scenario);
         const candidates = profiles.filter((profile) => (
-            TIER_WINDOWS[profile.tier_target] >= scenario.day_offset
+            SEED_TIER_SAFE_DAY_OFFSETS[profile.tier_target]
+                >= scenario.day_offset
             && profile.upcoming_booking_count
                 < TIER_MAX_UPCOMING[profile.tier_target]
             && selectVehicle({ profile, scenario })
         )).sort((left, right) => (
             left.upcoming_booking_count - right.upcoming_booking_count
-            || TIER_WINDOWS[left.tier_target] - TIER_WINDOWS[right.tier_target]
+            || SEED_TIER_SAFE_DAY_OFFSETS[left.tier_target]
+                - SEED_TIER_SAFE_DAY_OFFSETS[right.tier_target]
             || left.customer.created_at - right.customer.created_at
         ));
         const selected = preferred && candidates.includes(preferred)
@@ -1167,26 +1169,12 @@ const buildPaymentSets = (scenarios) => {
     return { payosIds };
 };
 
-const buildBookingRecord = ({
+const resolveBookingCreatedAt = ({
     scenario,
-    garage,
-    plan,
     vehicle,
-    guest,
-    staffByGarageType,
-    washBaysByGarageType,
-    paymentSets,
-    referenceDate,
+    walkIn,
+    snapshotAt,
 }) => {
-    const checkInProfile = staffByGarageType
-        .get(scenario.garage_code)
-        .get(STAFF_TYPES.CUSTOMER_SERVICE_STAFF)[0];
-    const snapshot = guest?.snapshot || buildVehicleSnapshot(vehicle);
-    const processed = PROCESSED_KINDS.has(scenario.kind);
-    const walkIn = scenario.channel === 'WALK_IN';
-    const completedPaid = scenario.kind === 'COMPLETED_PAID';
-    const completedNonpaid = scenario.kind === 'COMPLETED_NONPAID';
-    const completedAt = addMinutes(plan.end_time, 5);
     const preferredCreatedAt = walkIn
         ? scenario.kind === 'CANCELED'
             ? addHours(scenario.start_time, -24)
@@ -1197,16 +1185,57 @@ const buildBookingRecord = ({
     const minimumCreatedAt = vehicle
         ? addMinutes(vehicle.created_at, 30)
         : preferredCreatedAt;
+    const latestCreatedAt = new Date(Math.min(
+        addMinutes(snapshotAt, -1).getTime(),
+        addMinutes(scenario.start_time, -1).getTime()
+    ));
     const createdAt = new Date(Math.max(
-        preferredCreatedAt.getTime(),
+        Math.min(
+            preferredCreatedAt.getTime(),
+            latestCreatedAt.getTime()
+        ),
         minimumCreatedAt.getTime()
     ));
 
-    if (createdAt >= scenario.start_time) {
+    if (
+        createdAt >= scenario.start_time
+        || createdAt > snapshotAt
+    ) {
         throw new Error(
-            `Booking was created after start: ${scenario.garage_code}:${scenario.seed_sequence}`
+            `Invalid booking creation time: ${scenario.garage_code}:${scenario.seed_sequence}`
         );
     }
+
+    return createdAt;
+};
+
+const buildBookingRecord = ({
+    scenario,
+    garage,
+    plan,
+    vehicle,
+    guest,
+    staffByGarageType,
+    washBaysByGarageType,
+    paymentSets,
+    referenceDate,
+    snapshotAt,
+}) => {
+    const checkInProfile = staffByGarageType
+        .get(scenario.garage_code)
+        .get(STAFF_TYPES.CUSTOMER_SERVICE_STAFF)[0];
+    const snapshot = guest?.snapshot || buildVehicleSnapshot(vehicle);
+    const processed = PROCESSED_KINDS.has(scenario.kind);
+    const walkIn = scenario.channel === 'WALK_IN';
+    const completedPaid = scenario.kind === 'COMPLETED_PAID';
+    const completedNonpaid = scenario.kind === 'COMPLETED_NONPAID';
+    const completedAt = addMinutes(plan.end_time, 5);
+    const createdAt = resolveBookingCreatedAt({
+        scenario,
+        vehicle,
+        walkIn,
+        snapshotAt,
+    });
 
     const bookingDate = new Date(Date.UTC(
         scenario.start_time.getUTCFullYear(),
@@ -1503,6 +1532,7 @@ const assignScenarioCustomers = ({
 const buildBookingRecords = async ({
     scenarios,
     referenceDate,
+    snapshotAt,
     session,
 }) => {
     const dependencies = await loadBookingDependencies({ session });
@@ -1571,6 +1601,7 @@ const buildBookingRecords = async ({
                 dependencies.washBaysByGarageType,
             paymentSets,
             referenceDate,
+            snapshotAt,
         }));
     }
 
@@ -1863,6 +1894,7 @@ const summarizeRecords = (records) => ({
 const seedBooking = async ({
     session = null,
     referenceDate = getSeedReferenceDate(),
+    snapshotAt = new Date(),
     dryRun = false,
 } = {}) => {
     console.log('== Seeding bookings and booking violations ==');
@@ -1887,6 +1919,7 @@ const seedBooking = async ({
     const { records, dependencies } = await buildBookingRecords({
         scenarios,
         referenceDate,
+        snapshotAt,
         session,
     });
     const recordSummary = summarizeRecords(records);
@@ -1937,4 +1970,7 @@ const seedBooking = async ({
 
 module.exports = seedBooking;
 module.exports.buildBookingRecords = buildBookingRecords;
+module.exports.resolveBookingCreatedAt = resolveBookingCreatedAt;
+module.exports.SEED_TIER_SAFE_DAY_OFFSETS =
+    SEED_TIER_SAFE_DAY_OFFSETS;
 module.exports.summarizeRecords = summarizeRecords;

@@ -30,6 +30,27 @@ describe('booking incident validator', () => {
         expect(result.success).toBe(true);
     });
 
+    it('requires the exact assigned staff profile for a staff incident', () => {
+        const missingStaff = reportBookingIncidentSchema.safeParse({
+            params: { id: bookingId },
+            body: {
+                incident_type: 'STAFF_UNAVAILABLE',
+                affected_booking_item_key: 'ITEM_1',
+            },
+        });
+        const validIncident = reportBookingIncidentSchema.safeParse({
+            params: { id: bookingId },
+            body: {
+                incident_type: 'STAFF_UNAVAILABLE',
+                affected_booking_item_key: 'ITEM_1',
+                affected_staff_profile_id: '507f1f77bcf86cd799439099',
+            },
+        });
+
+        expect(missingStaff.success).toBe(false);
+        expect(validIncident.success).toBe(true);
+    });
+
     it('lets the backend select the nearest reschedule slot', () => {
         const result = customerIncidentDecisionSchema.safeParse({
             params: { id: bookingId, incidentId },
@@ -46,6 +67,18 @@ describe('booking incident validator', () => {
             params: { id: bookingId, incidentId },
             body: {
                 decision: 'RESCHEDULE_CUSTOM',
+            },
+        });
+
+        expect(result.success).toBe(false);
+    });
+
+    it('rejects a client-selected time for nearest rescheduling', () => {
+        const result = customerIncidentDecisionSchema.safeParse({
+            params: { id: bookingId, incidentId },
+            body: {
+                decision: 'RESCHEDULE_NEAREST',
+                new_start_time: '2999-01-01T09:00:00.000Z',
             },
         });
 

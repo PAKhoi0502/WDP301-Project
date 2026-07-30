@@ -497,6 +497,7 @@ const applyResolution = async (user, caseId, resolutionId, auditContext = {}) =>
                 const voucher = await customerVoucherService.issueCompensationVoucher({
                     user,
                     customerId: customerCase.customer_id,
+                    guestPhoneNormalized: booking.normalized_guest_phone || booking.guest_phone,
                     garageId: customerCase.garage_id,
                     bookingId: customerCase.booking_id,
                     customerCaseId: customerCase._id,

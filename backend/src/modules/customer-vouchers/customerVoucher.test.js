@@ -20,6 +20,26 @@ describe('customer voucher model', () => {
         await expect(createVoucher().validate()).resolves.toBeUndefined();
     });
 
+    it('accepts a compensation voucher bound to a guest phone', async () => {
+        const voucher = createVoucher({
+            customer_id: null,
+            guest_phone: '0901 234 567',
+        });
+
+        await expect(voucher.validate()).resolves.toBeUndefined();
+        expect(voucher.normalized_guest_phone).toBe('+84901234567');
+    });
+
+    it('rejects a voucher with both customer and guest owners', async () => {
+        const voucher = createVoucher({
+            guest_phone: '0901 234 567',
+        });
+
+        await expect(voucher.validate()).rejects.toMatchObject({
+            errors: { customer_id: expect.anything() },
+        });
+    });
+
     it('rejects percentage value above one hundred', async () => {
         const voucher = createVoucher({
             voucher_type: 'PERCENTAGE',

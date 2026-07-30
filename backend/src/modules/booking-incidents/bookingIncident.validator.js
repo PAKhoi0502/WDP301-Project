@@ -49,6 +49,17 @@ const reportBookingIncidentSchema = z.object({
                 message: 'description is required for other garage incidents',
             });
         }
+
+        if (
+            data.incident_type === BOOKING_INCIDENT_TYPES.STAFF_UNAVAILABLE
+            && !data.affected_staff_profile_id
+        ) {
+            context.addIssue({
+                code: 'custom',
+                path: ['affected_staff_profile_id'],
+                message: 'affected_staff_profile_id is required for staff unavailable incidents',
+            });
+        }
     }),
 });
 
@@ -78,6 +89,17 @@ const withDecisionRefinement = (schema) => schema.superRefine((data, context) =>
             code: 'custom',
             path: ['new_start_time'],
             message: 'new_start_time is required for custom reschedule decision',
+        });
+    }
+
+    if (
+        data.decision !== BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM
+        && data.new_start_time
+    ) {
+        context.addIssue({
+            code: 'custom',
+            path: ['new_start_time'],
+            message: 'new_start_time is only allowed for custom reschedule decision',
         });
     }
 });

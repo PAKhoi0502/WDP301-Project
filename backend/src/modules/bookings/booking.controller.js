@@ -371,6 +371,26 @@ const getAdminActiveBookingIncident = asyncHandler(async (req, res) => {
     });
 });
 
+const getAdminBookingIncidents = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const result = await bookingService.getAdminBookingIncidents(req.user, id);
+
+    return sendSuccess(res, {
+        message: 'Get booking incidents successfully',
+        data: result,
+    });
+});
+
+const getMyBookingIncidents = asyncHandler(async (req, res) => {
+    const { id } = req.validated.params;
+    const result = await bookingService.getMyBookingIncidents(req.user._id, id);
+
+    return sendSuccess(res, {
+        message: 'Get booking incidents successfully',
+        data: result,
+    });
+});
+
 const getAdminBookingIncidentOptions = asyncHandler(async (req, res) => {
     const { id, incidentId } = req.validated.params;
     const result = await bookingService.getAdminBookingIncidentOptions(
@@ -511,6 +531,8 @@ module.exports = {
     resolveMyBookingIncident,
     reportBookingIncident,
     getAdminActiveBookingIncident,
+    getAdminBookingIncidents,
+    getMyBookingIncidents,
     getAdminBookingIncidentOptions,
     recordBookingIncidentCustomerDecision,
     createIncidentCompensationVoucher,

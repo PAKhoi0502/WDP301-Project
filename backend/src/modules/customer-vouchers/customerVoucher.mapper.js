@@ -31,6 +31,8 @@ const toCustomerVoucherDto = (voucher) => {
         id: toId(plainVoucher._id),
         code: plainVoucher.code,
         customer_id: toId(plainVoucher.customer_id),
+        guest_phone: plainVoucher.guest_phone || null,
+        normalized_guest_phone: plainVoucher.normalized_guest_phone || null,
         garage_id: toId(plainVoucher.garage_id),
         customer: toReferenceSummary(
             plainVoucher.customer_id,

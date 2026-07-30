@@ -5,6 +5,7 @@ jest.mock('./booking.model', () => ({
 }));
 jest.mock('../booking-incidents/bookingIncident.model', () => ({
     create: jest.fn(),
+    find: jest.fn(),
     findOne: jest.fn(),
     findById: jest.fn(),
 }));
@@ -18,6 +19,7 @@ jest.mock('../wash-bays/washBay.model', () => ({
 }));
 jest.mock('../booking-service-steps/bookingServiceStep.service', () => ({
     markResourceReleasedForBookingItem: jest.fn(),
+    clearResourceReleasedForBookingItem: jest.fn(),
 }));
 jest.mock('../audit-logs/auditLog.service', () => ({
     recordAuditEvent: jest.fn(),
@@ -56,6 +58,14 @@ const createSessionQuery = (result) => ({
     session: jest.fn().mockResolvedValue(result),
 });
 
+const createIncidentListQuery = (result) => ({
+    sort: jest.fn().mockReturnThis(),
+    populate: jest.fn().mockReturnThis(),
+    then(resolve, reject) {
+        return Promise.resolve(result).then(resolve, reject);
+    },
+});
+
 describe('booking incident service', () => {
     const bookingId = '507f1f77bcf86cd799439011';
     const incidentId = '507f1f77bcf86cd799439012';
@@ -79,6 +89,7 @@ describe('booking incident service', () => {
         auditLogService.recordAuditEvent.mockResolvedValue(null);
         notificationService.createInAppNotification.mockResolvedValue({});
         bookingServiceStepService.markResourceReleasedForBookingItem.mockResolvedValue(null);
+        bookingServiceStepService.clearResourceReleasedForBookingItem.mockResolvedValue(null);
         loyaltyService.refundRedeemedPointsForBooking.mockResolvedValue(null);
     });
 
@@ -138,6 +149,93 @@ describe('booking incident service', () => {
         expect(booking.save).toHaveBeenCalledWith({ session });
         expect(auditLogService.recordAuditEvent).toHaveBeenCalled();
         expect(result.incident.id).toBe(incidentId);
+    });
+
+    it('releases only the unavailable staff from current and future items', async () => {
+        const affectedStaffId = '507f1f77bcf86cd799439017';
+        const availableStaffId = '507f1f77bcf86cd799439018';
+        const currentItem = {
+            item_key: 'ITEM_1',
+            sequence: 1,
+            status: 'IN_PROGRESS',
+            countdown_ends_at: new Date(Date.now() + 60000),
+            assigned_care_staff: [
+                { staff_profile_id: affectedStaffId, released_at: null },
+                { staff_profile_id: availableStaffId, released_at: null },
+            ],
+            assigned_execution_staff: [
+                { staff_profile_id: affectedStaffId, released_at: null },
+                { staff_profile_id: availableStaffId, released_at: null },
+            ],
+        };
+        const futureItem = {
+            item_key: 'ITEM_2',
+            sequence: 2,
+            status: 'PENDING',
+            assigned_care_staff: [
+                { staff_profile_id: affectedStaffId, released_at: null },
+                { staff_profile_id: availableStaffId, released_at: null },
+            ],
+            assigned_execution_staff: [],
+        };
+        const booking = {
+            _id: bookingId,
+            customer_id: customerId,
+            garage_id: garageId,
+            service_package_id: '507f1f77bcf86cd799439015',
+            vehicle_type: 'CAR',
+            status: 'IN_PROGRESS',
+            operation_status: 'NORMAL',
+            active_incident_id: null,
+            start_time: new Date('2999-01-01T06:00:00.000Z'),
+            end_time: new Date('2999-01-01T07:00:00.000Z'),
+            booking_items: [currentItem, futureItem],
+            markModified: jest.fn(),
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        const incident = {
+            _id: incidentId,
+            incident_type: 'STAFF_UNAVAILABLE',
+            created_at: new Date(),
+        };
+
+        Booking.findById
+            .mockReturnValueOnce(createSessionQuery(booking))
+            .mockReturnValueOnce(createPopulateQuery(booking));
+        BookingIncident.create.mockResolvedValue([incident]);
+        BookingIncident.findById.mockReturnValue(createPopulateQuery(incident));
+
+        await bookingService.reportBookingIncident(
+            { _id: '507f1f77bcf86cd799439016', role: 'ADMIN' },
+            bookingId,
+            {
+                incident_type: 'STAFF_UNAVAILABLE',
+                affected_booking_item_key: 'ITEM_1',
+                affected_staff_profile_id: affectedStaffId,
+            }
+        );
+
+        expect(currentItem.assigned_care_staff[0].released_at).toEqual(
+            expect.any(Date)
+        );
+        expect(currentItem.assigned_execution_staff[0].released_at).toEqual(
+            expect.any(Date)
+        );
+        expect(futureItem.assigned_care_staff[0].released_at).toEqual(
+            expect.any(Date)
+        );
+        expect(currentItem.assigned_care_staff[1].released_at).toBeNull();
+        expect(currentItem.assigned_execution_staff[1].released_at).toBeNull();
+        expect(futureItem.assigned_care_staff[1].released_at).toBeNull();
+        expect(BookingIncident.create).toHaveBeenCalledWith(
+            [
+                expect.objectContaining({
+                    affected_staff_profile_id: affectedStaffId,
+                    released_booking_item_keys: ['ITEM_1', 'ITEM_2'],
+                }),
+            ],
+            { session }
+        );
     });
 
     it('records customer-approved garage cancellation without a customer violation', async () => {
@@ -207,5 +305,122 @@ describe('booking incident service', () => {
             expect.objectContaining({ booking, session })
         );
         expect(result.released_booking_snapshot).toEqual(incident.reported_schedule_snapshot);
+    });
+
+    it.each([
+        ['RESUME_REMAINING', 60],
+        ['RESTART_CURRENT_ITEM', 600],
+    ])(
+        'applies %s when the customer continues after an incident',
+        async (continuationPolicy, expectedSeconds) => {
+            const bookingItem = {
+                item_key: 'ITEM_1',
+                sequence: 1,
+                status: 'PAUSED',
+                duration_minutes: 10,
+                countdown_duration_seconds: 600,
+                countdown_ends_at: null,
+                remaining_seconds_at_pause: 60,
+                paused_at: new Date(Date.now() - 30000),
+                actual_started_at: new Date(Date.now() - 120000),
+                total_paused_seconds: 0,
+                requires_wash_bay: false,
+                requires_care_staff: false,
+                assigned_care_staff: [],
+                assigned_execution_staff: [],
+            };
+            const booking = {
+                _id: bookingId,
+                customer_id: customerId,
+                garage_id: garageId,
+                status: 'IN_PROGRESS',
+                operation_status: 'AWAITING_CUSTOMER_DECISION',
+                active_incident_id: incidentId,
+                requires_wash_bay: false,
+                booking_items: [bookingItem],
+                markModified: jest.fn(),
+                save: jest.fn().mockResolvedValue(undefined),
+            };
+            const incident = {
+                _id: incidentId,
+                status: 'AWAITING_CUSTOMER_DECISION',
+                incident_type: 'OTHER_GARAGE_INCIDENT',
+                affected_booking_item_key: 'ITEM_1',
+                affected_staff_profile_id: null,
+                reported_schedule_snapshot: {
+                    _id: bookingId,
+                    garage_id: garageId,
+                },
+                compensation_voucher_ids: [],
+                save: jest.fn().mockResolvedValue(undefined),
+            };
+
+            Booking.findById
+                .mockReturnValueOnce(createSessionQuery(booking))
+                .mockReturnValueOnce(createPopulateQuery(booking));
+            BookingIncident.findOne.mockReturnValue(createSessionQuery(incident));
+            BookingIncident.findById.mockReturnValue(createPopulateQuery(incident));
+
+            await bookingService.resolveMyBookingIncident(
+                { _id: customerId, role: 'CUSTOMER' },
+                bookingId,
+                incidentId,
+                {
+                    decision: 'REASSIGN_AND_CONTINUE',
+                    continuation_policy: continuationPolicy,
+                }
+            );
+
+            expect(bookingItem.status).toBe('IN_PROGRESS');
+            expect(bookingItem.remaining_seconds_at_pause).toBeNull();
+            expect(
+                Math.round(
+                    (
+                        new Date(bookingItem.countdown_ends_at).getTime()
+                        - new Date(incident.resolved_at).getTime()
+                    ) / 1000
+                )
+            ).toBe(expectedSeconds);
+            expect(incident.continuation_policy).toBe(continuationPolicy);
+
+            if (continuationPolicy === 'RESTART_CURRENT_ITEM') {
+                expect(bookingItem.actual_started_at).toEqual(incident.resolved_at);
+            }
+        }
+    );
+
+    it('returns resolved incidents after the active incident is cleared', async () => {
+        const booking = {
+            _id: bookingId,
+            garage_id: garageId,
+            active_incident_id: null,
+        };
+        const incidents = [
+            {
+                _id: incidentId,
+                booking_id: bookingId,
+                garage_id: garageId,
+                status: 'RESOLVED',
+                compensation_voucher_ids: [],
+            },
+        ];
+
+        Booking.findById.mockReturnValue(createPopulateQuery(booking));
+        BookingIncident.find.mockReturnValue(createIncidentListQuery(incidents));
+
+        const result = await bookingService.getAdminBookingIncidents(
+            { _id: '507f1f77bcf86cd799439016', role: 'ADMIN' },
+            bookingId
+        );
+
+        expect(BookingIncident.find).toHaveBeenCalledWith({
+            booking_id: bookingId,
+        });
+        expect(result).toEqual([
+            expect.objectContaining({
+                id: incidentId,
+                status: 'RESOLVED',
+            }),
+        ]);
     });
 });

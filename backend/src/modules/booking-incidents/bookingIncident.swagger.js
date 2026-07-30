@@ -21,7 +21,11 @@ const bookingIncidentSchema = {
         },
         affected_booking_item_key: { type: 'string', nullable: true },
         affected_wash_bay_id: { type: 'string', nullable: true },
-        affected_staff_profile_id: { type: 'string', nullable: true },
+        affected_staff_profile_id: {
+            type: 'string',
+            nullable: true,
+            description: 'Required for STAFF_UNAVAILABLE and must be actively assigned to the booking item',
+        },
         reported_by_id: { type: 'string' },
         reported_booking_status: { type: 'string' },
         reported_schedule_snapshot: { type: 'object' },
@@ -59,6 +63,21 @@ const bookingIncidentSchema = {
             type: 'array',
             items: { type: 'string' },
         },
+        compensation_vouchers: {
+            type: 'array',
+            items: {
+                type: 'object',
+                properties: {
+                    id: { type: 'string' },
+                    code: { type: 'string' },
+                    status: { type: 'string' },
+                    expires_at: { type: 'string', format: 'date-time' },
+                    customer_id: { type: 'string', nullable: true },
+                    guest_phone: { type: 'string', nullable: true },
+                    normalized_guest_phone: { type: 'string', nullable: true },
+                },
+            },
+        },
         created_at: { type: 'string', format: 'date-time' },
         updated_at: { type: 'string', format: 'date-time' },
     },
@@ -79,6 +98,10 @@ const reportBookingIncidentRequest = {
         affected_booking_item_key: { type: 'string' },
         affected_wash_bay_id: { type: 'string', nullable: true },
         affected_staff_profile_id: { type: 'string', nullable: true },
+        released_booking_item_keys: {
+            type: 'array',
+            items: { type: 'string' },
+        },
     },
 };
 
@@ -173,6 +196,19 @@ const successResponse = (description, schema) => ({
 });
 
 const paths = {
+    '/bookings/{id}/incidents': {
+        get: {
+            tags: ['Booking Incidents'],
+            summary: 'Get my booking incident history',
+            parameters: [bookingIdParameter],
+            responses: {
+                200: successResponse('Incident history returned', {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/BookingIncident' },
+                }),
+            },
+        },
+    },
     '/bookings/{id}/incidents/active': {
         get: {
             tags: ['Booking Incidents'],
@@ -209,6 +245,17 @@ const paths = {
         },
     },
     '/admin/bookings/{id}/incidents': {
+        get: {
+            tags: ['Booking Incidents'],
+            summary: 'Get booking incident history',
+            parameters: [bookingIdParameter],
+            responses: {
+                200: successResponse('Incident history returned', {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/BookingIncident' },
+                }),
+            },
+        },
         post: {
             tags: ['Booking Incidents'],
             summary: 'Report a garage operational incident',
@@ -288,7 +335,11 @@ const paths = {
             },
             responses: {
                 201: successResponse('Compensation voucher created', {
-                    $ref: '#/components/schemas/CustomerVoucher',
+                    type: 'object',
+                    properties: {
+                        voucher: { $ref: '#/components/schemas/CustomerVoucher' },
+                        requires_approval: { type: 'boolean' },
+                    },
                 }),
             },
         },

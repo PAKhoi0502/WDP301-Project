@@ -21,6 +21,7 @@ const {
     NOTIFICATION_RELATED_TYPES,
 } = require('../../shared/constants/notification.constant');
 const { AUDIT_ACTIONS, AUDIT_RESOURCE_TYPES } = require('../../shared/constants/audit.constant');
+const { normalizePhone, isValidPhone } = require('../../shared/utils/phone');
 
 const getStaffVoucherLimit = () => {
     const value = Number(process.env.GARAGE_COMPENSATION_STAFF_MAX_AMOUNT || 100000);
@@ -31,6 +32,27 @@ const getStaffVoucherLimit = () => {
 const normalizeCode = (value) => String(value || '').trim().toUpperCase();
 
 const generateVoucherCode = () => `CARE_${randomBytes(6).toString('hex').toUpperCase()}`;
+
+const buildVoucherOwnerFilter = ({ customerId, guestPhoneNormalized }) => {
+    if (customerId) {
+        return { customer_id: customerId };
+    }
+
+    const normalizedGuestPhone = normalizePhone(guestPhoneNormalized);
+
+    if (!isValidPhone(normalizedGuestPhone)) {
+        throw new AppError(
+            'A registered customer or valid guest phone is required for the voucher',
+            400,
+            'CUSTOMER_VOUCHER_OWNER_REQUIRED'
+        );
+    }
+
+    return {
+        customer_id: null,
+        normalized_guest_phone: normalizedGuestPhone,
+    };
+};
 
 const populateVoucherQuery = (query) => query
     .populate('customer_id', 'full_name email phone')
@@ -101,10 +123,15 @@ const calculateVoucherDiscount = ({ voucher, servicePackage, orderAmount }) => {
     return Math.max(0, Math.min(Math.floor(discountAmount), orderAmount));
 };
 
-const findUsableVoucher = async ({ customerId, code, session = null }) => {
+const findUsableVoucher = async ({
+    customerId,
+    guestPhoneNormalized,
+    code,
+    session = null,
+}) => {
     const query = CustomerVoucher.findOne({
         code: normalizeCode(code),
-        customer_id: customerId,
+        ...buildVoucherOwnerFilter({ customerId, guestPhoneNormalized }),
     });
     const voucher = session ? await query.session(session) : await query;
 
@@ -127,6 +154,7 @@ const findUsableVoucher = async ({ customerId, code, session = null }) => {
 
 const previewVoucherForBooking = async ({
     customerId,
+    guestPhoneNormalized,
     code,
     servicePackage,
     orderAmount,
@@ -136,7 +164,12 @@ const previewVoucherForBooking = async ({
         return null;
     }
 
-    const voucher = await findUsableVoucher({ customerId, code, session });
+    const voucher = await findUsableVoucher({
+        customerId,
+        guestPhoneNormalized,
+        code,
+        session,
+    });
     const discountAmount = calculateVoucherDiscount({
         voucher,
         servicePackage,
@@ -149,7 +182,13 @@ const previewVoucherForBooking = async ({
     };
 };
 
-const reserveVoucherForBooking = async ({ voucherId, customerId, bookingId, session = null }) => {
+const reserveVoucherForBooking = async ({
+    voucherId,
+    customerId,
+    guestPhoneNormalized,
+    bookingId,
+    session = null,
+}) => {
     const options = { new: true };
 
     if (session) {
@@ -159,7 +198,7 @@ const reserveVoucherForBooking = async ({ voucherId, customerId, bookingId, sess
     const voucher = await CustomerVoucher.findOneAndUpdate(
         {
             _id: voucherId,
-            customer_id: customerId,
+            ...buildVoucherOwnerFilter({ customerId, guestPhoneNormalized }),
             status: CUSTOMER_VOUCHER_STATUS.ISSUED,
             expires_at: { $gt: new Date() },
         },
@@ -240,6 +279,7 @@ const getCompensationApprovalAmount = ({ voucherType, value, maxDiscountAmount, 
 const issueCompensationVoucher = async ({
     user,
     customerId,
+    guestPhoneNormalized = null,
     garageId,
     bookingId,
     incidentId,
@@ -255,6 +295,11 @@ const issueCompensationVoucher = async ({
     note = null,
     session = null,
 }) => {
+    const ownerFilter = buildVoucherOwnerFilter({
+        customerId,
+        guestPhoneNormalized,
+    });
+
     if (!(expiresAt instanceof Date) || Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
         throw new AppError(
             'Voucher expiration time must be in the future',
@@ -298,7 +343,9 @@ const issueCompensationVoucher = async ({
     const now = new Date();
     const payload = {
         code: generateVoucherCode(),
-        customer_id: customerId,
+        customer_id: ownerFilter.customer_id || null,
+        guest_phone: ownerFilter.normalized_guest_phone || null,
+        normalized_guest_phone: ownerFilter.normalized_guest_phone || null,
         garage_id: garageId,
         source_type: sourceType
             || (customerCaseId
@@ -622,21 +669,23 @@ const approveVoucher = async (adminId, voucherId) => {
             source_customer_case_id: voucher.source_customer_case_id,
         },
     });
-    await notificationService.createInAppNotification({
-        userId: voucher.customer_id,
-        type: NOTIFICATION_TYPES.COMPENSATION_VOUCHER_ISSUED,
-        title: 'Compensation voucher issued',
-        message: `The garage issued compensation voucher ${voucher.code}.`,
-        relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
-        relatedId: voucher.source_booking_id,
-        metadata: {
-            voucher_id: voucher._id.toString(),
-            incident_id: voucher.source_incident_id?.toString() || null,
-            customer_case_id: voucher.source_customer_case_id?.toString() || null,
-            code: voucher.code,
-            expires_at: voucher.expires_at,
-        },
-    });
+    if (voucher.customer_id) {
+        await notificationService.createInAppNotification({
+            userId: voucher.customer_id,
+            type: NOTIFICATION_TYPES.COMPENSATION_VOUCHER_ISSUED,
+            title: 'Compensation voucher issued',
+            message: `The garage issued compensation voucher ${voucher.code}.`,
+            relatedType: NOTIFICATION_RELATED_TYPES.BOOKING,
+            relatedId: voucher.source_booking_id,
+            metadata: {
+                voucher_id: voucher._id.toString(),
+                incident_id: voucher.source_incident_id?.toString() || null,
+                customer_case_id: voucher.source_customer_case_id?.toString() || null,
+                code: voucher.code,
+                expires_at: voucher.expires_at,
+            },
+        });
+    }
 
     return CustomerVoucherMapper.toCustomerVoucherDto(
         await populateVoucherQuery(CustomerVoucher.findById(voucher._id))

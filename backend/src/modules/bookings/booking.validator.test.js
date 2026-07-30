@@ -35,6 +35,27 @@ describe('admin booking list validator', () => {
 
         expect(result.success).toBe(false);
     });
+
+    it('accepts the supported upcoming-booking sort mode', () => {
+        const result = getAdminBookingsSchema.safeParse({
+            query: {
+                sort_by: 'START_TIME_ASC',
+            },
+        });
+
+        expect(result.success).toBe(true);
+        expect(result.data.query.sort_by).toBe('START_TIME_ASC');
+    });
+
+    it('rejects an unsupported booking sort mode', () => {
+        const result = getAdminBookingsSchema.safeParse({
+            query: {
+                sort_by: 'UPDATED_AT_DESC',
+            },
+        });
+
+        expect(result.success).toBe(false);
+    });
 });
 
 describe('booking available slots validator', () => {

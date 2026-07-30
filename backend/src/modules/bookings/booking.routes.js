@@ -109,6 +109,12 @@ customerRouter.get(
     bookingController.getMyActiveBookingIncident
 );
 
+customerRouter.get(
+    '/:id/incidents',
+    validate(incidentBookingParamSchema),
+    bookingController.getMyBookingIncidents
+);
+
 customerRouter.patch(
     '/:id/incidents/:incidentId/decision',
     validate(customerIncidentDecisionSchema),
@@ -167,6 +173,13 @@ staffTaskRouter.get(
     requireStaffCapabilities(STAFF_CAPABILITIES.INCIDENT_READ_ASSIGNED),
     validate(incidentBookingParamSchema),
     bookingController.getAdminActiveBookingIncident
+);
+
+staffTaskRouter.get(
+    '/:id/incidents',
+    requireStaffCapabilities(STAFF_CAPABILITIES.INCIDENT_READ_ASSIGNED),
+    validate(incidentBookingParamSchema),
+    bookingController.getAdminBookingIncidents
 );
 
 staffTaskRouter.get(
@@ -286,6 +299,16 @@ adminRouter.get(
     ),
     validate(incidentBookingParamSchema),
     bookingController.getAdminActiveBookingIncident
+);
+
+adminRouter.get(
+    '/:id/incidents',
+    requireAnyStaffCapability(
+        STAFF_CAPABILITIES.INCIDENT_READ_GARAGE,
+        STAFF_CAPABILITIES.INCIDENT_READ_ASSIGNED
+    ),
+    validate(incidentBookingParamSchema),
+    bookingController.getAdminBookingIncidents
 );
 
 adminRouter.get(

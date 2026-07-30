@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Booking = require('../bookings/booking.model');
 const WashHistory = require('./washHistory.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
+const CustomerVoucher = require('../customer-vouchers/customerVoucher.model');
 const ServicePackage = require('../service-packages/servicePackage.model');
 const loyaltyService = require('../loyalty/loyalty.service');
 const washHistoryService = require('./washHistory.service');
@@ -85,6 +86,7 @@ const claimWalkInHistoryForCustomer = async ({
         claimed_bookings: 0,
         claimed_wash_histories: 0,
         linked_promotion_usages: 0,
+        claimed_customer_vouchers: 0,
         loyalty_bookings_processed: 0,
         awarded_points: 0,
         total_spent_added: 0,
@@ -132,6 +134,24 @@ const claimWalkInHistoryForCustomer = async ({
                 return leftTime - rightTime;
             });
             const bookingIds = bookings.map((booking) => booking._id);
+            const customerVoucherUpdate = await CustomerVoucher.updateMany(
+                {
+                    customer_id: null,
+                    normalized_guest_phone: normalizedPhone,
+                },
+                {
+                    $set: {
+                        customer_id: customerId,
+                    },
+                    $unset: {
+                        guest_phone: '',
+                        normalized_guest_phone: '',
+                    },
+                },
+                { session }
+            );
+            result.claimed_customer_vouchers =
+                customerVoucherUpdate.modifiedCount || 0;
 
             if (!bookingIds.length) {
                 return;
@@ -302,6 +322,7 @@ const claimWalkInHistoryForCustomer = async ({
                 claimed_bookings: claimedBookings,
                 claimed_wash_histories: claimedWashHistories,
                 linked_promotion_usages: promotionUsageUpdate.modifiedCount || 0,
+                claimed_customer_vouchers: customerVoucherUpdate.modifiedCount || 0,
                 loyalty_bookings_processed: loyaltyBookingsProcessed,
                 awarded_points: awardedPoints,
                 total_spent_added: totalSpentAdded,

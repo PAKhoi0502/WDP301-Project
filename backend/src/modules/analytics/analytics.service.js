@@ -7,6 +7,7 @@ const PromotionUsage = require('../promotion-usages/promotionUsage.model');
 const Survey = require('../surveys/survey.model');
 const SurveyResponse = require('../surveys/surveyResponse.model');
 const PaymentTransaction = require('../payments/paymentTransaction.model');
+const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const {
     BOOKING_STATUS,
 } = require('../../shared/constants/booking.constant');
@@ -24,6 +25,9 @@ const {
     PAYMENT_TRANSACTION_STATUS,
     PAYMENT_INITIATED_CHANNEL,
 } = require('../../shared/constants/payment.constant');
+const {
+    LOYALTY_TIER_VALUES,
+} = require('../../shared/constants/loyalty.constant');
 const { AppError } = require('../../shared/utils/appError');
 
 const round = (value, precision = 2) => {
@@ -118,10 +122,27 @@ const mapTrend = (rows = []) => {
     }));
 };
 
-const getOverview = async (filters = {}) => {
+const mapTierDistribution = (rows = []) => {
+    const distribution = Object.fromEntries(
+        LOYALTY_TIER_VALUES.map((tier) => [tier, 0])
+    );
+
+    rows.forEach((row) => {
+        if (LOYALTY_TIER_VALUES.includes(row._id)) {
+            distribution[row._id] = row.count || 0;
+        }
+    });
+
+    return distribution;
+};
+
+const getOverview = async (
+    filters = {},
+    { includeTierDistribution = true } = {}
+) => {
     const bookingMatch = buildMatch(filters, 'start_time');
     const revenueMatch = buildMatch(filters, 'paid_at');
-    const [bookingRows, revenueRows] = await Promise.all([
+    const [bookingRows, revenueRows, tierRows] = await Promise.all([
         Booking.aggregate([
             { $match: bookingMatch },
             {
@@ -163,6 +184,17 @@ const getOverview = async (filters = {}) => {
                 },
             },
         ]),
+        includeTierDistribution
+            ? CustomerLoyalty.aggregate([
+                {
+                    $group: {
+                        _id: '$current_tier',
+                        count: { $sum: 1 },
+                    },
+                },
+                { $sort: { _id: 1 } },
+            ])
+            : Promise.resolve([]),
     ]);
 
     const booking = bookingRows[0] || {};
@@ -189,6 +221,9 @@ const getOverview = async (filters = {}) => {
                 ? round(revenue.total_revenue / revenue.paid_booking_count)
                 : 0,
         },
+        ...(includeTierDistribution
+            ? { tier_distribution: mapTierDistribution(tierRows) }
+            : {}),
         generated_at: new Date(),
     };
 };
@@ -296,10 +331,15 @@ const getStaffOverview = async (
         );
     }
 
-    const overview = await getOverview({
-        ...filters,
-        garage_id: garageId,
-    });
+    const overview = await getOverview(
+        {
+            ...filters,
+            garage_id: garageId,
+        },
+        {
+            includeTierDistribution: false,
+        }
+    );
 
     if (includeRevenue) {
         return overview;

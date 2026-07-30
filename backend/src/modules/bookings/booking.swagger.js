@@ -318,6 +318,11 @@ const createWalkInBookingRequest = {
         license_plate: { type: 'string', example: '59A-123.45' },
         vehicle_type: { type: 'string', enum: ['MOTORBIKE', 'CAR'], example: 'CAR' },
         promotion_code: { type: 'string', example: 'WELCOME10' },
+        voucher_code: {
+            type: 'string',
+            example: 'CARE_A1B2C3D4E5F6',
+            description: 'A phone-bound guest voucher requires guest_phone',
+        },
         note: { type: 'string', example: 'Walk-in customer' },
     },
 };
@@ -825,6 +830,7 @@ const paths = {
                 { name: 'is_walk_in', in: 'query', schema: { type: 'boolean' } },
                 { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
                 { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
+                { name: 'sort_by', in: 'query', schema: { type: 'string', enum: ['START_TIME_DESC', 'START_TIME_ASC'], default: 'START_TIME_DESC' } },
             ],
             responses: {
                 200: {

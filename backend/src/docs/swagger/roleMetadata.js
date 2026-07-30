@@ -154,7 +154,10 @@ addStaffOperationPolicies({
 });
 
 addStaffOperationPolicies({
-    operations: ['GET /admin/bookings/{id}/incidents/active'],
+    operations: [
+        'GET /admin/bookings/{id}/incidents',
+        'GET /admin/bookings/{id}/incidents/active',
+    ],
     capabilities: [
         STAFF_CAPABILITIES.INCIDENT_READ_GARAGE,
         STAFF_CAPABILITIES.INCIDENT_READ_ASSIGNED,
@@ -547,6 +550,7 @@ const ROUTE_GROUPS = Object.freeze([
             'POST /bookings',
             'GET /bookings/{id}',
             'PATCH /bookings/{id}/cancel',
+            'GET /bookings/{id}/incidents',
             'GET /bookings/{id}/incidents/active',
             'PATCH /bookings/{id}/incidents/{incidentId}/decision',
         ],
@@ -615,6 +619,7 @@ const ROUTE_GROUPS = Object.freeze([
             'PATCH /admin/bookings/{id}/complete-service',
             'PATCH /admin/bookings/{id}/mark-paid',
             'POST /admin/bookings/{id}/incidents',
+            'GET /admin/bookings/{id}/incidents',
             'GET /admin/bookings/{id}/incidents/active',
             'GET /admin/bookings/{id}/incidents/{incidentId}/resolution-options',
             'PATCH /admin/bookings/{id}/incidents/{incidentId}/record-customer-decision',

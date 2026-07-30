@@ -58,6 +58,7 @@ const { STAFF_TYPES } = require('../shared/constants/staff.constant');
 const { POINT_TRANSACTION_TYPES } = require('../shared/constants/loyalty.constant');
 const { stableHexId } = require('./seedBookingCatalog');
 const { getSeedReferenceDate } = require('./seedTime');
+const { GARAGE_SEEDS } = require('./seedCatalog');
 const {
     SURVEY_KEYS,
     SURVEY_TARGETS,
@@ -2039,7 +2040,11 @@ const loadSeedDependencies = async ({
         refunds,
     ] = await Promise.all([
         applySession(
-            Garage.find({}).sort({ garage_code: 1 }),
+            Garage.find({
+                garage_code: {
+                    $in: GARAGE_SEEDS.map((garage) => garage.garage_code),
+                },
+            }).sort({ garage_code: 1 }),
             session
         ).lean(),
         applySession(

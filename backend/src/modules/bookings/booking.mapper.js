@@ -431,6 +431,7 @@ const walkInCreateFields = [
     'seat_count',
     'quote_id',
     'promotion_code',
+    'voucher_code',
     'note',
 ];
 

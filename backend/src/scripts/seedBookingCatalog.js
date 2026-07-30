@@ -138,7 +138,7 @@ const FUTURE_DAY_OFFSETS = Object.freeze({
     GAR001: Object.freeze([0, 1, 4, 9]),
     GAR002: Object.freeze([0, 2, 5, 10, 13]),
     GAR003: Object.freeze([0, 1, 3, 6, 12, 18]),
-    GAR004: Object.freeze([1, 2, 4, 7, 8, 11, 14]),
+    GAR004: Object.freeze([1, 2, 4, 7, 8, 11, 13]),
     GAR005: Object.freeze([0, 5, 9, 16]),
 });
 

@@ -27,17 +27,23 @@ jest.mock('../payments/paymentTransaction.model', () => ({
     aggregate: jest.fn(),
 }));
 
+jest.mock('../loyalty/customerLoyalty.model', () => ({
+    aggregate: jest.fn(),
+}));
+
 const Booking = require('../bookings/booking.model');
 const User = require('../users/user.model');
 const WashHistory = require('../wash-histories/washHistory.model');
 const Survey = require('../surveys/survey.model');
 const SurveyResponse = require('../surveys/surveyResponse.model');
 const PaymentTransaction = require('../payments/paymentTransaction.model');
+const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const analyticsService = require('./analytics.service');
 
 describe('analytics service', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        CustomerLoyalty.aggregate.mockResolvedValue([]);
     });
 
     it('calculates overview revenue from wash histories', async () => {
@@ -60,6 +66,10 @@ describe('analytics service', () => {
                 paid_booking_count: 7,
             },
         ]);
+        CustomerLoyalty.aggregate.mockResolvedValue([
+            { _id: 'BRONZE', count: 8 },
+            { _id: 'SILVER', count: 2 },
+        ]);
 
         const result = await analyticsService.getOverview({});
 
@@ -73,7 +83,14 @@ describe('analytics service', () => {
             total_revenue: 700000,
             average_order_value: 100000,
         });
+        expect(result.tier_distribution).toEqual({
+            BRONZE: 8,
+            SILVER: 2,
+            GOLD: 0,
+            PLATINUM: 0,
+        });
         expect(WashHistory.aggregate).toHaveBeenCalledTimes(1);
+        expect(CustomerLoyalty.aggregate).toHaveBeenCalledTimes(1);
     });
 
     it('scopes staff overview to the assigned garage and redacts revenue', async () => {
@@ -116,6 +133,8 @@ describe('analytics service', () => {
         expect(result.metrics).not.toHaveProperty('original_revenue');
         expect(result.metrics).not.toHaveProperty('total_discount');
         expect(result.metrics).not.toHaveProperty('average_order_value');
+        expect(result).not.toHaveProperty('tier_distribution');
+        expect(CustomerLoyalty.aggregate).not.toHaveBeenCalled();
     });
 
     it('rejects an unscoped staff overview request', async () => {

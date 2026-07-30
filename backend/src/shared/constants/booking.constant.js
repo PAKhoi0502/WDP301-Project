@@ -91,6 +91,13 @@ const BOOKING_PAYMENT_STATUS = Object.freeze({
 
 const BOOKING_PAYMENT_STATUS_VALUES = Object.freeze(Object.values(BOOKING_PAYMENT_STATUS));
 
+const BOOKING_LIST_SORT = Object.freeze({
+    START_TIME_DESC: 'START_TIME_DESC',
+    START_TIME_ASC: 'START_TIME_ASC',
+});
+
+const BOOKING_LIST_SORT_VALUES = Object.freeze(Object.values(BOOKING_LIST_SORT));
+
 const DEFAULT_BOOKING_RULE = Object.freeze({
     current_tier: 'BRONZE',
     booking_window_days: 7,
@@ -118,5 +125,7 @@ module.exports = {
     BOOKING_PAYMENT_METHOD_VALUES,
     BOOKING_PAYMENT_STATUS,
     BOOKING_PAYMENT_STATUS_VALUES,
+    BOOKING_LIST_SORT,
+    BOOKING_LIST_SORT_VALUES,
     DEFAULT_BOOKING_RULE,
 };

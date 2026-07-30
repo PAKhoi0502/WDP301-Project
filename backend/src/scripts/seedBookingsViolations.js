@@ -154,6 +154,7 @@ const verifyBookingsViolations = async ({
             || !Number.isFinite(updatedAt)
             || !Number.isFinite(startTime)
             || createdAt >= startTime
+            || createdAt > Date.now()
             || updatedAt < createdAt
             || (
                 Number.isFinite(checkedInAt)

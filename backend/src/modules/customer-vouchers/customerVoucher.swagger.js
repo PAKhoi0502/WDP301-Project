@@ -1,6 +1,6 @@
 const tags = [{
     name: 'Customer Vouchers',
-    description: 'Customer-bound compensation and admin gift vouchers',
+    description: 'Registered-customer and guest-phone compensation vouchers',
 }];
 
 const customerVoucherSchema = {
@@ -8,7 +8,9 @@ const customerVoucherSchema = {
     properties: {
         id: { type: 'string' },
         code: { type: 'string' },
-        customer_id: { type: 'string' },
+        customer_id: { type: 'string', nullable: true },
+        guest_phone: { type: 'string', nullable: true },
+        normalized_guest_phone: { type: 'string', nullable: true },
         garage_id: { type: 'string' },
         source_type: {
             type: 'string',
