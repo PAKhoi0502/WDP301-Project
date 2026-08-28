@@ -96,6 +96,7 @@ const getDateGroupExpression = (field, groupBy = ANALYTICS_GROUP_BY.DAY) => {
         [ANALYTICS_GROUP_BY.DAY]: '%Y-%m-%d',
         [ANALYTICS_GROUP_BY.WEEK]: '%G-W%V',
         [ANALYTICS_GROUP_BY.MONTH]: '%Y-%m',
+        [ANALYTICS_GROUP_BY.YEAR]: '%Y',
     };
 
     return {
