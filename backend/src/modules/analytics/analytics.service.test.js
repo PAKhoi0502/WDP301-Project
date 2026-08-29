@@ -31,6 +31,10 @@ jest.mock('../loyalty/customerLoyalty.model', () => ({
     aggregate: jest.fn(),
 }));
 
+jest.mock('../loyalty/tierRule.model', () => ({
+    find: jest.fn(),
+}));
+
 const Booking = require('../bookings/booking.model');
 const User = require('../users/user.model');
 const WashHistory = require('../wash-histories/washHistory.model');
@@ -38,12 +42,23 @@ const Survey = require('../surveys/survey.model');
 const SurveyResponse = require('../surveys/surveyResponse.model');
 const PaymentTransaction = require('../payments/paymentTransaction.model');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
+const TierRule = require('../loyalty/tierRule.model');
 const analyticsService = require('./analytics.service');
 
 describe('analytics service', () => {
     beforeEach(() => {
         jest.clearAllMocks();
         CustomerLoyalty.aggregate.mockResolvedValue([]);
+        TierRule.find.mockReturnValue({
+            sort: jest.fn().mockReturnValue({
+                lean: jest.fn().mockResolvedValue([
+                    { tier_name: 'BRONZE', priority_level: 1, is_active: true },
+                    { tier_name: 'SILVER', priority_level: 2, is_active: true },
+                    { tier_name: 'GOLD', priority_level: 3, is_active: true },
+                    { tier_name: 'PLATINUM', priority_level: 4, is_active: true },
+                ]),
+            }),
+        });
     });
 
     it('calculates overview revenue from wash histories', async () => {
@@ -91,6 +106,7 @@ describe('analytics service', () => {
         });
         expect(WashHistory.aggregate).toHaveBeenCalledTimes(1);
         expect(CustomerLoyalty.aggregate).toHaveBeenCalledTimes(1);
+        expect(TierRule.find).toHaveBeenCalledWith({ is_active: true });
     });
 
     it('scopes staff overview to the assigned garage and redacts revenue', async () => {

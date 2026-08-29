@@ -4,6 +4,10 @@ jest.mock('./promotion.model', () => ({
     findOne: jest.fn(),
 }));
 
+jest.mock('../loyalty/tierRule.model', () => ({
+    countDocuments: jest.fn(),
+}));
+
 jest.mock('../service-packages/servicePackage.model', () => ({
     countDocuments: jest.fn(),
     findById: jest.fn(),
@@ -18,6 +22,7 @@ jest.mock('../loyalty/loyalty.service', () => ({
 }));
 
 const Promotion = require('./promotion.model');
+const TierRule = require('../loyalty/tierRule.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
 const loyaltyService = require('../loyalty/loyalty.service');
 const promotionService = require('./promotion.service');
@@ -50,6 +55,7 @@ describe('promotion service business rules', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        TierRule.countDocuments.mockResolvedValue(1);
     });
 
     it('calculates capped percentage discount for eligible customer and package', async () => {
@@ -112,6 +118,72 @@ describe('promotion service business rules', () => {
         await expect(
             promotionService.validatePromotionForBooking({
                 promotion_code: 'GOLD20',
+                customer_id: customerId,
+                servicePackage,
+                vehicleType: 'CAR',
+                orderAmount: 200000,
+            })
+        ).rejects.toMatchObject({
+            statusCode: 400,
+            errorCode: 'PROMOTION_TIER_NOT_ELIGIBLE',
+        });
+    });
+
+    it('allows a dynamically configured DIAMOND promotion for a DIAMOND customer', async () => {
+        const promotion = createValidPromotion({
+            code: 'DIAMOND20',
+            applicable_tiers: ['DIAMOND'],
+        });
+        const servicePackage = {
+            _id: servicePackageId,
+            vehicle_type: 'CAR',
+            base_price: 200000,
+        };
+
+        Promotion.findOne.mockResolvedValue(promotion);
+        loyaltyService.getOrCreateCustomerLoyalty.mockResolvedValue({
+            customer_id: customerId,
+            current_tier: 'DIAMOND',
+        });
+        PromotionUsage.countDocuments
+            .mockResolvedValueOnce(0)
+            .mockResolvedValueOnce(0);
+
+        const result = await promotionService.validatePromotionForBooking({
+            promotion_code: 'DIAMOND20',
+            customer_id: customerId,
+            servicePackage,
+            vehicleType: 'CAR',
+            orderAmount: 200000,
+        });
+
+        expect(result).toMatchObject({
+            promotion,
+            discount_amount: 30000,
+            final_price: 170000,
+        });
+    });
+
+    it('rejects a DIAMOND promotion for a lower-tier customer', async () => {
+        const promotion = createValidPromotion({
+            code: 'DIAMOND20',
+            applicable_tiers: ['DIAMOND'],
+        });
+        const servicePackage = {
+            _id: servicePackageId,
+            vehicle_type: 'CAR',
+            base_price: 200000,
+        };
+
+        Promotion.findOne.mockResolvedValue(promotion);
+        loyaltyService.getOrCreateCustomerLoyalty.mockResolvedValue({
+            customer_id: customerId,
+            current_tier: 'GOLD',
+        });
+
+        await expect(
+            promotionService.validatePromotionForBooking({
+                promotion_code: 'DIAMOND20',
                 customer_id: customerId,
                 servicePackage,
                 vehicleType: 'CAR',
@@ -213,6 +285,18 @@ describe('promotion service business rules', () => {
         ).rejects.toMatchObject({
             statusCode: 409,
             errorCode: 'PROMOTION_PHONE_USAGE_LIMIT_REACHED',
+        });
+    });
+
+    it('accepts a dynamically configured tier name when creating a promotion', async () => {
+        TierRule.countDocuments.mockResolvedValue(1);
+
+        await expect(promotionService.assertTierNamesValid(['diamond']))
+            .resolves.toBeUndefined();
+
+        expect(TierRule.countDocuments).toHaveBeenCalledWith({
+            tier_name: { $in: ['DIAMOND'] },
+            is_active: true,
         });
     });
 });

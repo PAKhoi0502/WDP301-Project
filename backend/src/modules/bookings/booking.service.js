@@ -28,7 +28,6 @@ const CustomerVoucherMapper = require('../customer-vouchers/customerVoucher.mapp
 const notificationService = require('../notifications/notification.service');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
 const TierRule = require('../loyalty/tierRule.model');
-const { LOYALTY_TIERS } = require('../../shared/constants/loyalty.constant');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const {
@@ -266,7 +265,12 @@ const assertBookingStartTimeAligned = (garage, startTime) => {
 
 const toBookingRuleFromTierRule = (tierRule) => {
     if (!tierRule) {
-        return { ...DEFAULT_BOOKING_RULE };
+        return {
+            current_tier: null,
+            booking_window_days: DEFAULT_BOOKING_RULE.booking_window_days,
+            max_upcoming_bookings: DEFAULT_BOOKING_RULE.max_upcoming_bookings,
+            priority_level: null,
+        };
     }
 
     return {
@@ -278,29 +282,23 @@ const toBookingRuleFromTierRule = (tierRule) => {
 };
 
 const getActiveBookingRuleByTier = async (tierName) => {
-    const selectedTierName = tierName || LOYALTY_TIERS.BRONZE;
-
-    const selectedTierRule = await TierRule.findOne({
-        tier_name: selectedTierName,
-        is_active: true,
-    }).lean();
-
-    if (selectedTierRule) {
-        return toBookingRuleFromTierRule(selectedTierRule);
-    }
-
-    if (selectedTierName !== LOYALTY_TIERS.BRONZE) {
-        const bronzeTierRule = await TierRule.findOne({
-            tier_name: LOYALTY_TIERS.BRONZE,
+    if (tierName) {
+        const selectedTierRule = await TierRule.findOne({
+            tier_name: tierName,
             is_active: true,
         }).lean();
 
-        if (bronzeTierRule) {
-            return toBookingRuleFromTierRule(bronzeTierRule);
+        if (selectedTierRule) {
+            return toBookingRuleFromTierRule(selectedTierRule);
         }
     }
 
-    return { ...DEFAULT_BOOKING_RULE };
+    const fallbackQuery = TierRule.findOne({ is_active: true });
+    const fallbackTierRule = typeof fallbackQuery.sort === 'function'
+        ? await fallbackQuery.sort({ priority_level: 1 }).lean()
+        : await fallbackQuery.lean();
+
+    return toBookingRuleFromTierRule(fallbackTierRule);
 };
 
 const getBookingRuleForCustomer = async (customerId) => {
@@ -310,7 +308,7 @@ const getBookingRuleForCustomer = async (customerId) => {
         .select('current_tier')
         .lean();
 
-    return getActiveBookingRuleByTier(loyalty?.current_tier || LOYALTY_TIERS.BRONZE);
+    return getActiveBookingRuleByTier(loyalty?.current_tier);
 };
 
 const populateBookingQuery = (query) => {
@@ -2622,7 +2620,7 @@ const getAvailableSlots = async ({
         getActiveServicePackage(service_package_id),
         customer_id
             ? getBookingRuleForCustomer(customer_id)
-            : getActiveBookingRuleByTier(LOYALTY_TIERS.BRONZE),
+            : getActiveBookingRuleByTier(),
     ]);
     let vehicle = null;
 
@@ -3248,7 +3246,7 @@ const createCustomerBooking = async (customerId, payload = {}) => {
                 });
                 const transactionalPriceAfterVoucher = Math.max(
                     transactionalPriceAfterPromotion
-                        - (transactionalVoucherResult?.discount_amount || 0),
+                    - (transactionalVoucherResult?.discount_amount || 0),
                     0
                 );
                 const transactionalRedeemResult = await loyaltyService.calculateBookingRedeemDiscount({
@@ -4701,7 +4699,7 @@ const resolveBookingIncidentDecision = async (
                         booking,
                         resolvedAt,
                         payload.continuation_policy
-                            || BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING
+                        || BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING
                     );
                 }
             } else if (
@@ -4821,7 +4819,7 @@ const resolveBookingIncidentDecision = async (
                 BOOKING_INCIDENT_DECISIONS.RESCHEDULE_CUSTOM,
             ].includes(decision)
                 ? payload.continuation_policy
-                    || BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING
+                || BOOKING_INCIDENT_CONTINUATION_POLICIES.RESUME_REMAINING
                 : null;
             incident.customer_confirmed_at = resolvedAt;
             incident.decision_recorded_by_id = user._id;

@@ -8,6 +8,7 @@ const Survey = require('../surveys/survey.model');
 const SurveyResponse = require('../surveys/surveyResponse.model');
 const PaymentTransaction = require('../payments/paymentTransaction.model');
 const CustomerLoyalty = require('../loyalty/customerLoyalty.model');
+const TierRule = require('../loyalty/tierRule.model');
 const {
     BOOKING_STATUS,
 } = require('../../shared/constants/booking.constant');
@@ -25,9 +26,6 @@ const {
     PAYMENT_TRANSACTION_STATUS,
     PAYMENT_INITIATED_CHANNEL,
 } = require('../../shared/constants/payment.constant');
-const {
-    LOYALTY_TIER_VALUES,
-} = require('../../shared/constants/loyalty.constant');
 const { AppError } = require('../../shared/utils/appError');
 
 const round = (value, precision = 2) => {
@@ -96,7 +94,6 @@ const getDateGroupExpression = (field, groupBy = ANALYTICS_GROUP_BY.DAY) => {
         [ANALYTICS_GROUP_BY.DAY]: '%Y-%m-%d',
         [ANALYTICS_GROUP_BY.WEEK]: '%G-W%V',
         [ANALYTICS_GROUP_BY.MONTH]: '%Y-%m',
-        [ANALYTICS_GROUP_BY.YEAR]: '%Y',
     };
 
     return {
@@ -123,13 +120,13 @@ const mapTrend = (rows = []) => {
     }));
 };
 
-const mapTierDistribution = (rows = []) => {
+const mapTierDistribution = (rows = [], tierRules = []) => {
     const distribution = Object.fromEntries(
-        LOYALTY_TIER_VALUES.map((tier) => [tier, 0])
+        tierRules.map((tierRule) => [tierRule.tier_name, 0])
     );
 
     rows.forEach((row) => {
-        if (LOYALTY_TIER_VALUES.includes(row._id)) {
+        if (row._id && Object.prototype.hasOwnProperty.call(distribution, row._id)) {
             distribution[row._id] = row.count || 0;
         }
     });
@@ -143,7 +140,7 @@ const getOverview = async (
 ) => {
     const bookingMatch = buildMatch(filters, 'start_time');
     const revenueMatch = buildMatch(filters, 'paid_at');
-    const [bookingRows, revenueRows, tierRows] = await Promise.all([
+    const [bookingRows, revenueRows, tierRows, activeTierRules] = await Promise.all([
         Booking.aggregate([
             { $match: bookingMatch },
             {
@@ -196,6 +193,9 @@ const getOverview = async (
                 { $sort: { _id: 1 } },
             ])
             : Promise.resolve([]),
+        includeTierDistribution
+            ? TierRule.find({ is_active: true }).sort({ priority_level: -1 }).lean()
+            : Promise.resolve([]),
     ]);
 
     const booking = bookingRows[0] || {};
@@ -223,7 +223,7 @@ const getOverview = async (
                 : 0,
         },
         ...(includeTierDistribution
-            ? { tier_distribution: mapTierDistribution(tierRows) }
+            ? { tier_distribution: mapTierDistribution(tierRows, activeTierRules) }
             : {}),
         generated_at: new Date(),
     };

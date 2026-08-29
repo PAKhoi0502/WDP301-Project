@@ -1,10 +1,5 @@
 const mongoose = require('mongoose');
 
-const {
-    LOYALTY_TIERS,
-    LOYALTY_TIER_VALUES,
-} = require('../../shared/constants/loyalty.constant');
-
 const customerLoyaltySchema = new mongoose.Schema(
     {
         customer_id: {
@@ -16,8 +11,9 @@ const customerLoyaltySchema = new mongoose.Schema(
 
         current_tier: {
             type: String,
-            enum: LOYALTY_TIER_VALUES,
-            default: LOYALTY_TIERS.BRONZE,
+            trim: true,
+            uppercase: true,
+            default: null,
         },
 
         total_points: {

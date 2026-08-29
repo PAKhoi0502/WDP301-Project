@@ -32,7 +32,7 @@ describe('tier rules, redeem rule and promotions seed catalog', () => {
         timezoneOffset: '+07:00',
     });
 
-    test('builds four deterministic and monotonic tier rules', () => {
+    test('builds four default deterministic and monotonic tier rules', () => {
         const first = buildTierRuleDefinitions(referenceDate);
         const second = buildTierRuleDefinitions(referenceDate);
 
@@ -100,6 +100,20 @@ describe('tier rules, redeem rule and promotions seed catalog', () => {
 
             expect(validationError).toBeUndefined();
         }
+    });
+
+    test('keeps custom tiers outside the default catalog', () => {
+        const definitions = buildTierRuleDefinitions(referenceDate);
+
+        expect(definitions.map((definition) => definition.tier_name)).toEqual([
+            LOYALTY_TIERS.BRONZE,
+            LOYALTY_TIERS.SILVER,
+            LOYALTY_TIERS.GOLD,
+            LOYALTY_TIERS.PLATINUM,
+        ]);
+        expect(definitions.some(
+            (definition) => definition.tier_name === 'DIAMOND'
+        )).toBe(false);
     });
 
     test('uses one hundred dong per point with practical redeem increments', () => {
@@ -232,5 +246,25 @@ describe('tier rules, redeem rule and promotions seed catalog', () => {
         expect(promotionByCode.get('PLATINUM20').applicable_tiers).toEqual([
             LOYALTY_TIERS.PLATINUM,
         ]);
+    });
+
+    test('does not require a fixed number of persisted tiers', () => {
+        const rules = [
+            ...buildTierRuleDefinitions(referenceDate),
+            {
+                tier_name: 'DIAMOND',
+                booking_window_days: 30,
+                max_upcoming_bookings: 4,
+                point_multiplier: 1.75,
+                priority_level: 5,
+                min_total_spent: 10000000,
+                min_total_visits: 25,
+                min_total_points: 600,
+                is_active: true,
+            },
+        ];
+
+        expect(rules).toHaveLength(5);
+        expect(() => assertTierRuleDefinitionsValid(rules)).not.toThrow();
     });
 });

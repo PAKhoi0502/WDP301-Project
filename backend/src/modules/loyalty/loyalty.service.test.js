@@ -58,10 +58,15 @@ jest.mock('../service-packages/servicePackage.model', () => ({
 jest.mock('../promotions/promotion.model', () => ({
     findById: jest.fn(),
     findOne: jest.fn(),
+    find: jest.fn(),
 }));
 
 jest.mock('../promotion-usages/promotionUsage.model', () => ({
     countDocuments: jest.fn(),
+}));
+
+jest.mock('../customer-vouchers/customerVoucher.service', () => ({
+    previewVoucherForBooking: jest.fn(),
 }));
 
 const CustomerLoyalty = require('./customerLoyalty.model');
@@ -105,6 +110,362 @@ describe('loyalty service business rules', () => {
         PointTransaction.findOne.mockReturnValue(
             createQueryMock(null)
         );
+    });
+
+    it('deactivates an unused tier without affecting other tiers', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = {
+            _id: tierRuleId,
+            tier_name: 'GOLD',
+            priority_level: 3,
+            is_active: true,
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        TierRule.findById.mockResolvedValue(tierRule);
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(null));
+        Promotion.findOne.mockReturnValue(createQueryMock(null));
+        TierRule.find.mockReturnValue(createQueryMock([
+            { _id: new mongoose.Types.ObjectId(), tier_name: 'BRONZE', priority_level: 1, is_active: true },
+            tierRule,
+        ]));
+
+        const result = await loyaltyService.deleteTierRule(tierRuleId);
+
+        expect(tierRule.is_active).toBe(false);
+        expect(tierRule.save).toHaveBeenCalledTimes(1);
+        expect(TierRule.findByIdAndDelete).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ tier_name: 'GOLD', is_active: false });
+    });
+
+    it('rejects deleting a tier currently used by customers', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = { _id: tierRuleId, tier_name: 'GOLD', is_active: true };
+        TierRule.findById.mockResolvedValue(tierRule);
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock({ current_tier: 'GOLD' }));
+
+        await expect(loyaltyService.deleteTierRule(tierRuleId)).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'TIER_RULE_IN_USE',
+        });
+    });
+
+    it('rejects deleting a tier used by a promotion', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = { _id: tierRuleId, tier_name: 'GOLD', is_active: true };
+        TierRule.findById.mockResolvedValue(tierRule);
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(null));
+        Promotion.findOne.mockReturnValue(createQueryMock({ applicable_tiers: ['GOLD'] }));
+
+        await expect(loyaltyService.deleteTierRule(tierRuleId)).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'TIER_RULE_USED_BY_PROMOTION',
+        });
+    });
+
+    it('rejects deleting a non-existent tier', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        TierRule.findById.mockResolvedValue(null);
+
+        await expect(loyaltyService.deleteTierRule(tierRuleId)).rejects.toMatchObject({
+            statusCode: 404,
+            errorCode: 'TIER_RULE_NOT_FOUND',
+        });
+    });
+
+    it('rejects deleting the only active tier', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = { _id: tierRuleId, tier_name: 'GOLD', is_active: true };
+        TierRule.findById.mockResolvedValue(tierRule);
+        CustomerLoyalty.findOne.mockReturnValue(createQueryMock(null));
+        Promotion.findOne.mockReturnValue(createQueryMock(null));
+        TierRule.find.mockReturnValue(createQueryMock([tierRule]));
+
+        await expect(loyaltyService.deleteTierRule(tierRuleId)).rejects.toMatchObject({
+            statusCode: 409,
+            errorCode: 'TIER_RULE_EVALUATION_UNDEFINED',
+        });
+        expect(tierRule.save).toBeUndefined();
+    });
+
+    it('creates a tier with a unique name and priority while preserving evaluation order', async () => {
+        const createdTier = {
+            _id: new mongoose.Types.ObjectId(),
+            tier_name: 'DIAMOND',
+            booking_window_days: 30,
+            max_upcoming_bookings: 5,
+            point_multiplier: 2,
+            priority_level: 5,
+            min_total_spent: 10000000,
+            min_total_visits: 20,
+            min_total_points: 5000,
+            is_active: true,
+            toObject: jest.fn(function toObject() {
+                return this;
+            }),
+        };
+        TierRule.findOne
+            .mockReturnValueOnce(createQueryMock(null))
+            .mockReturnValueOnce(createQueryMock(null));
+        TierRule.find.mockReturnValue(createQueryMock([
+            {
+                tier_name: 'PLATINUM',
+                booking_window_days: 14,
+                max_upcoming_bookings: 3,
+                point_multiplier: 1.5,
+                priority_level: 4,
+                min_total_spent: 5000000,
+                min_total_visits: 10,
+                min_total_points: 1000,
+            },
+        ]));
+        TierRule.create.mockResolvedValue(createdTier);
+
+        const result = await loyaltyService.createTierRule({
+            tier_name: ' diamond ',
+            booking_window_days: 30,
+            max_upcoming_bookings: 5,
+            point_multiplier: 2,
+            priority_level: 5,
+            min_total_spent: 10000000,
+            min_total_visits: 20,
+            min_total_points: 5000,
+            is_active: true,
+        });
+
+        expect(TierRule.create).toHaveBeenCalledWith(expect.objectContaining({
+            tier_name: 'DIAMOND',
+            priority_level: 5,
+        }));
+        expect(result).toMatchObject({ tier_name: 'DIAMOND', priority_level: 5 });
+    });
+
+    it('rejects duplicate tier names and priorities before creating a tier', async () => {
+        TierRule.findOne.mockReturnValueOnce(createQueryMock({ tier_name: 'GOLD' }));
+
+        await expect(loyaltyService.createTierRule({
+            tier_name: 'gold',
+            booking_window_days: 30,
+            max_upcoming_bookings: 5,
+            point_multiplier: 2,
+            priority_level: 5,
+        })).rejects.toMatchObject({ errorCode: 'TIER_RULE_ALREADY_EXISTS' });
+
+        TierRule.findOne.mockReset();
+        TierRule.findOne
+            .mockReturnValueOnce(createQueryMock(null))
+            .mockReturnValueOnce(createQueryMock({ priority_level: 5 }));
+
+        await expect(loyaltyService.createTierRule({
+            tier_name: 'DIAMOND',
+            booking_window_days: 30,
+            max_upcoming_bookings: 5,
+            point_multiplier: 2,
+            priority_level: 5,
+        })).rejects.toMatchObject({ errorCode: 'TIER_RULE_PRIORITY_ALREADY_EXISTS' });
+        expect(TierRule.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a tier that breaks the priority evaluation order', async () => {
+        TierRule.findOne
+            .mockReturnValueOnce(createQueryMock(null))
+            .mockReturnValueOnce(createQueryMock(null));
+        TierRule.find.mockReturnValue(createQueryMock([
+            {
+                tier_name: 'PLATINUM',
+                booking_window_days: 14,
+                max_upcoming_bookings: 3,
+                point_multiplier: 1.5,
+                priority_level: 4,
+                min_total_spent: 5000000,
+                min_total_visits: 10,
+                min_total_points: 1000,
+            },
+        ]));
+
+        await expect(loyaltyService.createTierRule({
+            tier_name: 'DIAMOND',
+            booking_window_days: 7,
+            max_upcoming_bookings: 2,
+            point_multiplier: 1,
+            priority_level: 5,
+            min_total_spent: 6000000,
+            min_total_visits: 20,
+            min_total_points: 5000,
+        })).rejects.toMatchObject({ errorCode: 'TIER_RULE_ORDER_INVALID' });
+        expect(TierRule.create).not.toHaveBeenCalled();
+    });
+
+    it('updates a tier rule without changing customer loyalty or points', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = {
+            _id: tierRuleId,
+            tier_name: 'GOLD',
+            booking_window_days: 14,
+            max_upcoming_bookings: 3,
+            point_multiplier: 1.5,
+            priority_level: 3,
+            min_total_spent: 1000000,
+            min_total_visits: 5,
+            min_total_points: 100,
+            is_active: true,
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        TierRule.findById.mockResolvedValue(tierRule);
+        TierRule.find.mockReturnValue(createQueryMock([
+            tierRule,
+            {
+                _id: new mongoose.Types.ObjectId(),
+                tier_name: 'BRONZE',
+                booking_window_days: 7,
+                max_upcoming_bookings: 1,
+                point_multiplier: 1,
+                priority_level: 1,
+                min_total_spent: 0,
+                min_total_visits: 0,
+                min_total_points: 0,
+                is_active: true,
+            },
+        ]));
+
+        const result = await loyaltyService.updateTierRule(tierRuleId, {
+            point_multiplier: 1.75,
+            min_total_points: 150,
+        });
+
+        expect(tierRule.save).toHaveBeenCalledTimes(1);
+        expect(tierRule.point_multiplier).toBe(1.75);
+        expect(tierRule.min_total_points).toBe(150);
+        expect(PointTransaction.create).not.toHaveBeenCalled();
+        expect(result).toMatchObject({ point_multiplier: 1.75, min_total_points: 150 });
+    });
+
+    it('rejects updates for a non-existent tier rule', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        TierRule.findById.mockResolvedValue(null);
+
+        await expect(loyaltyService.updateTierRule(tierRuleId, {
+            point_multiplier: 2,
+        })).rejects.toMatchObject({
+            statusCode: 404,
+            errorCode: 'TIER_RULE_NOT_FOUND',
+        });
+    });
+
+    it('rejects duplicate tier names and conflicting priorities', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = {
+            _id: tierRuleId,
+            tier_name: 'GOLD',
+            priority_level: 3,
+            is_active: true,
+            save: jest.fn(),
+        };
+        TierRule.findById.mockResolvedValue(tierRule);
+        TierRule.findOne.mockReturnValueOnce(createQueryMock({ tier_name: 'SILVER' }));
+
+        await expect(loyaltyService.updateTierRule(tierRuleId, {
+            tier_name: 'silver',
+        })).rejects.toMatchObject({ errorCode: 'TIER_RULE_ALREADY_EXISTS' });
+
+        TierRule.findOne.mockReset();
+        TierRule.findOne.mockReturnValueOnce(createQueryMock({ priority_level: 2 }));
+
+        await expect(loyaltyService.updateTierRule(tierRuleId, {
+            priority_level: 2,
+        })).rejects.toMatchObject({ errorCode: 'TIER_RULE_PRIORITY_ALREADY_EXISTS' });
+    });
+
+    it('rejects an update that breaks threshold order', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = {
+            _id: tierRuleId,
+            tier_name: 'GOLD',
+            booking_window_days: 14,
+            max_upcoming_bookings: 3,
+            point_multiplier: 1.5,
+            priority_level: 3,
+            min_total_spent: 1000000,
+            min_total_visits: 5,
+            min_total_points: 100,
+            is_active: true,
+            save: jest.fn(),
+        };
+        TierRule.findById.mockResolvedValue(tierRule);
+        TierRule.find.mockReturnValue(createQueryMock([
+            {
+                _id: new mongoose.Types.ObjectId(),
+                tier_name: 'SILVER',
+                booking_window_days: 7,
+                max_upcoming_bookings: 2,
+                point_multiplier: 1,
+                priority_level: 2,
+                min_total_spent: 500000,
+                min_total_visits: 3,
+                min_total_points: 50,
+                is_active: true,
+            },
+            tierRule,
+        ]));
+
+        await expect(loyaltyService.updateTierRule(tierRuleId, {
+            min_total_spent: 400000,
+        })).rejects.toMatchObject({ errorCode: 'TIER_RULE_ORDER_INVALID' });
+        expect(tierRule.save).not.toHaveBeenCalled();
+    });
+
+    it('allows deactivation when another active tier preserves evaluation', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = {
+            _id: tierRuleId,
+            tier_name: 'GOLD',
+            booking_window_days: 14,
+            max_upcoming_bookings: 3,
+            point_multiplier: 1.5,
+            priority_level: 3,
+            min_total_spent: 1000000,
+            min_total_visits: 5,
+            min_total_points: 100,
+            is_active: true,
+            save: jest.fn().mockResolvedValue(undefined),
+        };
+        TierRule.findById.mockResolvedValue(tierRule);
+        TierRule.find.mockReturnValue(createQueryMock([
+            tierRule,
+            {
+                tier_name: 'BRONZE',
+                booking_window_days: 7,
+                max_upcoming_bookings: 1,
+                point_multiplier: 1,
+                priority_level: 1,
+                min_total_spent: 0,
+                min_total_visits: 0,
+                min_total_points: 0,
+                is_active: true,
+            },
+        ]));
+
+        await loyaltyService.updateTierRule(tierRuleId, { is_active: false });
+
+        expect(tierRule.is_active).toBe(false);
+        expect(tierRule.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects deactivation when it leaves no active tier', async () => {
+        const tierRuleId = new mongoose.Types.ObjectId();
+        const tierRule = {
+            _id: tierRuleId,
+            tier_name: 'GOLD',
+            priority_level: 1,
+            is_active: true,
+            save: jest.fn(),
+        };
+        TierRule.findById.mockResolvedValue(tierRule);
+        TierRule.find.mockReturnValue(createQueryMock([tierRule]));
+
+        await expect(loyaltyService.updateTierRule(tierRuleId, {
+            is_active: false,
+        })).rejects.toMatchObject({ errorCode: 'TIER_RULE_EVALUATION_UNDEFINED' });
+        expect(tierRule.save).not.toHaveBeenCalled();
     });
 
     it('earns points from the main package and add-ons, updates totals, and reviews tier', async () => {
@@ -457,7 +818,7 @@ describe('loyalty service business rules', () => {
         });
     });
 
-    it('limits inactive tier recovery to one tier per completed paid booking', async () => {
+    it('assigns the highest eligible tier after a completed paid booking', async () => {
         const recoveryStartedAt = new Date('2026-01-01T00:00:00.000Z');
         const loyalty = createLoyaltyDocument({
             customer_id: customerId,
@@ -532,13 +893,13 @@ describe('loyalty service business rules', () => {
         expect(loyalty.total_spent).toBe(3000000);
         expect(loyalty.total_visits).toBe(25);
         expect(loyalty.total_points).toBe(700);
-        expect(loyalty.current_tier).toBe('GOLD');
-        expect(loyalty.tier_recovery_started_at).toBe(recoveryStartedAt);
+        expect(loyalty.current_tier).toBe('PLATINUM');
+        expect(loyalty.tier_recovery_started_at).toBeNull();
         expect(result).toMatchObject({
             earned_points: 20,
             tier_review: {
                 previous_tier: 'SILVER',
-                current_tier: 'GOLD',
+                current_tier: 'PLATINUM',
                 tier_changed: true,
             },
         });
@@ -822,10 +1183,10 @@ describe('loyalty service business rules', () => {
         expect(session.endSession).toHaveBeenCalledTimes(1);
     });
 
-    it('downgrades inactive customer tiers by one level after 90 days', async () => {
+    it('downgrades inactive customer tiers by one database-priority level after 90 days', async () => {
         const loyalty = createLoyaltyDocument({
             customer_id: customerId,
-            current_tier: 'GOLD',
+            current_tier: 'CUSTOM',
             last_visit_at: new Date(Date.now() - 91 * 24 * 60 * 60 * 1000),
             last_tier_downgrade_at: null,
         });
@@ -837,19 +1198,19 @@ describe('loyalty service business rules', () => {
         jest.spyOn(mongoose, 'startSession').mockResolvedValue(session);
         TierRule.find.mockReturnValue(createQueryMock([
             {
-                tier_name: 'BRONZE',
+                tier_name: 'BASE',
                 priority_level: 1,
             },
             {
-                tier_name: 'SILVER',
+                tier_name: 'ENTRY',
                 priority_level: 2,
             },
             {
-                tier_name: 'GOLD',
+                tier_name: 'CUSTOM',
                 priority_level: 3,
             },
             {
-                tier_name: 'PLATINUM',
+                tier_name: 'PREMIUM',
                 priority_level: 4,
             },
         ]));
@@ -859,9 +1220,9 @@ describe('loyalty service business rules', () => {
 
         expect(session.withTransaction).toHaveBeenCalledTimes(1);
         expect(CustomerLoyalty.find).toHaveBeenCalledWith(expect.objectContaining({
-            current_tier: { $ne: 'BRONZE' },
+            current_tier: { $ne: 'PREMIUM' },
         }));
-        expect(loyalty.current_tier).toBe('SILVER');
+        expect(loyalty.current_tier).toBe('ENTRY');
         expect(loyalty.last_tier_downgrade_at).toBeInstanceOf(Date);
         expect(loyalty.last_tier_review_at).toBeInstanceOf(Date);
         expect(loyalty.tier_recovery_started_at).toBeInstanceOf(Date);
@@ -874,12 +1235,100 @@ describe('loyalty service business rules', () => {
             downgrades: [
                 expect.objectContaining({
                     customer_id: customerId.toString(),
-                    previous_tier: 'GOLD',
-                    current_tier: 'SILVER',
+                    previous_tier: 'CUSTOM',
+                    current_tier: 'ENTRY',
                     tier_recovery_started_at: expect.any(Date),
                 }),
             ],
         });
         expect(session.endSession).toHaveBeenCalledTimes(1);
+    });
+
+    describe('database-driven tier evaluation', () => {
+        const makeRule = (tier_name, priority_level, thresholds = {}, overrides = {}) => ({
+            tier_name,
+            priority_level,
+            min_total_spent: thresholds.spent || 0,
+            min_total_visits: thresholds.visits || 0,
+            min_total_points: thresholds.points || 0,
+            is_active: true,
+            ...overrides,
+        });
+
+        it.each([
+            [4, 'TIER_4'],
+            [5, 'TIER_5'],
+            [6, 'TIER_6'],
+        ])('supports %i active tiers and selects the highest eligible rule', (tierCount, expectedTier) => {
+            const tierRules = Array.from({ length: tierCount }, (_, index) => makeRule(
+                `TIER_${index + 1}`,
+                index + 1,
+                {
+                    spent: index * 100,
+                    visits: index,
+                    points: index * 100,
+                }
+            ));
+
+            const result = loyaltyService.getHighestEligibleTierRule({
+                total_spent: 10000,
+                total_visits: 100,
+                qualifying_points: 10000,
+            }, tierRules);
+
+            expect(result.tier_name).toBe(expectedTier);
+        });
+
+        it('requires every configured threshold before selecting a higher tier', () => {
+            const tierRules = [
+                makeRule('START', 1),
+                makeRule('VIP', 2, { spent: 1000, visits: 10, points: 500 }),
+            ];
+
+            expect(loyaltyService.getHighestEligibleTierRule({
+                total_spent: 1000,
+                total_visits: 10,
+                qualifying_points: 499,
+            }, tierRules).tier_name).toBe('START');
+        });
+
+        it('ignores inactive rules even when they have the highest priority', () => {
+            const tierRules = [
+                makeRule('BASELINE', 1),
+                makeRule('ACTIVE_PREMIUM', 2, { points: 100 }),
+                makeRule('DISABLED_DIAMOND', 99, { points: 1 }, { is_active: false }),
+            ];
+
+            expect(loyaltyService.getHighestEligibleTierRule({
+                total_points: 1000,
+            }, tierRules).tier_name).toBe('ACTIVE_PREMIUM');
+        });
+
+        it('uses priority rather than tier-name ordering', () => {
+            const tierRules = [
+                makeRule('ALPHA', 10),
+                makeRule('OMEGA', 20),
+                makeRule('ENTRY', 1),
+            ];
+
+            expect(loyaltyService.getHighestEligibleTierRule({
+                total_points: 100,
+            }, tierRules).tier_name).toBe('OMEGA');
+        });
+
+        it('falls back to the lowest-priority active rule when no criteria are met', () => {
+            const tierRules = [
+                makeRule('FOUNDATION', 1, { spent: 100, visits: 2, points: 50 }),
+                makeRule('PREMIUM_CUSTOM', 3, { spent: 1000, visits: 20, points: 500 }),
+                makeRule('ENTRY_CUSTOM', 2, { spent: 200, visits: 5, points: 100 }),
+                makeRule('DISABLED_BASE', 0, {}, { is_active: false }),
+            ];
+
+            expect(loyaltyService.getHighestEligibleTierRule({
+                total_spent: 0,
+                total_visits: 0,
+                qualifying_points: 0,
+            }, tierRules).tier_name).toBe('FOUNDATION');
+        });
     });
 });

@@ -1,16 +1,14 @@
 const mongoose = require('mongoose');
 
-const {
-    LOYALTY_TIER_VALUES,
-} = require('../../shared/constants/loyalty.constant');
-
 const tierRuleSchema = new mongoose.Schema(
     {
         tier_name: {
             type: String,
-            enum: LOYALTY_TIER_VALUES,
             required: [true, 'Tier name is required'],
             unique: true,
+            trim: true,
+            uppercase: true,
+            minlength: [1, 'Tier name cannot be empty'],
         },
 
         booking_window_days: {
@@ -70,7 +68,16 @@ const tierRuleSchema = new mongoose.Schema(
 );
 
 tierRuleSchema.index({ is_active: 1, priority_level: -1 });
+tierRuleSchema.index({ priority_level: 1 }, { unique: true });
 tierRuleSchema.index({ created_at: -1 });
+
+tierRuleSchema.pre('validate', function normalizeTierName(next) {
+    if (typeof this.tier_name === 'string') {
+        this.tier_name = this.tier_name.trim().toUpperCase();
+    }
+
+    next();
+});
 
 tierRuleSchema.methods.toJSON = function () {
     const tierRule = this.toObject();

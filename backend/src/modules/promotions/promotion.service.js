@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const Promotion = require('./promotion.model');
 const PromotionMapper = require('./promotion.mapper');
 const ServicePackage = require('../service-packages/servicePackage.model');
+const TierRule = require('../loyalty/tierRule.model');
 const PromotionUsage = require('../promotion-usages/promotionUsage.model');
 const servicePriceRuleService = require('../service-price-rules/servicePriceRule.service');
 const loyaltyService = require('../loyalty/loyalty.service');
@@ -278,6 +279,28 @@ const assertCodeAvailable = async (code, ignoredPromotionId = null) => {
 
     if (existed) {
         throw new AppError('Promotion code already exists', 409, 'PROMOTION_CODE_ALREADY_EXISTS');
+    }
+};
+
+const assertTierNamesValid = async (tierNames = []) => {
+    const normalizedTierNames = normalizeStringList(tierNames)
+        .map((tierName) => tierName.trim().toUpperCase());
+
+    if (!normalizedTierNames.length) {
+        return;
+    }
+
+    const count = await TierRule.countDocuments({
+        tier_name: { $in: normalizedTierNames },
+        is_active: true,
+    });
+
+    if (count !== new Set(normalizedTierNames).size) {
+        throw new AppError(
+            'One or more applicable tiers are invalid or inactive',
+            400,
+            'INVALID_PROMOTION_TIERS'
+        );
     }
 };
 
@@ -570,6 +593,7 @@ const createPromotion = async (actorId, payload = {}) => {
     assertDiscountRuleValid(createPayload);
     assertAudienceRuleValid(createPayload);
     await assertCodeAvailable(createPayload.code);
+    await assertTierNamesValid(createPayload.applicable_tiers || []);
     await assertServicePackagesValid(createPayload.applicable_service_package_ids || []);
 
     const promotion = await Promotion.create({
@@ -593,6 +617,10 @@ const updatePromotion = async (actorId, promotionId, payload = {}) => {
 
     if (updatePayload.code !== undefined) {
         await assertCodeAvailable(updatePayload.code, promotionId);
+    }
+
+    if (updatePayload.applicable_tiers !== undefined) {
+        await assertTierNamesValid(updatePayload.applicable_tiers);
     }
 
     if (updatePayload.applicable_service_package_ids !== undefined) {
@@ -733,4 +761,5 @@ module.exports = {
     deletePromotion,
     validatePromotion,
     validatePromotionForBooking,
+    assertTierNamesValid,
 };

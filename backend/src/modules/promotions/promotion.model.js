@@ -1,7 +1,6 @@
 const mongoose = require('mongoose');
 
 const { VEHICLE_TYPE_VALUES } = require('../../shared/constants/vehicle.constant');
-const { LOYALTY_TIER_VALUES } = require('../../shared/constants/loyalty.constant');
 const {
     PROMOTION_DISCOUNT_TYPES,
     PROMOTION_DISCOUNT_TYPE_VALUES,
@@ -79,8 +78,14 @@ const promotionSchema = new mongoose.Schema(
         },
 
         applicable_tiers: {
-            type: [String],
-            enum: LOYALTY_TIER_VALUES,
+            type: [
+                {
+                    type: String,
+                    trim: true,
+                    uppercase: true,
+                    minlength: [1, 'Applicable tier name cannot be empty'],
+                },
+            ],
             default: [],
         },
 

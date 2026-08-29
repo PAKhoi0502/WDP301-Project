@@ -233,7 +233,6 @@ const schemas = {
                             total_visits_added: { type: 'number' },
                             current_tier: {
                                 type: 'string',
-                                enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'],
                                 nullable: true,
                             },
                             retry_required: { type: 'boolean' },

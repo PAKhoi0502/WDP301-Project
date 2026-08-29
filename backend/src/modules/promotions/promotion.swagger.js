@@ -25,7 +25,7 @@ const promotionSchema = {
         per_phone_limit: { type: 'number', nullable: true, enum: [1] },
         applicable_tiers: {
             type: 'array',
-            items: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
+            items: { type: 'string' },
         },
         applicable_vehicle_types: {
             type: 'array',
@@ -65,7 +65,7 @@ const createPromotionRequest = {
         per_phone_limit: { type: 'number', nullable: true, enum: [1], example: 1 },
         applicable_tiers: {
             type: 'array',
-            items: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
+            items: { type: 'string' },
             example: ['BRONZE', 'SILVER'],
         },
         applicable_vehicle_types: {
@@ -230,7 +230,7 @@ const paths = {
                 { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
                 { name: 'search', in: 'query', schema: { type: 'string' } },
                 { name: 'vehicle_type', in: 'query', schema: { type: 'string', enum: ['MOTORBIKE', 'CAR'] } },
-                { name: 'tier', in: 'query', schema: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] } },
+                { name: 'tier', in: 'query', schema: { type: 'string' } },
                 { name: 'audience', in: 'query', schema: { type: 'string', enum: ['ALL', 'CUSTOMER', 'WALK_IN'] } },
                 { name: 'is_active', in: 'query', schema: { type: 'boolean' } },
                 { name: 'valid_only', in: 'query', schema: { type: 'boolean' } },

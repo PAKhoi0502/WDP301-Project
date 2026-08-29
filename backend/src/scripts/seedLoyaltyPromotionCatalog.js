@@ -66,12 +66,13 @@ const REDEEM_RULE_BLUEPRINT = Object.freeze({
     is_active: true,
 });
 
-const ALL_TIERS = Object.freeze([
-    LOYALTY_TIERS.BRONZE,
-    LOYALTY_TIERS.SILVER,
-    LOYALTY_TIERS.GOLD,
-    LOYALTY_TIERS.PLATINUM,
-]);
+// These are the tiers covered by the default catalog. Runtime tier validation
+// and evaluation must use persisted TierRule documents instead of this list.
+const DEFAULT_TIER_NAMES = Object.freeze(
+    TIER_RULE_BLUEPRINTS.map((definition) => definition.tier_name)
+);
+
+const ALL_TIERS = DEFAULT_TIER_NAMES;
 
 const PROMOTION_BLUEPRINTS = Object.freeze([
     {
@@ -384,6 +385,7 @@ const buildPromotionDefinitions = (referenceDate) => (
 
 module.exports = {
     TIER_RULE_BLUEPRINTS,
+    DEFAULT_TIER_NAMES,
     REDEEM_RULE_BLUEPRINT,
     PROMOTION_BLUEPRINTS,
     buildTierRuleDefinitions,

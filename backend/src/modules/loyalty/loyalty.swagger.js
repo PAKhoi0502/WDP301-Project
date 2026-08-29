@@ -28,7 +28,7 @@ const customerLoyaltySchema = {
         id: { type: 'string' },
         customer_id: { type: 'string' },
         customer: customerSummarySchema,
-        current_tier: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
+        current_tier: { type: 'string' },
         total_points: { type: 'number' },
         qualifying_points: { type: 'number' },
         bonus_points: { type: 'number' },
@@ -52,7 +52,7 @@ const tierRuleSchema = {
     nullable: true,
     properties: {
         id: { type: 'string' },
-        tier_name: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
+        tier_name: { type: 'string' },
         booking_window_days: { type: 'number' },
         max_upcoming_bookings: { type: 'number' },
         point_multiplier: { type: 'number' },
@@ -75,15 +75,26 @@ const createTierRuleRequestSchema = {
         'point_multiplier',
         'priority_level',
     ],
+    example: {
+        tier_name: 'DIAMOND',
+        booking_window_days: 30,
+        max_upcoming_bookings: 5,
+        point_multiplier: 2,
+        priority_level: 5,
+        min_total_spent: 10000000,
+        min_total_visits: 20,
+        min_total_points: 5000,
+        is_active: true,
+    },
     properties: {
-        tier_name: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] },
-        booking_window_days: { type: 'number', example: 7 },
-        max_upcoming_bookings: { type: 'number', example: 1 },
-        point_multiplier: { type: 'number', example: 1 },
-        priority_level: { type: 'number', example: 1 },
-        min_total_spent: { type: 'number', example: 0 },
-        min_total_visits: { type: 'number', example: 0 },
-        min_total_points: { type: 'number', example: 0 },
+        tier_name: { type: 'string', example: 'DIAMOND' },
+        booking_window_days: { type: 'number', minimum: 1 },
+        max_upcoming_bookings: { type: 'number', minimum: 1 },
+        point_multiplier: { type: 'number', minimum: 0 },
+        priority_level: { type: 'number', minimum: 1 },
+        min_total_spent: { type: 'number', minimum: 0, default: 0 },
+        min_total_visits: { type: 'number', minimum: 0, default: 0 },
+        min_total_points: { type: 'number', minimum: 0, default: 0 },
         is_active: { type: 'boolean', example: true },
     },
 };
@@ -300,6 +311,33 @@ const commonErrorResponses = {
     404: { description: 'Not found' },
 };
 
+const tierRuleDeleteErrorResponses = {
+    ...commonErrorResponses,
+    409: {
+        description: 'Deletion is not permitted because the tier is in use or required for loyalty evaluation',
+        content: {
+            'application/json': {
+                schema: {
+                    type: 'object',
+                    properties: {
+                        success: { type: 'boolean', example: false },
+                        message: { type: 'string' },
+                        error_code: {
+                            type: 'string',
+                            enum: [
+                                'TIER_RULE_IN_USE',
+                                'TIER_RULE_USED_BY_PROMOTION',
+                                'TIER_RULE_DEFAULT_OR_FALLBACK',
+                                'TIER_RULE_EVALUATION_UNDEFINED',
+                            ],
+                        },
+                    },
+                },
+            },
+        },
+    },
+};
+
 const pointTransactionQueryParameters = [
     { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
     { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
@@ -456,7 +494,7 @@ const paths = {
                 { name: 'page', in: 'query', schema: { type: 'integer', default: 1 } },
                 { name: 'limit', in: 'query', schema: { type: 'integer', default: 20 } },
                 { name: 'search', in: 'query', schema: { type: 'string' } },
-                { name: 'tier', in: 'query', schema: { type: 'string', enum: ['BRONZE', 'SILVER', 'GOLD', 'PLATINUM'] } },
+                { name: 'tier', in: 'query', schema: { type: 'string' } },
             ],
             responses: {
                 200: {
@@ -644,7 +682,7 @@ const paths = {
                         },
                     },
                 },
-                ...commonErrorResponses,
+                ...tierRuleDeleteErrorResponses,
             },
         },
     },

@@ -14,7 +14,6 @@ const LoyaltyMapper = require('./loyalty.mapper');
 const { AppError } = require('../../shared/utils/appError');
 const { USER_ROLES } = require('../../shared/constants/roles.constant');
 const {
-    LOYALTY_TIERS,
     POINT_TRANSACTION_TYPES,
     POINT_EXPIRY_MONTHS,
     TIER_INACTIVITY_DOWNGRADE_DAYS,
@@ -502,7 +501,7 @@ const getPointMultiplier = async (tierName, session = null) => {
 
     const tierRule = await query;
 
-    return tierRule?.point_multiplier || 1;
+    return tierRule?.point_multiplier ?? 1;
 };
 
 const getOrCreateCustomerLoyalty = async (customerId, session = null) => {
@@ -518,11 +517,13 @@ const getOrCreateCustomerLoyalty = async (customerId, session = null) => {
         return loyalty;
     }
 
+    const fallbackTierRules = await getActiveTierRules(session);
+    const fallbackTierRule = fallbackTierRules[fallbackTierRules.length - 1] || null;
     const documents = await CustomerLoyalty.create(
         [
             {
                 customer_id: customerId,
-                current_tier: LOYALTY_TIERS.BRONZE,
+                current_tier: fallbackTierRule?.tier_name || null,
                 total_points: 0,
                 qualifying_points: 0,
                 bonus_points: 0,
@@ -569,7 +570,7 @@ const calculateEarnedPoints = async ({
 };
 
 const getActiveTierRules = async (session = null) => {
-    const query = TierRule.find({ is_active: true }).sort({ priority_level: 1 });
+    const query = TierRule.find({ is_active: true }).sort({ priority_level: -1, tier_name: 1 });
 
     if (session) {
         query.session(session);
@@ -590,24 +591,34 @@ const getCurrentTierRule = async (tierName, session = null) => {
 
 const getTierRuleContext = async (loyalty, session = null) => {
     const tierRules = await getActiveTierRules(session);
-    const currentTierRule = tierRules.find((rule) => rule.tier_name === loyalty.current_tier) || null;
-    const nextTierRule = tierRules.find((rule) => rule.priority_level > (currentTierRule?.priority_level || 0)) || null;
+    const currentTierRule = tierRules.find((rule) => rule.tier_name === loyalty.current_tier)
+        || tierRules[tierRules.length - 1]
+        || null;
+    const nextTierRule = currentTierRule
+        ? [...tierRules]
+            .sort((left, right) => left.priority_level - right.priority_level)
+            .find((rule) => rule.priority_level > currentTierRule.priority_level) || null
+        : null;
 
-    return {
-        currentTierRule,
-        nextTierRule,
-    };
+    return { currentTierRule, nextTierRule };
 };
 
 const getHighestEligibleTierRule = (loyalty, tierRules = []) => {
-    const orderedTierRules = [...tierRules].sort((left, right) => right.priority_level - left.priority_level);
+    const orderedTierRules = [...tierRules]
+        .filter((tierRule) => tierRule.is_active !== false)
+        .sort((left, right) => (
+            right.priority_level - left.priority_level
+            || String(left.tier_name).localeCompare(String(right.tier_name))
+        ));
+    const totalSpent = Number(loyalty?.total_spent) || 0;
+    const totalVisits = Number(loyalty?.total_visits) || 0;
     const qualifyingPoints = getQualifyingPoints(loyalty);
 
-    return orderedTierRules.find((tierRule) => {
-        return loyalty.total_spent >= tierRule.min_total_spent
-            && loyalty.total_visits >= tierRule.min_total_visits
-            && qualifyingPoints >= tierRule.min_total_points;
-    }) || orderedTierRules.find((tierRule) => tierRule.tier_name === LOYALTY_TIERS.BRONZE) || null;
+    return orderedTierRules.find((tierRule) => (
+        totalSpent >= (Number(tierRule.min_total_spent) || 0)
+        && totalVisits >= (Number(tierRule.min_total_visits) || 0)
+        && qualifyingPoints >= (Number(tierRule.min_total_points) || 0)
+    )) || orderedTierRules[orderedTierRules.length - 1] || null;
 };
 
 const getEligibleTierRule = async (loyalty, session = null) => {
@@ -617,54 +628,25 @@ const getEligibleTierRule = async (loyalty, session = null) => {
 };
 
 const getNextHigherTierRule = (tierRules, tierName) => {
-    const orderedTierRules = [...tierRules].sort((left, right) => left.priority_level - right.priority_level);
+    const orderedTierRules = [...tierRules]
+        .filter((tierRule) => tierRule.is_active !== false)
+        .sort((left, right) => left.priority_level - right.priority_level);
     const currentTierRule = orderedTierRules.find((tierRule) => tierRule.tier_name === tierName);
 
     if (!currentTierRule) {
-        return null;
+        return orderedTierRules[0] || null;
     }
 
     return orderedTierRules.find((tierRule) => tierRule.priority_level > currentTierRule.priority_level) || null;
-};
-
-const getRecoveringTierRule = ({ tierRules, currentTierName, eligibleTierRule }) => {
-    if (!eligibleTierRule) {
-        return null;
-    }
-
-    const currentTierRule = tierRules.find((tierRule) => tierRule.tier_name === currentTierName);
-
-    if (!currentTierRule || currentTierRule.priority_level >= eligibleTierRule.priority_level) {
-        return eligibleTierRule;
-    }
-
-    const nextHigherTierRule = getNextHigherTierRule(tierRules, currentTierName);
-
-    if (!nextHigherTierRule || nextHigherTierRule.priority_level >= eligibleTierRule.priority_level) {
-        return eligibleTierRule;
-    }
-
-    return nextHigherTierRule;
 };
 
 const reviewCustomerTier = async (loyalty, session = null) => {
     const previousTier = loyalty.current_tier;
     const tierRules = await getActiveTierRules(session);
     const eligibleTierRule = getHighestEligibleTierRule(loyalty, tierRules);
-    const recoveryStartedAt = loyalty.tier_recovery_started_at || null;
-    const selectedTierRule = recoveryStartedAt
-        ? getRecoveringTierRule({
-            tierRules,
-            currentTierName: loyalty.current_tier,
-            eligibleTierRule,
-        })
-        : eligibleTierRule;
 
-    if (selectedTierRule) {
-        loyalty.current_tier = selectedTierRule.tier_name;
-    }
-
-    if (recoveryStartedAt && eligibleTierRule && loyalty.current_tier === eligibleTierRule.tier_name) {
+    if (eligibleTierRule) {
+        loyalty.current_tier = eligibleTierRule.tier_name;
         loyalty.tier_recovery_started_at = null;
     }
 
@@ -820,9 +802,9 @@ const normalizeDowngradeLimit = (limit) => {
     return Math.min(value, 200);
 };
 
-const buildInactiveTierFilter = (cutoff) => {
+const buildInactiveTierFilter = (cutoff, fallbackTierName = null) => {
     return {
-        current_tier: { $ne: LOYALTY_TIERS.BRONZE },
+        ...(fallbackTierName ? { current_tier: { $ne: fallbackTierName } } : {}),
         $or: [
             {
                 last_tier_downgrade_at: { $ne: null, $lte: cutoff },
@@ -841,7 +823,9 @@ const buildInactiveTierFilter = (cutoff) => {
 };
 
 const getLowerTierRule = (tierRules, tierName) => {
-    const orderedTierRules = [...tierRules].sort((left, right) => left.priority_level - right.priority_level);
+    const orderedTierRules = [...tierRules]
+        .filter((tierRule) => tierRule.is_active !== false)
+        .sort((left, right) => left.priority_level - right.priority_level);
     const currentIndex = orderedTierRules.findIndex((tierRule) => tierRule.tier_name === tierName);
 
     if (currentIndex <= 0) {
@@ -867,7 +851,8 @@ const downgradeInactiveCustomerTiers = async ({ limit = 50 } = {}) => {
             const now = new Date();
             const cutoff = getTierInactivityCutoff(now);
             const tierRules = await getActiveTierRules(session);
-            const query = CustomerLoyalty.find(buildInactiveTierFilter(cutoff))
+            const fallbackTierRule = tierRules[tierRules.length - 1] || null;
+            const query = CustomerLoyalty.find(buildInactiveTierFilter(cutoff, fallbackTierRule?.tier_name))
                 .sort({ last_tier_downgrade_at: 1, last_visit_at: 1, created_at: 1 })
                 .limit(normalizeDowngradeLimit(limit))
                 .session(session);
@@ -876,9 +861,9 @@ const downgradeInactiveCustomerTiers = async ({ limit = 50 } = {}) => {
 
             for (const loyalty of loyalties) {
                 const previousTier = loyalty.current_tier;
-                const lowerTierRule = getLowerTierRule(tierRules, previousTier);
+                const lowerTierRule = getLowerTierRule(tierRules, previousTier) || fallbackTierRule;
 
-                if (!lowerTierRule) {
+                if (!lowerTierRule || lowerTierRule.tier_name === previousTier) {
                     continue;
                 }
 
@@ -1293,18 +1278,154 @@ const getTierRuleById = async (tierRuleId) => {
     return LoyaltyMapper.toTierRuleDto(tierRule);
 };
 
+const TIER_ORDER_FIELDS = [
+    'booking_window_days',
+    'max_upcoming_bookings',
+    'point_multiplier',
+    'min_total_spent',
+    'min_total_visits',
+    'min_total_points',
+];
+
 const createTierRule = async (payload) => {
-    const existingTierRule = await TierRule.findOne({
-        tier_name: payload.tier_name,
-    });
+    const normalizedPayload = {
+        ...payload,
+        tier_name: payload.tier_name.trim().toUpperCase(),
+    };
+    const [existingTierRule, existingPriorityRule, tierRules] = await Promise.all([
+        TierRule.findOne({ tier_name: normalizedPayload.tier_name }),
+        TierRule.findOne({ priority_level: normalizedPayload.priority_level }),
+        TierRule.find({}).sort({ priority_level: 1 }),
+    ]);
 
     if (existingTierRule) {
         throw new AppError('Tier rule already exists', 409, 'TIER_RULE_ALREADY_EXISTS');
     }
 
-    const tierRule = await TierRule.create(payload);
+    if (existingPriorityRule) {
+        throw new AppError(
+            'Priority level already exists',
+            409,
+            'TIER_RULE_PRIORITY_ALREADY_EXISTS'
+        );
+    }
 
-    return LoyaltyMapper.toTierRuleDto(tierRule);
+    const orderedTierRules = [...tierRules, normalizedPayload]
+        .sort((left, right) => left.priority_level - right.priority_level);
+    const candidateIndex = orderedTierRules.findIndex(
+        (tierRule) => tierRule.tier_name === normalizedPayload.tier_name
+    );
+    const previousTierRule = orderedTierRules[candidateIndex - 1];
+    const nextTierRule = orderedTierRules[candidateIndex + 1];
+    const breaksTierOrder = (lowerTier, higherTier) => lowerTier && higherTier
+        && TIER_ORDER_FIELDS.some((field) => lowerTier[field] > higherTier[field]);
+
+    if (
+        breaksTierOrder(previousTierRule, normalizedPayload)
+        || breaksTierOrder(normalizedPayload, nextTierRule)
+    ) {
+        throw new AppError(
+            'Tier thresholds and benefits must follow priority order',
+            400,
+            'TIER_RULE_ORDER_INVALID'
+        );
+    }
+
+    try {
+        const tierRule = await TierRule.create(normalizedPayload);
+        return LoyaltyMapper.toTierRuleDto(tierRule);
+    } catch (error) {
+        if (error.code === 11000) {
+            const duplicateField = Object.keys(error.keyValue || {})[0];
+            if (duplicateField === 'priority_level') {
+                throw new AppError(
+                    'Priority level already exists',
+                    409,
+                    'TIER_RULE_PRIORITY_ALREADY_EXISTS'
+                );
+            }
+            if (duplicateField === 'tier_name') {
+                throw new AppError('Tier rule already exists', 409, 'TIER_RULE_ALREADY_EXISTS');
+            }
+        }
+        throw error;
+    }
+};
+
+const getTierRuleId = (tierRule) => tierRule?._id?.toString();
+
+const assertTierRuleReferencesRemainValid = async ({ tierRule, candidate, payload }) => {
+    const tierNameChanged = candidate.tier_name !== tierRule.tier_name;
+    const isBeingDeactivated = tierRule.is_active !== false && candidate.is_active === false;
+    const thresholdChanged = TIER_ORDER_FIELDS.some((field) => payload[field] !== undefined);
+
+    if (tierNameChanged || isBeingDeactivated || thresholdChanged) {
+        // CustomerLoyalty stores the tier name. Renaming or disabling a referenced
+        // rule would make the customer's current tier impossible to evaluate.
+        const affectedLoyalties = await CustomerLoyalty.find({
+            current_tier: tierRule.tier_name,
+        });
+
+        if (affectedLoyalties?.length && (tierNameChanged || isBeingDeactivated)) {
+            throw new AppError(
+                'Tier rule is referenced by customer loyalty status',
+                409,
+                'TIER_RULE_CUSTOMER_STATUS_CONFLICT'
+            );
+        }
+
+        // An existing customer must not lose the tier currently recorded for them
+        // merely because its thresholds changed. The next review will use the
+        // updated rule, while this update preserves the existing status.
+        if (affectedLoyalties?.some((loyalty) => (
+            candidate.is_active !== false
+            && (
+                loyalty.total_spent < candidate.min_total_spent
+                || loyalty.total_visits < candidate.min_total_visits
+                || getQualifyingPoints(loyalty) < candidate.min_total_points
+            )
+        ))) {
+            throw new AppError(
+                'Tier update would invalidate existing customer loyalty status',
+                409,
+                'TIER_RULE_CUSTOMER_STATUS_CONFLICT'
+            );
+        }
+    }
+
+    // Promotion applicable_tiers stores tier names as well. A rename must not
+    // leave existing promotions pointing to a tier which no longer exists.
+    if (tierNameChanged && typeof Promotion.find === 'function') {
+        const affectedPromotions = await Promotion.find({
+            applicable_tiers: tierRule.tier_name,
+        });
+
+        if (affectedPromotions?.length) {
+            throw new AppError(
+                'Tier rule is referenced by promotion configuration',
+                409,
+                'TIER_RULE_PROMOTION_CONFLICT'
+            );
+        }
+    }
+};
+
+const assertTierRuleOrder = (tierRules) => {
+    const orderedTierRules = [...tierRules].sort((left, right) => (
+        left.priority_level - right.priority_level
+    ));
+    const breaksTierOrder = (lowerTier, higherTier) => lowerTier && higherTier
+        && TIER_ORDER_FIELDS.some((field) => lowerTier[field] > higherTier[field]);
+
+    for (let index = 1; index < orderedTierRules.length; index += 1) {
+        if (breaksTierOrder(orderedTierRules[index - 1], orderedTierRules[index])) {
+            throw new AppError(
+                'Tier thresholds and benefits must follow priority order',
+                400,
+                'TIER_RULE_ORDER_INVALID'
+            );
+        }
+    }
 };
 
 const updateTierRule = async (tierRuleId, payload) => {
@@ -1314,33 +1435,152 @@ const updateTierRule = async (tierRuleId, payload) => {
         throw new AppError('Tier rule not found', 404, 'TIER_RULE_NOT_FOUND');
     }
 
-    Object.assign(tierRule, payload);
+    const normalizedPayload = { ...payload };
+    if (normalizedPayload.tier_name !== undefined) {
+        normalizedPayload.tier_name = normalizedPayload.tier_name.trim().toUpperCase();
+    }
 
-    await tierRule.save();
+    const candidate = { ...tierRule, ...normalizedPayload };
+    const tierRuleDocumentId = getTierRuleId(tierRule);
+
+    if (normalizedPayload.tier_name !== undefined) {
+        const duplicateTierRule = await TierRule.findOne({
+            tier_name: normalizedPayload.tier_name,
+            _id: { $ne: tierRule._id },
+        });
+
+        if (duplicateTierRule) {
+            throw new AppError('Tier rule already exists', 409, 'TIER_RULE_ALREADY_EXISTS');
+        }
+    }
+
+    if (normalizedPayload.priority_level !== undefined) {
+        const duplicatePriorityRule = await TierRule.findOne({
+            priority_level: normalizedPayload.priority_level,
+            _id: { $ne: tierRule._id },
+        });
+
+        if (duplicatePriorityRule) {
+            throw new AppError(
+                'Priority level already exists',
+                409,
+                'TIER_RULE_PRIORITY_ALREADY_EXISTS'
+            );
+        }
+    }
+
+    const tierRules = await TierRule.find({});
+    const allTierRules = (tierRules || [])
+        .filter((rule) => getTierRuleId(rule) !== tierRuleDocumentId)
+        .concat(candidate);
+    assertTierRuleOrder(allTierRules);
+
+    if (!allTierRules.some((rule) => rule.is_active !== false)) {
+        throw new AppError(
+            'At least one active tier rule is required',
+            400,
+            'TIER_RULE_EVALUATION_UNDEFINED'
+        );
+    }
+
+    await assertTierRuleReferencesRemainValid({ tierRule, candidate, payload: normalizedPayload });
+
+    Object.assign(tierRule, normalizedPayload);
+
+    try {
+        await tierRule.save();
+    } catch (error) {
+        if (error.code === 11000) {
+            const duplicateField = Object.keys(error.keyValue || {})[0];
+            if (duplicateField === 'priority_level') {
+                throw new AppError(
+                    'Priority level already exists',
+                    409,
+                    'TIER_RULE_PRIORITY_ALREADY_EXISTS'
+                );
+            }
+            if (duplicateField === 'tier_name') {
+                throw new AppError('Tier rule already exists', 409, 'TIER_RULE_ALREADY_EXISTS');
+            }
+        }
+        throw error;
+    }
 
     return LoyaltyMapper.toTierRuleDto(tierRule);
 };
 
 const setTierRuleActiveStatus = async (tierRuleId, isActive) => {
-    const tierRule = await TierRule.findByIdAndUpdate(
-        tierRuleId,
-        { is_active: isActive },
-        { new: true, runValidators: true }
-    );
-
-    if (!tierRule) {
-        throw new AppError('Tier rule not found', 404, 'TIER_RULE_NOT_FOUND');
-    }
-
-    return LoyaltyMapper.toTierRuleDto(tierRule);
+    // Route activation/deactivation through the same invariant checks as a
+    // regular update. Direct findByIdAndUpdate would allow an admin to disable
+    // the only active fallback or a tier still referenced by customers.
+    return updateTierRule(tierRuleId, { is_active: isActive });
 };
 
 const deleteTierRule = async (tierRuleId) => {
-    const tierRule = await TierRule.findByIdAndDelete(tierRuleId);
+    // Tier references are stored by name in customer loyalty and promotion data.
+    // Load the rule first so those references can be checked before any mutation.
+    const tierRule = await TierRule.findById(tierRuleId);
 
     if (!tierRule) {
         throw new AppError('Tier rule not found', 404, 'TIER_RULE_NOT_FOUND');
     }
+
+    const customerLoyalty = await CustomerLoyalty.findOne({
+        current_tier: tierRule.tier_name,
+    });
+
+    if (customerLoyalty) {
+        throw new AppError(
+            'Tier rule is currently used by customer loyalty status',
+            409,
+            'TIER_RULE_IN_USE'
+        );
+    }
+
+    const promotion = await Promotion.findOne({
+        applicable_tiers: tierRule.tier_name,
+    });
+
+    if (promotion) {
+        throw new AppError(
+            'Tier rule is used by a promotion',
+            409,
+            'TIER_RULE_USED_BY_PROMOTION'
+        );
+    }
+
+    const activeTierRules = await TierRule.find({ is_active: true })
+        .sort({ priority_level: 1 });
+    const isOnlyActiveTier = activeTierRules.length === 1
+        && getTierRuleId(activeTierRules[0]) === getTierRuleId(tierRule);
+
+    if (isOnlyActiveTier) {
+        throw new AppError(
+            'At least one active tier rule is required',
+            409,
+            'TIER_RULE_EVALUATION_UNDEFINED'
+        );
+    }
+
+    // The lowest-priority active tier is the runtime fallback used when a
+    // customer's current tier has no active matching rule.
+    const fallbackTierRule = activeTierRules[0];
+    if (
+        tierRule.is_active !== false
+        && fallbackTierRule
+        && getTierRuleId(fallbackTierRule) === getTierRuleId(tierRule)
+    ) {
+        throw new AppError(
+            'The default or fallback tier rule cannot be deleted',
+            409,
+            'TIER_RULE_DEFAULT_OR_FALLBACK'
+        );
+    }
+
+    // Preserve the tier definition for audit/backward compatibility and avoid
+    // rewriting customer statuses or deleting promotion configurations.
+    tierRule.is_active = false;
+    await tierRule.save();
 
     return LoyaltyMapper.toTierRuleDto(tierRule);
 };
@@ -1416,6 +1656,10 @@ const getAllPointTransactions = async ({ page = 1, limit = 20, customer_id, book
 
 module.exports = {
     getOrCreateCustomerLoyalty,
+    getTierRuleContext,
+    getHighestEligibleTierRule,
+    getEligibleTierRule,
+    getNextHigherTierRule,
     calculateEarnedPoints,
     processBookingLoyalty,
     calculateBookingRedeemDiscount,

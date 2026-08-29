@@ -2,7 +2,6 @@ const ANALYTICS_GROUP_BY = Object.freeze({
     DAY: 'DAY',
     WEEK: 'WEEK',
     MONTH: 'MONTH',
-    YEAR: 'YEAR',
 });
 
 const ANALYTICS_GROUP_BY_VALUES = Object.freeze(Object.values(ANALYTICS_GROUP_BY));

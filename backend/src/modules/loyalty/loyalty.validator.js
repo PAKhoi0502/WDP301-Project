@@ -1,7 +1,6 @@
 const { z } = require('zod');
 
 const {
-    LOYALTY_TIER_VALUES,
     POINT_TRANSACTION_TYPE_VALUES,
 } = require('../../shared/constants/loyalty.constant');
 
@@ -29,7 +28,10 @@ const optionalTextField = (max = 100) => z.preprocess(
 );
 
 const optionalObjectIdField = z.preprocess(emptyToUndefined, objectIdField.optional());
-const loyaltyTierField = z.enum(LOYALTY_TIER_VALUES);
+const loyaltyTierField = z.preprocess(
+    emptyToUndefined,
+    z.string().trim().min(1, 'Tier name cannot be empty').max(100).transform((value) => value.toUpperCase())
+);
 const pointTransactionTypeField = z.enum(POINT_TRANSACTION_TYPE_VALUES);
 const promotionCodeField = z.preprocess(
     emptyToUndefined,
@@ -45,10 +47,10 @@ const promotionCodeField = z.preprocess(
 
 const tierRuleFields = {
     tier_name: loyaltyTierField,
-    booking_window_days: z.coerce.number().int().min(1).max(60),
-    max_upcoming_bookings: z.coerce.number().int().min(1).max(20),
-    point_multiplier: z.coerce.number().min(0).max(10),
-    priority_level: z.coerce.number().int().min(1).max(100),
+    booking_window_days: z.coerce.number().int().min(1),
+    max_upcoming_bookings: z.coerce.number().int().min(1),
+    point_multiplier: z.coerce.number().min(0),
+    priority_level: z.coerce.number().int().min(1),
     min_total_spent: z.coerce.number().min(0).default(0),
     min_total_visits: z.coerce.number().int().min(0).default(0),
     min_total_points: z.coerce.number().int().min(0).default(0),
@@ -56,6 +58,7 @@ const tierRuleFields = {
 };
 
 const updatableTierRuleFields = {
+    tier_name: tierRuleFields.tier_name.optional(),
     booking_window_days: tierRuleFields.booking_window_days.optional(),
     max_upcoming_bookings: tierRuleFields.max_upcoming_bookings.optional(),
     point_multiplier: tierRuleFields.point_multiplier.optional(),

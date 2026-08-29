@@ -117,16 +117,20 @@ const calculatePromotionDiscount = (promotion, orderAmount) => {
 
 const getHighestEligibleTier = (metrics, tierRules) => {
     const eligibleRule = [...tierRules]
+        .filter((tierRule) => tierRule.is_active !== false)
         .sort((left, right) => (
             right.priority_level - left.priority_level
+            || String(left.tier_name).localeCompare(String(right.tier_name))
         ))
         .find((tierRule) => (
-            metrics.total_spent >= tierRule.min_total_spent
-            && metrics.total_visits >= tierRule.min_total_visits
-            && metrics.total_points >= tierRule.min_total_points
+            metrics.total_spent >= (Number(tierRule.min_total_spent) || 0)
+            && metrics.total_visits >= (Number(tierRule.min_total_visits) || 0)
+            && metrics.total_points >= (Number(tierRule.min_total_points) || 0)
         ));
 
-    return eligibleRule?.tier_name || 'BRONZE';
+    return eligibleRule?.tier_name || [...tierRules]
+        .filter((tierRule) => tierRule.is_active !== false)
+        .sort((left, right) => left.priority_level - right.priority_level)[0]?.tier_name || null;
 };
 
 const getPackageBasePoints = (booking, servicePackageById) => {
@@ -182,6 +186,9 @@ const buildCustomerTierTimeline = ({
         || toId(left.booking._id).localeCompare(toId(right.booking._id))
     ));
 
+    const fallbackTierName = [...tierRules]
+        .filter((tierRule) => tierRule.is_active !== false)
+        .sort((left, right) => left.priority_level - right.priority_level)[0]?.tier_name || null;
     const metricsByCustomerId = new Map();
     const tierContextByBookingId = new Map();
     const earnedPointsByBookingId = new Map();
@@ -196,7 +203,7 @@ const buildCustomerTierTimeline = ({
         const booking = event.booking;
         const customerId = toId(booking.customer_id);
         const metrics = metricsByCustomerId.get(customerId) || {
-            current_tier: 'BRONZE',
+            current_tier: fallbackTierName,
             total_spent: 0,
             total_visits: 0,
             total_points: 0,
@@ -217,7 +224,7 @@ const buildCustomerTierTimeline = ({
         ) ?? booking.original_price;
         const multiplier = tierRuleByName.get(
             metrics.current_tier
-        )?.point_multiplier || 1;
+        )?.point_multiplier ?? 1;
         const paymentRatio = booking.original_price > 0
             ? finalPrice / booking.original_price
             : 0;
@@ -1017,6 +1024,9 @@ const loadSeedDependencies = async ({ referenceDate, session = null }) => {
     const bookingIds = scenarios.map(
         (scenario) => scenario.booking_id_hex
     );
+    const requiredTierNames = buildTierRuleDefinitions(referenceDate).map(
+        (definition) => definition.tier_name
+    );
     const queries = [
         Booking.find({ _id: { $in: bookingIds } }),
         Promotion.find({}),
@@ -1051,9 +1061,16 @@ const loadSeedDependencies = async ({ referenceDate, session = null }) => {
         );
     }
 
-    if (tierRules.length !== 4) {
+    const availableTierNames = new Set(
+        tierRules.map((tierRule) => tierRule.tier_name)
+    );
+    const missingTierNames = requiredTierNames.filter(
+        (tierName) => !availableTierNames.has(tierName)
+    );
+
+    if (missingTierNames.length) {
         throw new Error(
-            `Seeded tier rules are incomplete: ${tierRules.length}/4`
+            `Seeded tier rules are incomplete: missing ${missingTierNames.join(', ')}`
         );
     }
 
@@ -1730,7 +1747,7 @@ const verifyPaymentsPromotionUsages = async ({
                 expected.promotion_id
             )
             || booking.promotion_discount_amount
-                !== expected.promotion_discount_amount
+            !== expected.promotion_discount_amount
             || booking.discount_amount !== expected.discount_amount
             || booking.final_price !== expected.final_price
             || booking.payment_method !== expected.payment_method
@@ -1788,11 +1805,11 @@ const verifyPaymentsPromotionUsages = async ({
             payment.status === PAYMENT_TRANSACTION_STATUS.PAID
             && (
                 booking.payment_status
-                    !== BOOKING_PAYMENT_STATUS.PAID
+                !== BOOKING_PAYMENT_STATUS.PAID
                 || booking.payment_method
-                    !== BOOKING_PAYMENT_METHOD.PAYOS
+                !== BOOKING_PAYMENT_METHOD.PAYOS
                 || payment.paid_at.getTime()
-                    !== booking.paid_at.getTime()
+                !== booking.paid_at.getTime()
             )
         ) {
             throw new Error(
@@ -1806,7 +1823,7 @@ const verifyPaymentsPromotionUsages = async ({
             && (
                 booking.is_walk_in
                 || toId(payment.initiated_by_user_id)
-                    !== toId(booking.customer_id)
+                !== toId(booking.customer_id)
                 || payment.created_by_staff_id
             )
         ) {
@@ -1827,12 +1844,12 @@ const verifyPaymentsPromotionUsages = async ({
                 !staff
                 || toId(staff.garage_id) !== toId(booking.garage_id)
                 || toId(payment.created_by_staff_id)
-                    !== toId(staff.user_id)
+                !== toId(staff.user_id)
                 || staff.staff_type
-                    !== STAFF_TYPES.CUSTOMER_SERVICE_STAFF
+                !== STAFF_TYPES.CUSTOMER_SERVICE_STAFF
                 || !staff.is_active
                 || staff.employment_status
-                    !== STAFF_EMPLOYMENT_STATUS.ACTIVE
+                !== STAFF_EMPLOYMENT_STATUS.ACTIVE
             ) {
                 throw new Error(
                     `Invalid staff payment initiator: ${payment._id}`
@@ -1870,9 +1887,9 @@ const verifyPaymentsPromotionUsages = async ({
             )
             || usage.status !== expected.status
             || usage.discount_amount
-                !== booking.promotion_discount_amount
+            !== booking.promotion_discount_amount
             || usage.reserved_at.getTime()
-                !== booking.created_at.getTime()
+            !== booking.created_at.getTime()
             || usage.updated_at < usage.created_at
         ) {
             throw new Error(
@@ -1885,11 +1902,11 @@ const verifyPaymentsPromotionUsages = async ({
             && (
                 booking.status !== BOOKING_STATUS.COMPLETED
                 || booking.payment_status
-                    !== BOOKING_PAYMENT_STATUS.PAID
+                !== BOOKING_PAYMENT_STATUS.PAID
                 || usage.consumed_at.getTime()
-                    !== booking.paid_at.getTime()
+                !== booking.paid_at.getTime()
                 || usage.used_at.getTime()
-                    !== booking.paid_at.getTime()
+                !== booking.paid_at.getTime()
             )
         ) {
             throw new Error(
@@ -2018,26 +2035,26 @@ const verifyPaymentsPromotionUsages = async ({
             paid_payos: bookings.filter((booking) => (
                 booking.status === BOOKING_STATUS.COMPLETED
                 && booking.payment_status
-                    === BOOKING_PAYMENT_STATUS.PAID
+                === BOOKING_PAYMENT_STATUS.PAID
                 && booking.payment_method
-                    === BOOKING_PAYMENT_METHOD.PAYOS
+                === BOOKING_PAYMENT_METHOD.PAYOS
             )).length,
             paid_cash: bookings.filter((booking) => (
                 booking.status === BOOKING_STATUS.COMPLETED
                 && booking.payment_status
-                    === BOOKING_PAYMENT_STATUS.PAID
+                === BOOKING_PAYMENT_STATUS.PAID
                 && booking.payment_method
-                    === BOOKING_PAYMENT_METHOD.CASH
+                === BOOKING_PAYMENT_METHOD.CASH
             )).length,
             unpaid: bookings.filter((booking) => (
                 booking.status === BOOKING_STATUS.COMPLETED
                 && booking.payment_status
-                    === BOOKING_PAYMENT_STATUS.UNPAID
+                === BOOKING_PAYMENT_STATUS.UNPAID
             )).length,
             pending: bookings.filter((booking) => (
                 booking.status === BOOKING_STATUS.COMPLETED
                 && booking.payment_status
-                    === BOOKING_PAYMENT_STATUS.PENDING
+                === BOOKING_PAYMENT_STATUS.PENDING
             )).length,
         },
     };
@@ -2100,7 +2117,7 @@ const run = async () => {
         );
         process.exitCode = 1;
 
-        await disconnectDB().catch(() => {});
+        await disconnectDB().catch(() => { });
     }
 };
 

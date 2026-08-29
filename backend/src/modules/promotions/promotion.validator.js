@@ -1,7 +1,6 @@
 const { z } = require('zod');
 
 const { VEHICLE_TYPE_VALUES } = require('../../shared/constants/vehicle.constant');
-const { LOYALTY_TIER_VALUES } = require('../../shared/constants/loyalty.constant');
 const {
     PROMOTION_DISCOUNT_TYPE_VALUES,
     PROMOTION_AUDIENCE_VALUES,
@@ -59,7 +58,8 @@ const nameField = z.string().trim().min(2).max(150);
 const descriptionField = z.preprocess(emptyToUndefined, z.string().trim().max(2000).nullable().optional());
 const discountTypeField = z.enum(PROMOTION_DISCOUNT_TYPE_VALUES);
 const vehicleTypeField = z.enum(VEHICLE_TYPE_VALUES);
-const loyaltyTierField = z.enum(LOYALTY_TIER_VALUES);
+const loyaltyTierField = z.string().trim().min(1, 'Tier name cannot be empty').max(100)
+    .transform((value) => value.toUpperCase());
 const promotionAudienceField = z.enum(PROMOTION_AUDIENCE_VALUES);
 
 const paginationQueryFields = {
