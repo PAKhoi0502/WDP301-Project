@@ -196,7 +196,7 @@ const redeemVoucherTemplateSchema = z.object({
         .strict(),
     body: z
         .object({
-            garage_id: objectIdField,
+            garage_id: objectIdField.optional(),
         })
         .strict(),
 });

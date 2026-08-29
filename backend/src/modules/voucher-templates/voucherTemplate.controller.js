@@ -16,12 +16,10 @@ const getCustomerVoucherTemplates = asyncHandler(async (req, res) => {
 
 const redeemVoucherTemplate = asyncHandler(async (req, res) => {
     const { id } = req.validated.params;
-    const { garage_id } = req.validated.body;
 
     const result = await voucherTemplateService.redeemVoucherTemplate({
         customerId: req.user._id,
         voucherTemplateId: id,
-        garageId: garage_id,
     });
 
     return sendCreated(res, {

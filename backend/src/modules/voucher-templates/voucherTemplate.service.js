@@ -4,7 +4,6 @@ const { randomBytes } = require('crypto');
 const VoucherTemplate = require('./voucherTemplate.model');
 const VoucherTemplateMapper = require('./voucherTemplate.mapper');
 const ServicePackage = require('../service-packages/servicePackage.model');
-const Garage = require('../garages/garage.model');
 const CustomerVoucher = require('../customer-vouchers/customerVoucher.model');
 const TierRule = require('../loyalty/tierRule.model');
 const loyaltyService = require('../loyalty/loyalty.service');
@@ -421,19 +420,14 @@ const assertVoucherTemplateRedeemable = (voucherTemplate) => {
     }
 };
 
-const redeemVoucherTemplate = async ({ customerId, voucherTemplateId, garageId }) => {
-    const [voucherTemplate, garage, loyalty] = await Promise.all([
+const redeemVoucherTemplate = async ({ customerId, voucherTemplateId }) => {
+    const [voucherTemplate, loyalty] = await Promise.all([
         VoucherTemplate.findById(voucherTemplateId),
-        Garage.findOne({ _id: garageId, is_active: true }),
         loyaltyService.getOrCreateCustomerLoyalty(customerId),
     ]);
 
     if (!voucherTemplate) {
         throw new AppError('Voucher template not found', 404, 'VOUCHER_TEMPLATE_NOT_FOUND');
-    }
-
-    if (!garage) {
-        throw new AppError('Active garage not found', 404, 'GARAGE_NOT_FOUND');
     }
 
     assertVoucherTemplateRedeemable(voucherTemplate);
@@ -505,7 +499,7 @@ const redeemVoucherTemplate = async ({ customerId, voucherTemplateId, garageId }
                     {
                         code: generateVoucherCode(),
                         customer_id: customerId,
-                        garage_id: garageId,
+                        garage_id: null,
                         source_type: CUSTOMER_VOUCHER_SOURCES.POINTS_REDEMPTION,
                         source_voucher_template_id: reservedTemplate._id,
                         voucher_type: reservedTemplate.voucher_type,

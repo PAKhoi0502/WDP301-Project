@@ -45,7 +45,7 @@ const customerVoucherSchema = new mongoose.Schema(
         garage_id: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'Garage',
-            required: [true, 'Voucher garage is required'],
+            default: null,
         },
 
         source_type: {
@@ -246,6 +246,8 @@ customerVoucherSchema.pre('validate', function (next) {
             this.invalidate('source_type', 'Admin gift voucher cannot reference a compensation source');
         }
     } else if (this.source_type === CUSTOMER_VOUCHER_SOURCES.POINTS_REDEMPTION) {
+        this.garage_id = null;
+
         if (
             !this.source_voucher_template_id
             || this.source_booking_id
@@ -257,6 +259,10 @@ customerVoucherSchema.pre('validate', function (next) {
         }
     } else {
         this.invalidate('source_type', 'Voucher source is required');
+    }
+
+    if (this.source_type && this.source_type !== CUSTOMER_VOUCHER_SOURCES.POINTS_REDEMPTION && !this.garage_id) {
+        this.invalidate('garage_id', 'Voucher garage is required');
     }
 
     if (this.voucher_type === CUSTOMER_VOUCHER_TYPES.PERCENTAGE && this.value > 100) {
