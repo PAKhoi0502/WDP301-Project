@@ -102,6 +102,7 @@ const createTierRuleRequestSchema = {
 const updateTierRuleRequestSchema = {
     type: 'object',
     properties: {
+        tier_name: { type: 'string', example: 'VIP' },
         booking_window_days: { type: 'number', example: 12 },
         max_upcoming_bookings: { type: 'number', example: 2 },
         point_multiplier: { type: 'number', example: 1.35 },

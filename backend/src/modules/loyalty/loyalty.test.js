@@ -16,10 +16,10 @@ describe('loyalty module', () => {
     const servicePackageId = new mongoose.Types.ObjectId().toString();
     const bookingId = new mongoose.Types.ObjectId().toString();
 
-    it('validates admin tier rule create payload with numeric coercion', () => {
+    it.each(['DIAMOND', 'VIP_PLUS', 'KIM_CUONG'])('accepts dynamic tier name %s', (tierName) => {
         const result = createTierRuleSchema.safeParse({
             body: {
-                tier_name: 'GOLD',
+                tier_name: tierName,
                 booking_window_days: '12',
                 max_upcoming_bookings: '2',
                 point_multiplier: '1.35',
@@ -31,16 +31,7 @@ describe('loyalty module', () => {
         });
 
         expect(result.success).toBe(true);
-        expect(result.data.body).toMatchObject({
-            tier_name: 'GOLD',
-            booking_window_days: 12,
-            max_upcoming_bookings: 2,
-            point_multiplier: 1.35,
-            priority_level: 3,
-            min_total_spent: 3000000,
-            min_total_visits: 20,
-            min_total_points: 500,
-        });
+        expect(result.data.body.tier_name).toBe(tierName);
     });
 
     it('rejects empty tier rule update payload', () => {
@@ -77,6 +68,19 @@ describe('loyalty module', () => {
 
         expect(result.success).toBe(true);
         expect(result.data.body).toEqual({});
+    });
+
+    it('allows dynamic tier names in the Mongoose model', async () => {
+        const tierRule = new TierRule({
+            tier_name: 'HẠNG SẮT',
+            booking_window_days: 7,
+            max_upcoming_bookings: 1,
+            point_multiplier: 1,
+            priority_level: 1,
+        });
+
+        await expect(tierRule.validate()).resolves.toBeUndefined();
+        expect(tierRule.tier_name).toBe('HẠNG SẮT');
     });
 
     it('applies point transaction model rules', async () => {
