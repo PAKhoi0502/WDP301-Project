@@ -417,6 +417,73 @@ const redeemPointsForBooking = async ({
     };
 };
 
+const redeemPointsForVoucherRedemption = async ({
+    customerId,
+    points,
+    sourceId = null,
+    description = 'Redeem points for voucher',
+    actorId = null,
+    session = null,
+}) => {
+    const normalizedPoints = Number(points) || 0;
+
+    if (!customerId || normalizedPoints <= 0) {
+        throw new AppError('Redeem points must be greater than 0', 400, 'LOYALTY_REDEEM_POINTS_INVALID');
+    }
+
+    const loyalty = await getOrCreateCustomerLoyalty(customerId, session);
+
+    if (normalizedPoints > loyalty.available_points) {
+        throw new AppError('Available points are not enough', 409, 'LOYALTY_POINTS_NOT_ENOUGH');
+    }
+
+    const sourceTransactions = await getRedeemSourceTransactions({
+        customerId,
+        usedPoints: normalizedPoints,
+        session,
+    });
+    const sourceTransactionIds = await consumeRedeemSourceTransactions({
+        sourceTransactions,
+        usedPoints: normalizedPoints,
+        session,
+    });
+
+    const balanceBefore = loyalty.available_points;
+    const balanceAfter = balanceBefore - normalizedPoints;
+
+    loyalty.available_points = balanceAfter;
+    loyalty.redeemed_points += normalizedPoints;
+
+    await loyalty.save(session ? { session } : undefined);
+
+    const transactions = await PointTransaction.create(
+        [
+            {
+                customer_id: customerId,
+                booking_id: null,
+                source_id: sourceId || null,
+                type: POINT_TRANSACTION_TYPES.REDEEM,
+                points: -normalizedPoints,
+                remaining_points: 0,
+                balance_before: balanceBefore,
+                balance_after: balanceAfter,
+                description,
+                earned_at: null,
+                expires_at: null,
+                expired_at: null,
+                source_transaction_ids: sourceTransactionIds,
+                created_by: actorId || null,
+            },
+        ],
+        session ? { session } : undefined
+    );
+
+    return {
+        loyalty: LoyaltyMapper.toCustomerLoyaltyDto(loyalty),
+        point_transaction: LoyaltyMapper.toPointTransactionDto(transactions[0]),
+    };
+};
+
 const refundRedeemedPointsForBooking = async ({ booking, actorId = null, session = null }) => {
     const usedPoints = Number(booking?.used_points) || 0;
 
@@ -1664,6 +1731,7 @@ module.exports = {
     processBookingLoyalty,
     calculateBookingRedeemDiscount,
     redeemPointsForBooking,
+    redeemPointsForVoucherRedemption,
     refundRedeemedPointsForBooking,
     calculateRedeemPreview,
     reviewCustomerTier,

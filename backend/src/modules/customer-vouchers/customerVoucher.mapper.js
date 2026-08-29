@@ -49,6 +49,7 @@ const toCustomerVoucherDto = (voucher) => {
         source_incident_id: toId(plainVoucher.source_incident_id),
         source_customer_case_id: toId(plainVoucher.source_customer_case_id),
         source_customer_case_resolution_id: toId(plainVoucher.source_customer_case_resolution_id),
+        source_voucher_template_id: toId(plainVoucher.source_voucher_template_id),
         voucher_type: plainVoucher.voucher_type,
         value: plainVoucher.value,
         max_discount_amount: plainVoucher.max_discount_amount,

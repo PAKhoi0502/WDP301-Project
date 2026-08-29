@@ -28,6 +28,7 @@ const staffBookingWorkflowRoutes = require('../modules/staff-booking-workflows/s
 const reviewRoutes = require('../modules/reviews/review.routes');
 const feedbackRewardRoutes = require('../modules/feedback-rewards/feedbackReward.routes');
 const bookingViolationRoutes = require('../modules/booking-violations/bookingViolation.routes');
+const voucherTemplateRoutes = require('../modules/voucher-templates/voucherTemplate.routes');
 
 const router = express.Router();
 
@@ -60,6 +61,7 @@ router.use('/promotions', promotionRoutes.customerRouter);
 router.use('/loyalty', loyaltyRoutes.customerRouter);
 router.use('/notifications', notificationRoutes);
 router.use('/customer-vouchers', customerVoucherRoutes.customerRouter);
+router.use('/voucher-templates', voucherTemplateRoutes.customerRouter);
 router.use('/customer-cases', customerCaseRoutes.customerRouter);
 router.use('/wash-histories', washHistoryRoutes.customerRouter);
 router.use('/payments', paymentRoutes.publicRouter);
@@ -86,6 +88,7 @@ router.use('/admin/booking-violations', bookingViolationRoutes.adminRouter);
 router.use('/admin/analytics', analyticsRoutes.adminRouter);
 router.use('/admin/research', researchRoutes.adminRouter);
 router.use('/admin/customer-vouchers', customerVoucherRoutes.adminRouter);
+router.use('/admin/voucher-templates', voucherTemplateRoutes.adminRouter);
 router.use('/staff/customer-cases', customerCaseRoutes.staffRouter);
 router.use('/admin/customer-cases', customerCaseRoutes.adminRouter);
 router.use('/admin/booking-arrivals', bookingArrivalRoutes.adminRouter);

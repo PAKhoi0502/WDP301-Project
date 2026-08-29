@@ -78,6 +78,12 @@ const customerVoucherSchema = new mongoose.Schema(
             default: null,
         },
 
+        source_voucher_template_id: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'VoucherTemplate',
+            default: null,
+        },
+
         voucher_type: {
             type: String,
             enum: CUSTOMER_VOUCHER_TYPE_VALUES,
@@ -191,6 +197,7 @@ customerVoucherSchema.index(
     { unique: true, partialFilterExpression: { source_customer_case_resolution_id: { $type: 'objectId' } } }
 );
 customerVoucherSchema.index({ reserved_booking_id: 1 });
+customerVoucherSchema.index({ source_voucher_template_id: 1, customer_id: 1 });
 
 customerVoucherSchema.pre('validate', function (next) {
     if (this.guest_phone || this.normalized_guest_phone) {
@@ -237,6 +244,16 @@ customerVoucherSchema.pre('validate', function (next) {
             || this.source_customer_case_resolution_id
         ) {
             this.invalidate('source_type', 'Admin gift voucher cannot reference a compensation source');
+        }
+    } else if (this.source_type === CUSTOMER_VOUCHER_SOURCES.POINTS_REDEMPTION) {
+        if (
+            !this.source_voucher_template_id
+            || this.source_booking_id
+            || this.source_incident_id
+            || this.source_customer_case_id
+            || this.source_customer_case_resolution_id
+        ) {
+            this.invalidate('source_type', 'Points redemption voucher must reference a voucher template only');
         }
     } else {
         this.invalidate('source_type', 'Voucher source is required');
